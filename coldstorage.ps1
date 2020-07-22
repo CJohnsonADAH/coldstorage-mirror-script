@@ -1,4 +1,12 @@
-﻿Import-Module BitsTransfer
+﻿<#
+.Description
+Sync files to ColdStorage server.
+#>
+param (
+    [switch] $Help = $false
+)
+
+Import-Module BitsTransfer
 
 function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
     $o1 = ( Get-Item -LiteralPath "${from}" )
@@ -337,4 +345,27 @@ function Do-Rsync ($Pairs=$null) {
         $i = $i + 1 # Step 2
     }
     Write-Progress -Id 1137 -Activity "rsync between ADAHFS servers and ColdStorage" -Completed
+}
+
+function Do-Write-Usage () {
+    $cmd = $MyInvocation.MyCommand
+    $Pairs = ( $mirrors.Keys -Join "|" )
+
+    Write-Host "Usage: $cmd mirror [$Pairs]"
+}
+
+if ( $Help -eq $true ) {
+    Do-Write-Usage
+} else {
+    if ( $args[0] -eq "mirror" ) {
+        $N = ( $args.Count - 1 )
+        if ( $N -gt 0 ) {
+            $Words = $args[1 .. $N]
+        } else {
+            $Words = @( )
+        }
+        Do-Mirror -Pairs $Words
+    } else {
+        Do-Write-Usage
+    }
 }
