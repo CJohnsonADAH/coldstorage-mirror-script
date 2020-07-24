@@ -6,7 +6,42 @@ param (
     [switch] $Help = $false
 )
 
+# coldstorage
+#
+# Last-Modified: 24 Quintilis 2020
+
 Import-Module BitsTransfer
+
+$ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
+$ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
+$ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
+
+$mirrors = @{
+    Processed=( "ER", "${ColdStorageER}\Processed", "\\ADAHFS3\Data\Permanent" )
+    Working_ER=( "ER", "${ColdStorageER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
+    Unprocessed=( "ER", "${ColdStorageER}\Unprocessed", "\\ADAHFS1\PermanentBackup\Unprocessed" )
+    Masters=( "DA", "${ColdStorageDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
+    Access=( "DA", "${ColdStorageDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
+    Working_DA=( "DA", "${ColdStorageDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
+}
+
+# Bleep Bleep Bleep Bleep Bleep Bleep -- BLOOP!
+function Do-Bleep-Bloop () {
+    [console]::beep(659,250) ##E
+    [console]::beep(659,250) ##E
+    [console]::beep(659,300) ##E
+    [console]::beep(523,250) ##C
+    [console]::beep(659,250) ##E
+    [console]::beep(784,300) ##G
+    [console]::beep(392,300) ##g
+    [console]::beep(523,275) ## C
+    [console]::beep(392,275) ##g
+    [console]::beep(330,275) ##e
+    [console]::beep(440,250) ##a
+    [console]::beep(494,250) ##b
+    [console]::beep(466,275) ##a#
+    [console]::beep(440,275) ##a
+}
 
 function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
     $o1 = ( Get-Item -LiteralPath "${from}" )
@@ -278,19 +313,6 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Completed
 }
 
-$ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
-$ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
-$ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
-
-$mirrors = @{
-    Processed=( "ER", "${ColdStorageER}\Processed", "\\ADAHFS3\Data\Permanent" )
-    Working_ER=( "ER", "${ColdStorageER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
-    Unprocessed=( "ER", "${ColdStorageER}\Unprocessed", "\\ADAHFS1\PermanentBackup\Unprocessed" )
-    Masters=( "DA", "${ColdStorageDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
-    Access=( "DA", "${ColdStorageDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
-    Working_DA=( "DA", "${ColdStorageDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
-}
-
 function Do-Mirror ($Pairs=$null) {
 
     if ( $Pairs.Count -lt 1 ) {
@@ -317,6 +339,230 @@ function Do-Mirror ($Pairs=$null) {
         $i = $i + 1
     }
     Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Completed
+}
+
+function Do-Clear-And-Bag {
+
+    [Cmdletbinding()]
+
+param (
+    [Switch]
+    $Quiet,
+
+    [String]
+    $Exclude="^$",
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+)
+
+    Begin {
+        if ( $Exclude.Length -eq 0 ) {
+            $Exclude = "^$"
+        }
+    }
+
+    Process {
+        $Anchor = $PWD
+
+        $DirName = $File.FullName
+        $BaseName = $File.Name
+        if ( $BaseName -match "^[A-Za-z0-9]{2,3}_ER" ) {
+            if ( -not ( $BaseName -match $Exclude ) ) {
+                $DirParts = $BaseName.Split("_")
+                $CURNAME = $DirParts[0]
+                $ERType = $DirParts[1]
+                $ERCreator = $DirParts[2]
+                $ERCreatorInstance = $DirParts[3]
+                $Slug = $DirParts[4]
+
+                $ERCode = $ERType + "-" + $ERCreator + "-" + $ERCreatorInstance
+
+                chdir $DirName
+
+                $DataDir = "${DirName}\bagit.txt"
+                if ( Test-Path -LiteralPath "$DataDir" ) {
+                    if ( $Quiet -eq $false ) {
+                        Write-Output "BAGGED: ${ERCode}, $DirName"
+                    }
+                } else {
+                    Write-Output "UNBAGGED: ${ERCode}, $DirName"
+                    
+                    $NotOK = ( $DirName | Do-Scan-ERInstance )
+                    if ( $NotOK.Count -gt 0 ) {
+                        Do-Bleep-Bloop
+                        $ShouldWeContinue = Read-Host "Exit Code ${NotOK}, Continue (Y/N)? "
+                    } else {
+                        $ShouldWeContinue = "Y"
+                    }
+
+                    if ( $ShouldWeContinue -eq "Y" ) {
+                        Do-Bag-ERInstance $DirName
+                    }
+
+                }
+            } elseif ( $Quiet -eq $false ) {
+                Write-Output "SKIPPED: ${ERCode}, $DirName"
+            }
+
+            chdir $Anchor
+        }
+    }
+
+    End {
+    }
+}
+
+function Do-Scan-Dir-For-Bags {
+
+    [CmdletBinding()]
+
+param (
+    [Switch]
+    $Quiet,
+
+    [String]
+    $Exclude="^$",
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+)
+
+    Begin {
+        if ( $Exclude.Length -eq 0 ) {
+            $Exclude = "^$"
+        }
+    }
+
+    Process {
+        $Anchor = $PWD
+
+        $DirName = $File.FullName
+        $BaseName = $File.Name
+        if ( $BaseName -match "^[A-Za-z0-9]{2,3}_ER" ) {
+            if ( -not ( $BaseName -match $Exclude ) ) {
+                $DirParts = $BaseName.Split("_")
+                $CURNAME = $DirParts[0]
+                $ERType = $DirParts[1]
+                $ERCreator = $DirParts[2]
+                $ERCreatorInstance = $DirParts[3]
+                $Slug = $DirParts[4]
+
+                $ERCode = $ERType + "-" + $ERCreator + "-" + $ERCreatorInstance
+
+                chdir $DirName
+
+                $DataDir = "${DirName}\bagit.txt"
+                if ( Test-Path -LiteralPath "$DataDir" ) {
+                    if ( $Quiet -eq $false ) {
+                        Write-Output "BAGGED: ${ERCode}, $DirName"
+                    }
+                } else {
+                    Write-Output "UNBAGGED: ${ERCode}, $DirName"
+                }
+            } elseif ( $Quiet -eq $false ) {
+                Write-Output "SKIPPED: ${ERCode}, $DirName"
+            }
+
+            chdir $Anchor
+        }
+    }
+
+    End {
+        if ( $Quiet -eq $false ) {
+            Do-Bleep-Bloop
+        }
+    }
+}
+
+function Do-Scan-ERInstance () {
+    [CmdletBinding()]
+
+param (
+    [Parameter(ValueFromPipeline=$true)]
+    $Path
+)
+
+    Begin { }
+
+    Process {
+        Write-Host "ClamAV Scan: ${Path}" -InformationAction Continue
+        & "C:\Users\charlesw.johnson\OneDrive - Alabama OIT\clamav-0.102.3-win-x64-portable\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Host
+        if ( $LastExitCode -ne 0 ) {
+            $LastExitCode
+        }
+    }
+
+    End { }
+}
+
+function Do-Bag-ERInstance ($DIRNAME) {
+
+    $Anchor = $PWD
+    chdir $DIRNAME
+
+    Write-Host ""
+    Write-Host "BagIt: ${PWD}"
+    & python.exe "${HOME}\bin\bagit\bagit.py" . 2>&1
+
+    chdir $Anchor
+}
+
+function Do-Bag-Repo-Dirs ($Pair, $From, $To) {
+    $Anchor = $PWD
+
+    chdir $From
+    dir -Attributes Directory | Do-Clear-And-Bag -Quiet -Exclude $null
+    chdir $Anchor
+}
+
+function Do-Bag ($Pairs=$null) {
+    if ( $Pairs.Count -lt 1 ) {
+        $Pairs = $mirrors.Keys
+    }
+
+    $i = 0
+    $N = $Pairs.Count
+    $Pairs | ForEach {
+        $Pair = $_
+        $locations = $mirrors[$Pair]
+
+        $slug = $locations[0]
+        $src = $locations[2]
+        $dest = $locations[1]
+
+        Do-Bag-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
+        $i = $i + 1
+    }
+}
+
+function Do-Check-Repo-Dirs ($Pair, $From, $To) {
+    $Anchor = $PWD
+
+    chdir $From
+    dir -Attributes Directory | Do-Scan-Dir-For-Bags -Quiet -Exclude $null
+    chdir $Anchor
+}
+
+function Do-Check ($Pairs=$null) {
+    if ( $Pairs.Count -lt 1 ) {
+        $Pairs = $mirrors.Keys
+    }
+
+    $i = 0
+    $N = $Pairs.Count
+    $Pairs | ForEach {
+        $Pair = $_
+        $locations = $mirrors[$Pair]
+
+        $slug = $locations[0]
+        $src = $locations[2]
+        $dest = $locations[1]
+
+        Do-Check-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
+        $i = $i + 1
+    }
+
 }
 
 function Do-Rsync ($Pairs=$null) {
@@ -357,7 +603,8 @@ function Do-Write-Usage () {
 if ( $Help -eq $true ) {
     Do-Write-Usage
 } else {
-    if ( $args[0] -eq "mirror" ) {
+    $verb = $args[0]
+    if ( $verb -eq "mirror" ) {
         $N = ( $args.Count - 1 )
         if ( $N -gt 0 ) {
             $Words = $args[1 .. $N]
@@ -365,6 +612,24 @@ if ( $Help -eq $true ) {
             $Words = @( )
         }
         Do-Mirror -Pairs $Words
+    } elseif ( $verb -eq "check" ) {
+        $Words = @( )
+
+        $N = ( $args.Count - 1 )
+        if ( $N -gt 0 ) {
+            $Words = $args[1 .. $N]
+        }
+        Do-Check -Pairs $Words
+    } elseif ( $verb -eq "bag" ) {
+        $Words = @( )
+
+        $N = ( $args.Count - 1 )
+        if ( $N -gt 0 ) {
+            $Words = $args[1 .. $N]
+        }
+        Do-Bag -Pairs $Words
+    } elseif ( $verb -eq "bleep" ) {
+        Do-Bleep-Bloop
     } else {
         Do-Write-Usage
     }
