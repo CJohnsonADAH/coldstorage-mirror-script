@@ -71,7 +71,7 @@ function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
 function Do-Reset-Metadata ($from, $to, $verbose) {
     
     if (Test-Path -LiteralPath $from) {
-        $oFrom = (Get-Item $from)
+        $oFrom = (Get-Item -LiteralPath $from)
 
         if (Test-Path -LiteralPath $to) {
             $oTo = (Get-Item -LiteralPath $to)
@@ -87,11 +87,11 @@ function Do-Reset-Metadata ($from, $to, $verbose) {
             }
 
             $Acl = $null
-            $Acl = Get-Acl -Path $oFrom.FullName
+            $Acl = Get-Acl -LiteralPath $oFrom.FullName
             $oOwner = $Acl.GetOwner([System.Security.Principal.NTAccount])
 
             $Acl = $null
-            $Acl = Get-Acl -Path $oTo.FullName
+            $Acl = Get-Acl -LiteralPath $oTo.FullName
             $acl.SetOwner($oOwner)
 
             if ($altered -or $verbse) {
