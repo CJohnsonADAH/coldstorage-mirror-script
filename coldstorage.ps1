@@ -3,7 +3,8 @@
 Sync files to ColdStorage server.
 #>
 param (
-    [switch] $Help = $false
+    [switch] $Help = $false,
+    [switch] $Quiet = $false
 )
 
 # coldstorage
@@ -325,17 +326,33 @@ function Do-Mirror ($Pairs=$null) {
         $Pair = $_
         $locations = $mirrors[$Pair]
 
-        $slug = $locations[0]
-        $src = $locations[2]
-        $dest = $locations[1]
-        $TrashcanLocation = "${ColdStorageBackup}\${slug}_${Pair}"
+        try {
+            $slug = $locations[0]
+            $src = $locations[2]
+            $dest = $locations[1]
+            $TrashcanLocation = "${ColdStorageBackup}\${slug}_${Pair}"
 
-        if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
-            mkdir "${TrashcanLocation}"
+            if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
+                mkdir "${TrashcanLocation}"
+            }
+
+            Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
+            Do-Mirror-Child-Dirs -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}"
+        } catch [System.Management.Automation.RuntimeException] {
+            $recurseInto = @( )
+            $mirrors.Keys | ForEach {
+                $subPair = $_
+                $locations = $mirrors[$subPair]
+                $slug = $locations[0]
+                $src = $locations[2]
+                $dest = $locations[1]
+
+                if ( $slug -eq $Pair ) {
+                    $recurseInto += @( $subPair )
+                }
+            }
+            Do-Mirror -Pairs $recurseInto
         }
-
-        Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-        Do-Mirror-Child-Dirs -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}"
         $i = $i + 1
     }
     Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Completed
@@ -413,6 +430,143 @@ param (
     }
 }
 
+function Bagged-File-Path {
+    param (
+        [Switch]
+        $FullName,
+
+        [Switch]
+        $Wildcard,
+
+        [Parameter(ValueFromPipeline=$true)]
+        $File
+    )
+
+    Begin { }
+
+    Process {
+        $Prefix = ""
+        if ( $FullName ) {
+            $Prefix = $File.Directory
+            $Prefix = "${Prefix}\"
+        }
+        $FileName = $File.Name
+        $FileName = ( $FileName -replace "[^A-Za-z0-9]", "_" )
+        
+        if ( $Wildcard ) {
+            # 4 = YYYY, 2 = mm, 2 = dd, 2 = HH, 2 = MM, 2 = SS
+            $Suffix = ( "[0-9]" * ( 4 + 2 + 2 + 2 + 2 + 2) )
+        } else {
+            $DateStamp = ( Date -UFormat "%Y%m%d%H%M%S" )
+            $Suffix = "${DateStamp}"
+        }
+        $Suffix = "_bagged_${Suffix}"
+
+        "${Prefix}${FileName}${Suffix}"
+    }
+
+    End { }
+}
+
+function Do-Scan-File-For-Bags {
+    [CmdletBinding()]
+
+param (
+    [Switch]
+    $Quiet,
+
+    [String]
+    $Exclude="^$",
+
+    [ScriptBlock]
+    $OnBagged={ Param($File, $Payload, $BagDir); $FilePath = $File.FullName; $PayloadPath = $Payload.FullName; Write-Output "BAGGED: ${FilePath} = ${PayloadPath}" },
+
+    [ScriptBlock]
+    $OnDiff={ Param($File, $Payload, $LeftHash, $RightHash); },
+
+    [ScriptBlock]
+    $OnUnbagged={ Param($File); $FilePath = $File.FullName; Write-Output "UNBAGGED: ${FilePath}" },
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+)
+
+    Begin {
+        if ( $Exclude.Length -eq 0 ) {
+            $Exclude = "^$"
+        }
+    }
+
+    Process {
+        $Anchor = $PWD
+        
+        $Parent = $File.Directory
+        chdir $Parent
+
+        $FileName = $File.Name
+        $FilePath = $File.FullName
+        $CardBag = ( $File | Bagged-File-Path -Wildcard )
+
+        $BagPayload = $null
+        if ( Test-Path -Path $CardBag ) {
+            Dir -Path $CardBag | ForEach {
+                $BagPath = $_
+                $BagData = $BagPath.FullName + "\data"
+                if ( Test-Path -LiteralPath $BagData ) {
+                    $BagPayloadPath = "${BagData}\${FileName}"
+                    if ( Test-Path -LiteralPath $BagPayloadPath ) {
+                    
+                        $LeftHash = Get-FileHash -LiteralPath $File
+                        $RightHash = Get-FileHash -LiteralPath $BagPayloadPath
+
+                        if ( $LeftHash.hash -eq $RightHash.hash ) {
+                            $BagPayload = ( Get-Item -LiteralPath $BagPayloadPath )
+                            $OnBagged.Invoke($File, $BagPayload, $BagPath)
+                        } else {
+                            $OnDiff.Invoke($File, $(Get-Item $BagPayloadPath), $LeftHash, $RightHash )
+                        }
+                    }
+                }
+            }
+        }
+
+        if ( -Not $BagPayload ) {
+            $OnUnbagged.Invoke($File)
+        }
+
+        chdir $Anchor
+    }
+
+    End {
+        if ( $Quiet -eq $false ) {
+            Do-Bleep-Bloop
+        }
+    }
+
+}
+
+function Select-Unbagged-Dirs () {
+
+    [CmdletBinding()]
+
+    param (
+        [Parameter(ValueFromPipeline=$true)]
+        $File
+    )
+
+    Begin { }
+
+    Process {
+        $BaseName = $File.Name
+        if ( -Not ( $BaseName -match "_bagged_[0-9]+$" ) ) {
+            $BaseName
+        }
+    }
+
+    End { }
+
+}
+
 function Do-Scan-Dir-For-Bags {
 
     [CmdletBinding()]
@@ -439,6 +593,8 @@ param (
 
         $DirName = $File.FullName
         $BaseName = $File.Name
+
+        # Is this an ER Instance directory?
         if ( $BaseName -match "^[A-Za-z0-9]{2,3}_ER" ) {
             if ( -not ( $BaseName -match $Exclude ) ) {
                 $DirParts = $BaseName.Split("_")
@@ -463,6 +619,13 @@ param (
             } elseif ( $Quiet -eq $false ) {
                 Write-Output "SKIPPED: ${ERCode}, $DirName"
             }
+
+            chdir $Anchor
+        } else {
+            chdir $File
+            
+            dir -File | Do-Scan-File-For-Bags
+            dir -Directory | Select-Unbagged-Dirs | Do-Scan-Dir-For-Bags
 
             chdir $Anchor
         }
@@ -496,6 +659,24 @@ param (
     End { }
 }
 
+function Do-Validate-Bag ($DIRNAME) {
+
+    $Anchor = $PWD
+    chdir $DIRNAME
+
+    & python.exe "${HOME}\bin\bagit\bagit.py" --validate --quiet . 2>&1
+    $NotOK = $LastExitCode
+
+    if ( $NotOK -gt 0 ) {
+        Do-Bleep-Bloop
+        & python.exe "${HOME}\bin\bagit\bagit.py" --validate . 2>&1
+    } else {
+        Write-Host "OK-BagIt: ${DIRNAME}"
+    }
+
+    chdir $Anchor
+}
+
 function Do-Bag-ERInstance ($DIRNAME) {
 
     $Anchor = $PWD
@@ -505,6 +686,35 @@ function Do-Bag-ERInstance ($DIRNAME) {
     Write-Host "BagIt: ${PWD}"
     & python.exe "${HOME}\bin\bagit\bagit.py" . 2>&1
 
+    chdir $Anchor
+}
+
+function Do-Bag-One ($LiteralPath) {
+    $Anchor = $PWD
+
+    $Item = Get-Item -LiteralPath $LiteralPath
+    
+    chdir $Item.DirectoryName
+    $OriginalFileName = $Item.Name
+    $OriginalFullName = $Item.FullName
+    $FileName = ( $Item | Bagged-File-Path )
+
+    $BagDir = ".\${FileName}"
+    if ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
+        $BagDir = mkdir -Path $BagDir
+    }
+
+    Move-Item -LiteralPath $Item -Destination $BagDir
+    Do-Bag-ERInstance -DIRNAME $BagDir
+    if ( $LastExitCode -eq 0 ) {
+        $NewFilePath = "${BagDir}\data\${OriginalFileName}"
+        if ( Test-Path -LiteralPath "${NewFilePath}" ) {
+            New-Item -ItemType HardLink -Path $OriginalFullName -Target $NewFilePath
+	        
+            Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
+            Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
+        }
+    }
     chdir $Anchor
 }
 
@@ -540,7 +750,9 @@ function Do-Check-Repo-Dirs ($Pair, $From, $To) {
     $Anchor = $PWD
 
     chdir $From
-    dir -Attributes Directory | Do-Scan-Dir-For-Bags -Quiet -Exclude $null
+    dir -File | Do-Scan-File-For-Bags
+    dir -Directory| Do-Scan-Dir-For-Bags -Quiet -Exclude $null
+
     chdir $Anchor
 }
 
@@ -555,11 +767,28 @@ function Do-Check ($Pairs=$null) {
         $Pair = $_
         $locations = $mirrors[$Pair]
 
-        $slug = $locations[0]
-        $src = $locations[2]
-        $dest = $locations[1]
+        try {
+            $slug = $locations[0]
+            $src = $locations[2]
+            $dest = $locations[1]
 
-        Do-Check-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
+            Do-Check-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
+        } catch [System.Management.Automation.RuntimeException] {
+            $recurseInto = @( )
+            $mirrors.Keys | ForEach {
+                $subPair = $_
+                $locations = $mirrors[$subPair]
+                $slug = $locations[0]
+                $src = $locations[2]
+                $dest = $locations[1]
+        
+                if ( $slug -eq $Pair ) {
+                    $recurseInto += @( $subPair )
+                }
+            }
+            Do-Check -Pairs $recurseInto
+        }
+
         $i = $i + 1
     }
 
@@ -593,17 +822,18 @@ function Do-Rsync ($Pairs=$null) {
     Write-Progress -Id 1137 -Activity "rsync between ADAHFS servers and ColdStorage" -Completed
 }
 
-function Do-Write-Usage () {
-    $cmd = $MyInvocation.MyCommand
+function Do-Write-Usage ($cmd) {
     $Pairs = ( $mirrors.Keys -Join "|" )
 
     Write-Host "Usage: $cmd mirror [$Pairs]"
 }
 
 if ( $Help -eq $true ) {
-    Do-Write-Usage
+    Do-Write-Usage -cmd $MyInvocation.MyCommand
 } else {
     $verb = $args[0]
+    $t0 = date
+    
     if ( $verb -eq "mirror" ) {
         $N = ( $args.Count - 1 )
         if ( $N -gt 0 ) {
@@ -631,6 +861,14 @@ if ( $Help -eq $true ) {
     } elseif ( $verb -eq "bleep" ) {
         Do-Bleep-Bloop
     } else {
-        Do-Write-Usage
+        Do-Write-Usage -cmd $MyInvocation.MyCommand
+        $Quiet = $true
+    }
+
+    $tN = date
+
+    if ( -not $Quiet ) {
+        Write-Output "Completed: ${tN}"
+        Write-Output ( $tN - $t0 )
     }
 }
