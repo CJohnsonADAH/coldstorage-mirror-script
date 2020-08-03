@@ -44,6 +44,89 @@ function Do-Bleep-Bloop () {
     [console]::beep(440,275) ##a
 }
 
+#############################################################################################################
+## BagIt DIRECTORIES ########################################################################################
+#############################################################################################################
+
+function Is-BagIt-Formatted-Directory ( $File ) {
+    $result = $false # innocent until proven guilty
+    
+    $BagDir = $File.FullName
+    if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
+        $PayloadDir = "${BagDir}\data"
+        if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
+            $BagItTxt = "${BagDir}\bagit.txt"
+            if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
+                $result = $true
+            }
+        }
+    }
+
+    return $result
+}
+
+function Select-BagIt-Formatted-Directories () {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process { if ( Is-BagIt-Formatted-Directory($File) ) { $File } }
+
+End { }
+}
+
+#############################################################################################################
+## ER INSTANCE DIRECTORIES: Typically found in ER Unprocessed directory #####################################
+#############################################################################################################
+
+function Is-ER-Instance-Directory ( $File ) {
+    $result = $false # innocent until proven guilty
+    if ( Test-Path -LiteralPath $File.FullName -PathType Container ) {
+        $BaseName = $File.Name
+        $result = ($BaseName -match "^[A-Za-z0-9]{2,3}_ER")
+    }
+    return $result
+}
+
+function Select-ER-Instance-Directories () {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process { if ( Is-ER-Instance-Directory($File) ) { $File } }
+
+End { }
+}
+
+function Select-ER-Instance-Data () {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    $BaseName = $File.Name
+    
+    $DirParts = $BaseName.Split("_")
+
+    $ERMeta = @{
+        CURNAME=( $DirParts[0] )
+        ERType=( $DirParts[1] )
+        ERCreator=( $DirParts[2] )
+        ERCreatorInstance=( $DirParts[3] )
+        Slug=( $DirParts[4] )
+    }
+    $ERMeta.ERCode = ( "{0}-{1}-{2}" -f $ERMeta.ERType, $ERMeta.ERCreator, $ERMeta.ERCreatorInstance )
+
+    return $ERMeta
+}
+
+End { }
+}
+
+#############################################################################################################
+## COMMAND FUNCTIONS ########################################################################################
+#############################################################################################################
+
 function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
     $o1 = ( Get-Item -LiteralPath "${from}" )
     $o2 = ( Get-Item -Path "${from}" )
@@ -384,21 +467,14 @@ param (
 
         $DirName = $File.FullName
         $BaseName = $File.Name
-        if ( $BaseName -match "^[A-Za-z0-9]{2,3}_ER" ) {
+        if ( Is-ER-Instance-Directory($File) ) {
             if ( -not ( $BaseName -match $Exclude ) ) {
-                $DirParts = $BaseName.Split("_")
-                $CURNAME = $DirParts[0]
-                $ERType = $DirParts[1]
-                $ERCreator = $DirParts[2]
-                $ERCreatorInstance = $DirParts[3]
-                $Slug = $DirParts[4]
-
-                $ERCode = $ERType + "-" + $ERCreator + "-" + $ERCreatorInstance
+                $ERMeta = ( $File | Select-ER-Instance-Data )
+                $ERCode = $ERMeta.ERCode
 
                 chdir $DirName
 
-                $DataDir = "${DirName}\bagit.txt"
-                if ( Test-Path -LiteralPath "$DataDir" ) {
+                if ( Is-BagIt-Formatted-Directory($File) ) {
                     if ( $Quiet -eq $false ) {
                         Write-Output "BAGGED: ${ERCode}, $DirName"
                     }
@@ -595,21 +671,14 @@ param (
         $BaseName = $File.Name
 
         # Is this an ER Instance directory?
-        if ( $BaseName -match "^[A-Za-z0-9]{2,3}_ER" ) {
+        if ( Is-ER-Instance-Directory($File) ) {
             if ( -not ( $BaseName -match $Exclude ) ) {
-                $DirParts = $BaseName.Split("_")
-                $CURNAME = $DirParts[0]
-                $ERType = $DirParts[1]
-                $ERCreator = $DirParts[2]
-                $ERCreatorInstance = $DirParts[3]
-                $Slug = $DirParts[4]
-
-                $ERCode = $ERType + "-" + $ERCreator + "-" + $ERCreatorInstance
+                $ERMeta = ($File | Select-ER-Instance-Data)
+                $ERCode = $ERMeta.ERCode
 
                 chdir $DirName
 
-                $DataDir = "${DirName}\bagit.txt"
-                if ( Test-Path -LiteralPath "$DataDir" ) {
+                if ( Is-BagIt-Formatted-Directory($File) ) {
                     if ( $Quiet -eq $false ) {
                         Write-Output "BAGGED: ${ERCode}, $DirName"
                     }
