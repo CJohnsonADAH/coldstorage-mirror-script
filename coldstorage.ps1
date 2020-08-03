@@ -1,6 +1,6 @@
 ﻿<#
 .Description
-Sync files to ColdStorage server.
+Sync files to or from the ColdStorage server.
 #>
 param (
     [switch] $Help = $false,
@@ -9,7 +9,7 @@ param (
 
 # coldstorage
 #
-# Last-Modified: 24 Quintilis 2020
+# Last-Modified: 30 Quintilis 2020
 
 Import-Module BitsTransfer
 
@@ -18,9 +18,9 @@ $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
 $ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
 
 $mirrors = @{
-    Processed=( "ER", "${ColdStorageER}\Processed", "\\ADAHFS3\Data\Permanent" )
+    Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageER}\Processed" )
     Working_ER=( "ER", "${ColdStorageER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
-    Unprocessed=( "ER", "${ColdStorageER}\Unprocessed", "\\ADAHFS1\PermanentBackup\Unprocessed" )
+    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageER}\Unprocessed" )
     Masters=( "DA", "${ColdStorageDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
     Access=( "DA", "${ColdStorageDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
     Working_DA=( "DA", "${ColdStorageDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
@@ -324,9 +324,9 @@ function Do-Mirror ($Pairs=$null) {
     $N = $Pairs.Count
     $Pairs | ForEach {
         $Pair = $_
-        $locations = $mirrors[$Pair]
+        if ( $mirrors.ContainsKey($Pair) ) {
+            $locations = $mirrors[$Pair]
 
-        try {
             $slug = $locations[0]
             $src = $locations[2]
             $dest = $locations[1]
@@ -338,7 +338,7 @@ function Do-Mirror ($Pairs=$null) {
 
             Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
             Do-Mirror-Child-Dirs -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}"
-        } catch [System.Management.Automation.RuntimeException] {
+        } else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
                 $subPair = $_
@@ -352,7 +352,7 @@ function Do-Mirror ($Pairs=$null) {
                 }
             }
             Do-Mirror -Pairs $recurseInto
-        }
+        } # if
         $i = $i + 1
     }
     Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Completed
@@ -765,15 +765,15 @@ function Do-Check ($Pairs=$null) {
     $N = $Pairs.Count
     $Pairs | ForEach {
         $Pair = $_
-        $locations = $mirrors[$Pair]
+        if ( $mirrors.ContainsKey($Pair) ) {
+            $locations = $mirrors[$Pair]
 
-        try {
             $slug = $locations[0]
             $src = $locations[2]
             $dest = $locations[1]
 
             Do-Check-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
-        } catch [System.Management.Automation.RuntimeException] {
+        } else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
                 $subPair = $_
@@ -787,7 +787,7 @@ function Do-Check ($Pairs=$null) {
                 }
             }
             Do-Check -Pairs $recurseInto
-        }
+        } # if
 
         $i = $i + 1
     }
