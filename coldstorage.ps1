@@ -44,6 +44,28 @@ function Do-Bleep-Bloop () {
     [console]::beep(440,275) ##a
 }
 
+function Rebase-File {
+    [CmdletBinding()]
+
+   param (
+    [String]
+    $To,
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+   )
+
+   Begin {}
+
+   Process {
+    $BaseName = $File.Name
+    $Object = $To + "\" + $BaseName
+    $Object
+   }
+
+   End {}
+}
+
 #############################################################################################################
 ## BagIt DIRECTORIES ########################################################################################
 #############################################################################################################
@@ -73,6 +95,24 @@ Begin { }
 Process { if ( Is-BagIt-Formatted-Directory($File) ) { $File } }
 
 End { }
+}
+
+#############################################################################################################
+## BagIt PACKAGING CONVENTIONS ##############################################################################
+#############################################################################################################
+
+function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
+    $result = $false # innocent until proven guilty
+
+    if ( Is-BagIt-Formatted-Directory( $File ) ) {
+        $BagDir = $File.FullName
+        $payload = ( Get-ChildItem -Force -LiteralPath "${BagDir}\data" | Measure-Object )
+
+        if ($payload.Count -eq 1) {
+            $result = $true
+        }
+    }
+    return $result
 }
 
 #############################################################################################################
@@ -123,13 +163,112 @@ Process {
 End { }
 }
 
+############################################################################################################
+## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
+############################################################################################################
+
+function Is-Different-File-Content ($From, $To) {
+    $LeftHash = $null
+    $RightHash = $null
+
+    # We go through some rigamarole here because each side of the comparison MAY be
+    # a valid file path whose content we can hash, OR it MAY be a string of a path
+    # to a file that does not (yet) exist.
+    $FromPath = $From
+    if ( Get-Member -InputObject $From -name "FullName" -MemberType Properties ) {
+        $FromPath = $From.FullName
+    }
+
+    $ToPath = $To
+    if ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
+        $ToPath = $To.FullName
+    }
+
+    if ( Test-Path -LiteralPath $FromPath ) {
+        $LeftHash = Get-FileHash -LiteralPath $FromPath
+    }
+    if ( Test-Path -LiteralPath $ToPath ) {
+        $RightHash = Get-FileHash -LiteralPath $ToPath
+    }
+
+    return ( $LeftHash.hash -ne $RightHash.hash )
+}
+
+function Is-Matched-File ($From, $To, $Diff=$false) {
+    $ToPath = $To
+    if ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
+        $ToPath = $To.FullName
+    }
+    $TreatAsMatched = ( Test-Path -LiteralPath "${ToPath}" )
+    if ( $TreatAsMatched ) {
+        $ObjectFile = (Get-Item -LiteralPath "${ToPath}")
+        if ( $Diff ) {
+            $TreatAsMatched = -Not ( Is-Different-File-Content -From $From -To $ObjectFile )
+        }
+    }
+    return $TreatAsMatched
+}
+
+function Get-Unmatched-Items {
+    [CmdletBinding()]
+
+   param (
+    [String]
+    $Match,
+
+    [switch]
+    $Diff = $false,
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+   )
+
+   Begin {}
+
+   Process {
+        $Object = ($File | Rebase-File -To $Match)
+        if ( -Not ( Is-Matched-File -From $File -To $Object -Diff $Diff ) ) {
+            $File
+        }
+   }
+
+   End {}
+}
+
+function Get-Matched-Items {
+    [CmdletBinding()]
+
+   param (
+    [String]
+    $Match,
+
+    [switch]
+    $Diff = $false,
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+   )
+
+   Begin {}
+
+   Process {
+        $Object = ($File | Rebase-File -To $Match)
+        if ( Is-Matched-File -From $File -To $Object -Diff $Diff ) {
+            $File
+        }
+   }
+
+   End {}
+}
+
+
 #############################################################################################################
 ## COMMAND FUNCTIONS ########################################################################################
 #############################################################################################################
 
 function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
-    $o1 = ( Get-Item -LiteralPath "${from}" )
-    $o2 = ( Get-Item -Path "${from}" )
+    $o1 = ( Get-Item -Force -LiteralPath "${from}" )
+    $o2 = ( Get-Item -Force -LiteralPath "${from}" )
 
     if ( $o1.Count -eq $o2.Count ) {
         try {
@@ -155,10 +294,10 @@ function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
 function Do-Reset-Metadata ($from, $to, $verbose) {
     
     if (Test-Path -LiteralPath $from) {
-        $oFrom = (Get-Item -LiteralPath $from)
+        $oFrom = (Get-Item -Force -LiteralPath $from)
 
         if (Test-Path -LiteralPath $to) {
-            $oTo = (Get-Item -LiteralPath $to)
+            $oTo = (Get-Item -Force -LiteralPath $to)
 
             $altered = $false
             if ($oTo.LastWriteTime -ne $oFrom.LastWriteTime) {
@@ -215,85 +354,17 @@ function Sync-Metadata ($from, $to, $verbose) {
     }
 }
 
-function Get-Unmatched-Dirs {
-    [CmdletBinding()]
-
-   param (
-    [String]
-    $Match,
-
-    [Parameter(ValueFromPipeline=$true)]
-    $File
-   )
-
-   Begin {}
-
-   Process {
-    $BaseName = $File.Name
-    $Object = $Match + "\" + $BaseName
-
-    if ( -Not ( Test-Path -LiteralPath "$Object" ) ) {
-        $File
-    }
-   }
-
-   End {}
-}
-
-function Get-Matched-Dirs {
-    [CmdletBinding()]
-
-   param (
-    [String]
-    $Match,
-
-    [Parameter(ValueFromPipeline=$true)]
-    $File
-   )
-
-   Begin {}
-
-   Process {
-    $BaseName = $File.BaseName
-    $Object = $Match + "\" + $BaseName
-
-    if ( Test-Path -LiteralPath "$Object" ) {
-        $File
-    }
-   }
-
-   End {}
-}
-
-function Rebase-File {
-    [CmdletBinding()]
-
-   param (
-    [String]
-    $To,
-
-    [Parameter(ValueFromPipeline=$true)]
-    $File
-   )
-
-   Begin {}
-
-   Process {
-    $BaseName = $File.Name
-    $Object = $To + "\" + $BaseName
-    $Object
-   }
-
-   End {}
-}
-
-function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
+function Do-Mirror ($From, $To, $Trashcan, $Depth=0) {
     $IdBase = (10 * $Depth)
     if ($Depth -gt 0) {
         $RootedIdBase = 10
     } else {
         $RootedIdBase = 0
     }
+
+    ##################################################################################################################
+    ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
+    ##################################################################################################################
 
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 0
 
@@ -304,7 +375,7 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
         $DirLevelHeader = ""
     }
 
-    Get-ChildItem -Directory -LiteralPath "$To" | Get-Unmatched-Dirs -Match "$From" | ForEach {
+    Get-ChildItem -Directory -LiteralPath "$To" | Get-Unmatched-Items -Match "$From" | ForEach {
         if ($DirLevelHeader) {
             $DirLevelHeader
             $DirLevelHeader=""
@@ -312,16 +383,23 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
         $BaseName = $_.Name
         $MoveFrom = $_.FullName
         $MoveTo = ($_ | Rebase-File -To $Trashcan)
-        "Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force"
-        if ( -Not ( Test-Path -LiteralPath $Trashcan ) ) {
-            mkdir $Trashcan
+
+        if ( -Not ( Is-Bagged-Copy-of-Loose-file -File ( Get-Item -LiteralPath $_.FullName ) ) ) {
+            "Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force"
+            if ( -Not ( Test-Path -LiteralPath $Trashcan ) ) {
+                mkdir $Trashcan
+            }
+            Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force
         }
-        Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force
     }
+
+    ##################################################################################################################
+    ## COPY OVER (mkdir): Create child directories on destination to mirror subdirectories of source. ################
+    ##################################################################################################################
 
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 20
 
-    Get-ChildItem -Directory -LiteralPath "$From" | Get-Unmatched-Dirs -Match "${To}" | ForEach {
+    Get-ChildItem -Directory -LiteralPath "$From" | Get-Unmatched-Items -Match "${To}" | ForEach {
         if ($DirLevelHeader) {
             $DirLevelHeader
             $DirLevelHeader=""
@@ -334,10 +412,14 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
         Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
     }
 
+    ##################################################################################################################
+    ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
+    ##################################################################################################################
+
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 40
 
     $i = 0
-    $aFiles = ( Get-ChildItem -File -LiteralPath "$From" | Get-Unmatched-Dirs -Match "${To}"  )
+    $aFiles = ( Get-ChildItem -File -LiteralPath "$From" | Get-Unmatched-Items -Match "${To}" -Diff  )
     $N = $aFiles.Count
 
     $aFiles | ForEach {
@@ -359,10 +441,14 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
     }
     Write-Progress -Id ($IdBase + 3) -Activity "Copying Unmatched Files [${From}]" -Completed
 
+    ##################################################################################################################
+    ## METADATA: Synchronize source file system meta-data to destination #############################################
+    ##################################################################################################################
+
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 60
 
     $i = 0
-    $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Dirs -Match "${To}" )
+    $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" )
     $N = $aFiles.Count
 
    $aFiles | ForEach  {
@@ -377,10 +463,14 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
     }
     Write-Progress -Id ($IdBase + 1) -Activity "Synchronizing metadata [${From}]" -Completed
 
+    ##################################################################################################################
+    ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
+    ##################################################################################################################
+
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 80
 
     $i = 0
-    $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Dirs -Match "$To" )
+    $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Items -Match "$To" )
     $N = $aFiles.Count
     
     $aFiles | ForEach {
@@ -392,12 +482,12 @@ function Do-Mirror-Child-Dirs ($From, $To, $Trashcan, $Depth=0) {
         $i = $i + 1
         Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Status "${BaseName}" -percentComplete (100*$i / $N)
 
-        Do-Mirror-Child-Dirs -From "${MirrorFrom}" -To "${MirrorTo}" -Trashcan "${MirrorTrash}" -Depth ($Depth + 1)
+        Do-Mirror -From "${MirrorFrom}" -To "${MirrorTo}" -Trashcan "${MirrorTrash}" -Depth ($Depth + 1)
     }
     Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Completed
 }
 
-function Do-Mirror ($Pairs=$null) {
+function Do-Mirror-Repositories ($Pairs=$null) {
 
     if ( $Pairs.Count -lt 1 ) {
         $Pairs = $mirrors.Keys
@@ -420,7 +510,7 @@ function Do-Mirror ($Pairs=$null) {
             }
 
             Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-            Do-Mirror-Child-Dirs -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}"
+            Do-Mirror -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}"
         } else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
@@ -434,7 +524,7 @@ function Do-Mirror ($Pairs=$null) {
                     $recurseInto += @( $subPair )
                 }
             }
-            Do-Mirror -Pairs $recurseInto
+            Do-Mirror-Repositories -Pairs $recurseInto
         } # if
         $i = $i + 1
     }
@@ -585,7 +675,7 @@ param (
 
         $BagPayload = $null
         if ( Test-Path -Path $CardBag ) {
-            Dir -Path $CardBag | ForEach {
+            Dir -Force -Path $CardBag | ForEach {
                 $BagPath = $_
                 $BagData = $BagPath.FullName + "\data"
                 if ( Test-Path -LiteralPath $BagData ) {
@@ -596,10 +686,10 @@ param (
                         $RightHash = Get-FileHash -LiteralPath $BagPayloadPath
 
                         if ( $LeftHash.hash -eq $RightHash.hash ) {
-                            $BagPayload = ( Get-Item -LiteralPath $BagPayloadPath )
+                            $BagPayload = ( Get-Item -Force -LiteralPath $BagPayloadPath )
                             $OnBagged.Invoke($File, $BagPayload, $BagPath)
                         } else {
-                            $OnDiff.Invoke($File, $(Get-Item $BagPayloadPath), $LeftHash, $RightHash )
+                            $OnDiff.Invoke($File, $(Get-Item -Force -LiteralPath $BagPayloadPath), $LeftHash, $RightHash )
                         }
                     }
                 }
@@ -758,10 +848,10 @@ function Do-Bag-ERInstance ($DIRNAME) {
     chdir $Anchor
 }
 
-function Do-Bag-One ($LiteralPath) {
+function Do-Bag-Loose-File ($LiteralPath) {
     $Anchor = $PWD
 
-    $Item = Get-Item -LiteralPath $LiteralPath
+    $Item = Get-Item -Force -LiteralPath $LiteralPath
     
     chdir $Item.DirectoryName
     $OriginalFileName = $Item.Name
@@ -884,7 +974,7 @@ function Do-Rsync ($Pairs=$null) {
         $i = $i + 1 # Step 1
 
         Write-Progress -Id 1137 -Activity "rsync between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-        Do-Mirror -Pair "${Pair}"
+        Do-Mirror-Repositories -Pair "${Pair}"
 
         $i = $i + 1 # Step 2
     }
