@@ -163,6 +163,142 @@ Process {
 End { }
 }
 
+#############################################################################################################
+## index.html FOR BOUND SUBDIRECTORIES ######################################################################
+#############################################################################################################
+
+Add-Type -Assembly System.Web
+
+function Resolve-UNC-Path {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ReturnObject=$false )
+
+Begin {}
+
+Process {
+    $output = $null
+
+    If ( $File -is [String] ) {
+        $FileObject = (Get-Item -LiteralPath $File)
+    } Else {
+        $FileObject = $File
+    }
+
+    $Drive = $null
+    $Root = $null
+
+    If ( Get-Member -InputObject $FileObject -Name "Root" -MemberType Properties ) {
+        $Root = $FileObject.Root
+    } ElseIf ( Get-Member -InputObject $FileObject -Name "Directory" -MemberType Properties ) {
+        $Parent = $FileObject.Directory
+        $Root = $Parent.Root
+    }
+
+    If ( -Not ( $Root -eq $null ) ) {
+        Try {
+            $Drive = New-Object System.IO.DriveInfo($Root)
+            $Drive.DriveType | Out-Null
+        } Catch {
+            $Drive = $null
+        }
+
+        If ($Drive -eq $null) {
+            $output = $FileObject.FullName
+        }
+        ElseIf ($Drive.DriveType -eq "Fixed") {
+            $output = $FileObject.FullName
+        }
+        Else {
+            $RootPath = $Parent
+            $currentDrive = Split-Path -Qualifier $Root.FullName
+            $logicalDisk = Gwmi Win32_LogicalDisk -filter "DriveType = 4 AND DeviceID = '${currentDrive}'"
+            $ProviderName = $logicalDisk.ProviderName
+            $unc = $FileObject.FullName.Replace($currentDrive, $ProviderName)
+            $output = $unc
+        }
+
+        if ($ReturnObject) {
+            $output = (Get-Item -LiteralPath $output)
+        }
+        $output
+    }
+}
+
+End {}
+
+}
+
+function Select-URI-Link {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo )
+
+    Begin { Push-Location; Set-Location $RelativeTo }
+
+    Process {
+        $URL = $File.FileURI
+
+        $HREF = [System.Web.HttpUtility]::HtmlEncode($URL)
+
+        $FileName = ($File | Resolve-Path -Relative)
+
+        $TEXT = [System.Web.HttpUtility]::HtmlEncode($FileName)
+
+        '<a href="{0}">{1}</a>' -f $HREF, $TEXT
+    }
+
+    End { Pop-Location }
+
+}
+
+function Add-File-URI {
+Param( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $UNC = $File.FullName
+        $Nodes = $UNC.Split("\") | % { [URI]::EscapeDataString($_) }
+
+        $URL = ( $Nodes -Join "/" )
+        $protocolLocalAuthority = "file:///"
+        
+        $File | Add-Member -NotePropertyName "FileURI" -NotePropertyValue "${protocolLocalAuthority}$URL"
+        $File
+    }
+
+    End { }
+
+}
+
+function Do-Make-Index-Html {
+Param( $Directory )
+
+    if ( $Directory -eq $null ) {
+        $Path = ( Get-Location )
+    } else {
+        $Path = ( $Directory )
+    }
+
+    if ( Test-Path -LiteralPath "${Path}" ) {
+        $UNC = ( Get-Item -LiteralPath "${Path}"| Resolve-UNC-Path -ReturnObject )
+
+        $indexHtmlPath = "${UNC}\index.html"
+
+        if ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
+            $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Resolve-UNC-Path -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC
+
+            $NL = [Environment]::NewLine
+
+            $htmlUL = $listing | % -Begin { "<ul>" } -Process { '  <li>' + $_ + "</li>" } -End { "</ul>" }
+            $htmlTitle = ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) )
+
+            $htmlOut = ( "<!DOCTYPE html>${NL}<html>${NL}<head>${NL}<title>{0}</title>${NL}</head>${NL}<body>${NL}<h1>{0}</h1>${NL}{1}${NL}</body>${NL}</html>${NL}" -f $htmlTitle, ( $htmlUL -Join "${NL}" ) )
+
+            $htmlOut > $indexHtmlPath
+        } else {
+            Write-Error "index.html already exists in ${Directory}!"
+        }
+    }
+}
+
 ############################################################################################################
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
@@ -1017,6 +1153,15 @@ if ( $Help -eq $true ) {
             $Words = $args[1 .. $N]
         }
         Do-Bag -Pairs $Words
+    } elseif ( $verb -eq "index" ) {
+        if ( $N -gt 0 ) {
+            $Words = $args[1 .. $N]
+        } else {
+            $Words = @( Get-Location )
+        }
+        $Words | ForEach {
+            Do-Make-Index-Html -Directory $_
+        }
     } elseif ( $verb -eq "bleep" ) {
         Do-Bleep-Bloop
     } else {
