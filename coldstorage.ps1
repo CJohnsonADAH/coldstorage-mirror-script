@@ -115,6 +115,35 @@ function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
     return $result
 }
 
+function Do-Bag-Loose-File ($LiteralPath) {
+    $Anchor = $PWD
+
+    $Item = Get-Item -Force -LiteralPath $LiteralPath
+    
+    chdir $Item.DirectoryName
+    $OriginalFileName = $Item.Name
+    $OriginalFullName = $Item.FullName
+    $FileName = ( $Item | Bagged-File-Path )
+
+    $BagDir = ".\${FileName}"
+    if ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
+        $BagDir = mkdir -Path $BagDir
+    }
+
+    Move-Item -LiteralPath $Item -Destination $BagDir
+    Do-Bag-ERInstance -DIRNAME $BagDir
+    if ( $LastExitCode -eq 0 ) {
+        $NewFilePath = "${BagDir}\data\${OriginalFileName}"
+        if ( Test-Path -LiteralPath "${NewFilePath}" ) {
+            New-Item -ItemType HardLink -Path $OriginalFullName -Target $NewFilePath
+	        
+            Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
+            Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
+        }
+    }
+    chdir $Anchor
+}
+
 #############################################################################################################
 ## ER INSTANCE DIRECTORIES: Typically found in ER Unprocessed directory #####################################
 #############################################################################################################
@@ -163,6 +192,19 @@ Process {
 End { }
 }
 
+function Do-Bag-ERInstance ($DIRNAME) {
+
+    $Anchor = $PWD
+    chdir $DIRNAME
+
+    Write-Host ""
+    Write-Host "BagIt: ${PWD}"
+    & python.exe "${HOME}\bin\bagit\bagit.py" . 2>&1
+
+    chdir $Anchor
+}
+
+
 #############################################################################################################
 ## index.html FOR BOUND SUBDIRECTORIES ######################################################################
 #############################################################################################################
@@ -178,7 +220,7 @@ Process {
     $output = $null
 
     If ( $File -is [String] ) {
-        $FileObject = (Get-Item -LiteralPath $File)
+        $FileObject = (Get-Item -Force -LiteralPath $File)
     } Else {
         $FileObject = $File
     }
@@ -278,7 +320,7 @@ Param( $Directory )
     }
 
     if ( Test-Path -LiteralPath "${Path}" ) {
-        $UNC = ( Get-Item -LiteralPath "${Path}"| Resolve-UNC-Path -ReturnObject )
+        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Resolve-UNC-Path -ReturnObject )
 
         $indexHtmlPath = "${UNC}\index.html"
 
@@ -297,6 +339,42 @@ Param( $Directory )
             Write-Error "index.html already exists in ${Directory}!"
         }
     }
+}
+
+function Is-Indexed-Directory {
+Praam( $File )
+
+    If ( $File -is [String] ) {
+        $FileObject = (Get-Item -Force -LiteralPath $File)
+    } Else {
+        $FileObject = $File
+    }
+    $FilePath = $FileObject.FullName
+
+    $result = $false
+    if ( Test-Path -LiteralPath "${FilePath}" ) {
+        $NewFilePath = "${FilePath}\index.html"
+        $result = Test-Path -LiteralPath "${NewFilePath}"
+    }
+    return $result
+}
+
+function Is-Bagged-Indexed-Directory {
+Praam( $File )
+
+    If ( $File -is [String] ) {
+        $FileObject = (Get-Item -Force -LiteralPath $File)
+    } Else {
+        $FileObject = $File
+    }
+    $FilePath = $FileObject.FullName
+
+    $result = $false
+    if ( Is-BagIt-Formatted-Directory($File) ) {
+        $payloadPath = "${FilePath}\data"
+        $result = Is-Indexed-Directory($payloadPath)
+    }
+    return $result
 }
 
 ############################################################################################################
@@ -969,47 +1047,6 @@ function Do-Validate-Bag ($DIRNAME) {
         Write-Host "OK-BagIt: ${DIRNAME}"
     }
 
-    chdir $Anchor
-}
-
-function Do-Bag-ERInstance ($DIRNAME) {
-
-    $Anchor = $PWD
-    chdir $DIRNAME
-
-    Write-Host ""
-    Write-Host "BagIt: ${PWD}"
-    & python.exe "${HOME}\bin\bagit\bagit.py" . 2>&1
-
-    chdir $Anchor
-}
-
-function Do-Bag-Loose-File ($LiteralPath) {
-    $Anchor = $PWD
-
-    $Item = Get-Item -Force -LiteralPath $LiteralPath
-    
-    chdir $Item.DirectoryName
-    $OriginalFileName = $Item.Name
-    $OriginalFullName = $Item.FullName
-    $FileName = ( $Item | Bagged-File-Path )
-
-    $BagDir = ".\${FileName}"
-    if ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
-        $BagDir = mkdir -Path $BagDir
-    }
-
-    Move-Item -LiteralPath $Item -Destination $BagDir
-    Do-Bag-ERInstance -DIRNAME $BagDir
-    if ( $LastExitCode -eq 0 ) {
-        $NewFilePath = "${BagDir}\data\${OriginalFileName}"
-        if ( Test-Path -LiteralPath "${NewFilePath}" ) {
-            New-Item -ItemType HardLink -Path $OriginalFullName -Target $NewFilePath
-	        
-            Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
-            Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
-        }
-    }
     chdir $Anchor
 }
 
