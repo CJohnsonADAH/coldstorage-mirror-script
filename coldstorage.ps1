@@ -66,14 +66,31 @@ function Rebase-File {
    End {}
 }
 
+function Get-File-Object ( $File ) {
+    
+    $oFile = $null
+    If ( $File -is [String] ) {
+        If ( Test-Path -LiteralPath "${File}" ) {
+            $oFile = ( Get-Item -Force -LiteralPath "${File}" )
+        }
+    }
+    Else {
+        $oFile = $File
+    }
+
+    return $oFile
+}
+
 #############################################################################################################
 ## BagIt DIRECTORIES ########################################################################################
 #############################################################################################################
 
 function Is-BagIt-Formatted-Directory ( $File ) {
     $result = $false # innocent until proven guilty
-    
-    $BagDir = $File.FullName
+
+    $oFile = Get-File-Object -File $File   
+
+    $BagDir = $oFile.FullName
     if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
         $PayloadDir = "${BagDir}\data"
         if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
@@ -97,9 +114,52 @@ Process { if ( Is-BagIt-Formatted-Directory($File) ) { $File } }
 End { }
 }
 
+function Select-BagIt-Payload () {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    if ( Is-BagIt-Formatted-Directory($File) ) {
+        $oFile = Get-File-Object($File)
+        $payloadPath = $oFile.FullName + "\data"
+        Get-ChildItem -Force -Recurse -LiteralPath "${payloadPath}"
+    }
+}
+
+End { }
+
+}
+
 #############################################################################################################
 ## BagIt PACKAGING CONVENTIONS ##############################################################################
 #############################################################################################################
+
+function Is-Loose-File ( $File ) {
+    
+    $oFile = Get-File-Object($File)
+
+    $result = $false
+    If ( -Not ( $oFile -eq $null ) ) {
+        if ( Test-Path -LiteralPath $oFile.FullName -PathType Leaf ) {
+            $result = $true
+
+            $Context = $oFile.Directory
+            $sContext = $Context.FullName
+
+            If ( Is-Indexed-Directory($sContext) ) {
+                $result = $false
+            }
+            ElseIf  ( Is-Bagged-Indexed-Directory($sContext) ) {
+                $result = $false
+            }
+            ElseIf ( Is-ER-Instance-Directory($Context) ) {
+                $result = $false
+            }
+        }
+    }
+    return $result
+}
 
 function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
     $result = $false # innocent until proven guilty
@@ -114,6 +174,89 @@ function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
     }
     return $result
 }
+
+function Select-Bagged-Copies-of-Loose-Files {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process { if ( Is-Bagged-Copy-of-Loose-File($File) ) { $File } }
+
+End { }
+}
+
+function Match-Bagged-Copy-to-Loose-File {
+Param ( [Parameter(ValueFromPipeline=$true)] $Bag, $File, [switch] $Diff )
+
+Begin { }
+
+Process {
+    If ( Is-Loose-File($File) ) {
+        $oBag = Get-File-Object -File $Bag
+        $Payload = ( Get-Item -Force -LiteralPath $oBag.FullName | Select-BagIt-Payload )
+        If ( Is-Bagged-Copy-of-Loose-File($Bag) ) {
+            If ( $Payload.Count -eq 1 ) {
+                $oFile = Get-File-Object -File $File
+                
+                $Mismatched = $false
+                If ( $Payload.Name -ne $oFile.Name ) {
+                    $Mismatched = $true
+                }
+                ElseIf ( $Payload.Length -ne $oFile.Length ) {
+                    $Mismatched = $true
+                }
+                ElseIf ( $Diff ) {
+                    If ( Is-Different-File-Content -From $Payload -To $File ) {
+                        $Mismatched = $true
+                    }
+                }
+
+                if ( -Not $Mismatched ) {
+                    $Bag
+                }
+            }
+        }
+    }
+}
+
+End { }
+}
+
+function Get-Bagged-Copy-of-Loose-File ( $File ) {
+    $result = $null
+
+    If ( Is-Loose-File($File) ) {
+        $oFile = Get-File-Object($File)
+        $Parent = $oFile.Directory
+
+        $match = ( Get-ChildItem -Directory $Parent | Select-Bagged-Copies-of-Loose-Files | Match-Bagged-Copy-to-Loose-File -File $oFile )
+
+        if ( $match.Count -gt 0 ) {
+            $result = $match
+        }
+    }
+
+    return $result
+}
+
+function Is-Unbagged-Loose-File ( $File ) {
+
+    $oFile = Get-File-Object($File)
+    
+    $result = $false
+    If ( -Not ( $oFile -eq $null ) ) {
+        If ( Is-Loose-File($File) ) {
+            $result = $true
+            $bag = Get-Bagged-Copy-of-Loose-File -File $oFile
+                       
+            if ( $bag.Count -gt 0 ) {
+                $result = $false
+            }
+        }
+    }
+    return $result
+}
+
 
 function Do-Bag-Loose-File ($LiteralPath) {
     $Anchor = $PWD
@@ -219,11 +362,7 @@ Begin {}
 Process {
     $output = $null
 
-    If ( $File -is [String] ) {
-        $FileObject = (Get-Item -Force -LiteralPath $File)
-    } Else {
-        $FileObject = $File
-    }
+    $FileObject = Get-File-Object($File)
 
     $Drive = $null
     $Root = $null
@@ -342,13 +481,9 @@ Param( $Directory )
 }
 
 function Is-Indexed-Directory {
-Praam( $File )
+Param( $File )
 
-    If ( $File -is [String] ) {
-        $FileObject = (Get-Item -Force -LiteralPath $File)
-    } Else {
-        $FileObject = $File
-    }
+    $FileObject = Get-File-Object($File)
     $FilePath = $FileObject.FullName
 
     $result = $false
@@ -360,13 +495,9 @@ Praam( $File )
 }
 
 function Is-Bagged-Indexed-Directory {
-Praam( $File )
+Param( $File )
 
-    If ( $File -is [String] ) {
-        $FileObject = (Get-Item -Force -LiteralPath $File)
-    } Else {
-        $FileObject = $File
-    }
+    $FileObject = Get-File-Object($File)
     $FilePath = $FileObject.FullName
 
     $result = $false
@@ -771,8 +902,8 @@ param (
 
         $DirName = $File.FullName
         $BaseName = $File.Name
-        if ( Is-ER-Instance-Directory($File) ) {
-            if ( -not ( $BaseName -match $Exclude ) ) {
+        If ( Is-ER-Instance-Directory($File) ) {
+            If ( -not ( $BaseName -match $Exclude ) ) {
                 $ERMeta = ( $File | Select-ER-Instance-Data )
                 $ERCode = $ERMeta.ERCode
 
@@ -798,11 +929,27 @@ param (
                     }
 
                 }
-            } elseif ( $Quiet -eq $false ) {
+            }
+            ElseIf ( $Quiet -eq $false ) {
                 Write-Output "SKIPPED: ${ERCode}, $DirName"
             }
 
             chdir $Anchor
+        }
+        ElseIf ( Is-Indexed-Directory($File) ) {
+            Write-Output "STUBBED: ${File}, indexed." #FIXME
+        }
+        Else {
+            Write-Output "Check for loosies."
+            Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
+                If ( Is-Loose-File($_) ) {
+                    If ( Is-Unbagged-Loose-File($_) ) {
+                        $LooseFile = $_.Name
+                        Write-Output "UNBAGGED: ${LooseFile}, loose."
+                        Do-Bag-Loose-File -LiteralPath $_.FullName
+                    }
+                }
+            }
         }
     }
 
@@ -1173,7 +1320,7 @@ if ( $Help -eq $true ) {
         } else {
             $Words = @( )
         }
-        Do-Mirror -Pairs $Words
+        Do-Mirror-Repositories -Pairs $Words
     } elseif ( $verb -eq "check" ) {
         $Words = @( )
 
