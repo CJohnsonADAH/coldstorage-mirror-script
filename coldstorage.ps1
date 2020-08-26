@@ -1513,7 +1513,7 @@ if ( $Help -eq $true ) {
     $verb = $args[0]
     $t0 = date
     
-    if ( $verb -eq "mirror" ) {
+    If ( $verb -eq "mirror" ) {
         $N = ( $args.Count - 1 )
         if ( $N -gt 0 ) {
             $Words = $args[1 .. $N]
@@ -1527,7 +1527,8 @@ if ( $Help -eq $true ) {
         }
 
         Do-Mirror-Repositories -Pairs $Words -DiffLevel $DiffLevel
-    } elseif ( $verb -eq "check" ) {
+    }
+    ElseIf ( $verb -eq "check" ) {
         $Words = @( )
 
         $N = ( $args.Count - 1 )
@@ -1535,7 +1536,8 @@ if ( $Help -eq $true ) {
             $Words = $args[1 .. $N]
         }
         Do-Check -Pairs $Words
-    } elseif ( $verb -eq "bag" ) {
+    }
+    ElseIf ( $verb -eq "bag" ) {
         $Words = @( )
 
         $N = ( $args.Count - 1 )
@@ -1543,7 +1545,8 @@ if ( $Help -eq $true ) {
             $Words = $args[1 .. $N]
         }
         Do-Bag -Pairs $Words
-    } elseif ( $verb -eq "index" ) {
+    }
+    ElseIf ( $verb -eq "index" ) {
         if ( $N -gt 0 ) {
             $Words = $args[1 .. $N]
         } else {
@@ -1552,9 +1555,15 @@ if ( $Help -eq $true ) {
         $Words | ForEach {
             Do-Make-Index-Html -Directory $_
         }
-    } elseif ( $verb -eq "bleep" ) {
+    }
+    ElseIf ( $verb -eq "settings" ) {
+        ColdStorage-Settings -Name $args[1]
+        $Quiet = $true
+    }
+    ElseIf ( $verb -eq "bleep" ) {
         Do-Bleep-Bloop
-    } else {
+    }
+    Else {
         Do-Write-Usage -cmd $MyInvocation.MyCommand
         $Quiet = $true
     }
