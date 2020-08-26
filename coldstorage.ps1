@@ -86,12 +86,91 @@ function Get-File-Object ( $File ) {
 ## SETTINGS: PATHS, ETC. ####################################################################################
 #############################################################################################################
 
+Function ColdStorage-Script-Dir () {
+    $ScriptPath = ( Split-Path -Parent $PSCommandPath )
+    return (Get-Item -Force -LiteralPath $ScriptPath)
+}
+
+Function ColdStorage-Settings-File () {
+    $JsonDir = ( ColdStorage-Script-Dir ).FullName
+    $JsonPath = "${JsonDir}\settings.json"
+    If ( Test-Path -LiteralPath $JsonPath ) {
+        $File = (Get-Item -Force -LiteralPath $JsonPath)
+    }
+    Else {
+        $File = $null
+    }
+    return $File
+}
+
+Function ColdStorage-Settings-Defaults {
+    $Out=@{
+        BagIt="${HOME}\bin\bagit"
+        ClamAV="${HOME}\bin\clamav"
+    }
+    $Out
+}
+
+Function ColdStorage-Settings-Json {
+    ColdStorage-Settings-File | % {
+        If ( $_ -eq $null ) {
+            ColdStorage-Settings-Defaults | ConvertTo-Json
+        } Else {
+            Get-Content -Raw $_
+        }
+    }
+}
+
+Function ColdStorage-Settings-ToFilePath {
+Param ( [Parameter(ValueFromPipeline=$true)] $Path )
+
+Begin { }
+
+Process {
+    ( ( $Path -replace "[/]",'\' ) -replace '^~[\\]',"${HOME}\" )
+}
+
+End { }
+}
+
+Function Get-Json-Settings {
+Param([String] $Name="", [Parameter(ValueFromPipeline=$true)] $Json)
+
+Begin { }
+
+Process {
+    $Hashtable = ( $Json | ConvertFrom-Json )
+    If ( $Name.Length -gt 0 ) {
+        ( $Hashtable )."${Name}"
+    }
+    Else {
+        $Hashtable
+    }
+}
+
+End { }
+
+}
+
+Function ColdStorage-Settings {
+Param([String] $Name="")
+
+Begin { }
+
+Process {
+    ColdStorage-Settings-Json | Get-Json-Settings -Name $Name
+}
+
+End { }
+}
+
+
 function Get-ClamAV-Path () {
-    return "${HOME}\OneDrive - Alabama OIT\clamav-0.102.3-win-x64-portable"
+    return ( ColdStorage-Settings("ClamAV") | ColdStorage-Settings-ToFilePath )
 }
 
 function Get-BagIt-Path () {
-    return "${HOME}\bin\bagit"
+    return ( ColdStorage-Settings("BagIt") | ColdStorage-Settings-ToFilePath )
 }
 
 #############################################################################################################
