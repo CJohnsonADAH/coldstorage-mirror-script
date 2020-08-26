@@ -83,6 +83,18 @@ function Get-File-Object ( $File ) {
 }
 
 #############################################################################################################
+## SETTINGS: PATHS, ETC. ####################################################################################
+#############################################################################################################
+
+function Get-ClamAV-Path () {
+    return "${HOME}\OneDrive - Alabama OIT\clamav-0.102.3-win-x64-portable"
+}
+
+function Get-BagIt-Path () {
+    return "${HOME}\bin\bagit"
+}
+
+#############################################################################################################
 ## BagIt DIRECTORIES ########################################################################################
 #############################################################################################################
 
@@ -343,7 +355,8 @@ function Do-Bag-ERInstance ($DIRNAME) {
 
     Write-Host ""
     Write-Host "BagIt: ${PWD}"
-    & python.exe "${HOME}\bin\bagit\bagit.py" . 2>&1
+    $BagIt = Get-BagIt-Path
+    & python.exe "${BagIt}\bagit.py" . 2>&1
 
     chdir $Anchor
 }
@@ -1276,7 +1289,8 @@ param (
 
     Process {
         Write-Host "ClamAV Scan: ${Path}" -InformationAction Continue
-        & "C:\Users\charlesw.johnson\OneDrive - Alabama OIT\clamav-0.102.3-win-x64-portable\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Host
+        $ClamAV = Get-ClamAV-Path
+        & "${ClamAV}\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Host
         if ( $LastExitCode -ne 0 ) {
             $LastExitCode
         }
@@ -1290,12 +1304,13 @@ function Do-Validate-Bag ($DIRNAME) {
     $Anchor = $PWD
     chdir $DIRNAME
 
-    & python.exe "${HOME}\bin\bagit\bagit.py" --validate --quiet . 2>&1
+    $BagIt = Get-BagIt-Path
+    & python.exe "${BagIt}\bagit.py" --validate --quiet . 2>&1
     $NotOK = $LastExitCode
 
     if ( $NotOK -gt 0 ) {
         Do-Bleep-Bloop
-        & python.exe "${HOME}\bin\bagit\bagit.py" --validate . 2>&1
+        & python.exe "${BagIt}\bagit.py" --validate . 2>&1
     } else {
         Write-Host "OK-BagIt: ${DIRNAME}"
     }
