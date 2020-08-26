@@ -412,7 +412,7 @@ Process {
         }
 
         if ($ReturnObject) {
-            $output = (Get-Item -LiteralPath $output)
+            $output = (Get-Item -Force -LiteralPath $output)
         }
         $output
     }
