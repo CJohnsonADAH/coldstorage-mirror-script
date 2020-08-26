@@ -435,7 +435,7 @@ function Do-Bag-ERInstance ($DIRNAME) {
     Write-Host ""
     Write-Host "BagIt: ${PWD}"
     $BagIt = Get-BagIt-Path
-    & python.exe "${BagIt}\bagit.py" . 2>&1
+    & python.exe "${BagIt}\bagit.py" . 2>&1 | Write-Host
 
     chdir $Anchor
 }
@@ -1385,15 +1385,15 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
 
     $BagIt = Get-BagIt-Path
     If ( $Verbose ) {
-        & python.exe "${BagIt}\bagit.py" --validate . 2>&1
+        & python.exe "${BagIt}\bagit.py" --validate . | Write-Host
     }
     Else {
-        & python.exe "${BagIt}\bagit.py" --validate --quiet . 2>&1
+        & python.exe "${BagIt}\bagit.py" --validate --quiet . 2>&1 | Write-Host
         $NotOK = $LastExitCode
 
         if ( $NotOK -gt 0 ) {
             Do-Bleep-Bloop
-            & python.exe "${BagIt}\bagit.py" --validate . 2>&1
+            & python.exe "${BagIt}\bagit.py" --validate . | Write-Host
         } else {
             Write-Host "OK-BagIt: ${DIRNAME}"
         }
