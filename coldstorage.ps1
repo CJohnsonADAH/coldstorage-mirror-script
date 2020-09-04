@@ -837,12 +837,14 @@ Function Do-Copy-Snapshot-File ($from, $to, $direction="over", $Batch=$false, [s
         Copy-Item -LiteralPath "${from}" -Destination "${to}"
     }
 
-	#try {
-	#	Set-ItemProperty -Path "$to" -Name IsReadOnly -Value $true
-	#}
-	#catch {
-	#	Write-Error "setting read-only failed: $to"
-	#}
+    if ( $ReadOnly ) {
+	    Try {
+	    	Set-ItemProperty -Path "$to" -Name IsReadOnly -Value $true
+	    }
+	    Catch {
+		    Write-Error "setting read-only failed: $to"
+	    }
+    }
 }
 
 function Do-Reset-Metadata ($from, $to, $verbose) {
