@@ -5,7 +5,8 @@ Sync files to or from the ColdStorage server.
 param (
     [switch] $Help = $false,
     [switch] $Quiet = $false,
-    [switch] $Diff = $false
+    [switch] $Diff = $false,
+	[switch] $Batch = $false
 )
 
 # coldstorage
@@ -67,7 +68,7 @@ function Rebase-File {
    End {}
 }
 
-function Get-File-Object ( $File ) {
+Function Get-File-Object ( $File ) {
     
     $oFile = $null
     If ( $File -is [String] ) {
@@ -80,6 +81,28 @@ function Get-File-Object ( $File ) {
     }
 
     return $oFile
+}
+
+Function Get-File-Literal-Path {
+Param($File)
+
+	$sFile = $null
+
+	If ( $File -eq $null ) {
+		$oFile = $null
+	}
+	ElseIf ( -Not ( Get-Member -InputObject $File -name "FullName" -MemberType Properties ) ) {
+		$oFile = Get-File-Object($File)
+	}
+	Else {
+		$oFile = $File
+	}
+
+	If ( Get-Member -InputObject $oFile -name "FullName" -MemberType Properties ) {
+		$sFile = $oFile.FullName
+	}
+	
+	return $sFile
 }
 
 #############################################################################################################
@@ -660,47 +683,54 @@ Param( $File )
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
 
-function Is-Different-File-Content ($From, $To, $DiffLevel=2) {
-    $LeftHash = $null
-    $RightHash = $null
+Function Is-Different-File-Content {
+Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
 
     # We go through some rigamarole here because each side of the comparison MAY be
     # a valid file path whose content we can hash, OR it MAY be a string of a path
     # to a file that does not (yet) exist.
-    $FromPath = $From
-    if ( Get-Member -InputObject $From -name "FullName" -MemberType Properties ) {
-        $FromPath = $From.FullName
-    }
 
-    $ToPath = $To
-    if ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
-        $ToPath = $To.FullName
-    }
+	$oFrom = Get-File-Object($From)
+	$oTo = Get-File-Object($To)
+	
+	If ( $oFrom -ne $null ) {
+		$Differentiated = ($oTo -eq $null)
+	
+		If ( ( -Not $Differentiated ) -and ( $DiffLevel -gt 0 ) ) {
+			$LeftLength = $null
+			$RightLength = $null
+			If ( $oFrom -ne $null ) {
+				$LeftLength = $oFrom.Length
+			}
+			If ( $oTo -ne $null ) {
+				$RightLength = $oTo.Length
+			}
+			If ($Verbose) { Write-Host "Length comparison: ${LeftLength} vs. ${RightLength}" }
+			$Differentiated=($Differentiated -or ( $LeftLength -ne $RightLength ))
+		}
 
-    $Differentiated = $false # innocent until proven guilty
-    if ( ( -Not $Differentiated ) -and ( $DiffLevel -gt 0 ) ) {
-        $LeftLength = $null
-        $RightLength = $null
+		If ( ( -Not $Differentiated ) -and ( $DiffLevel -gt 1 ) ) {
+			$sFrom = Get-File-Literal-Path($oFrom)
+			$sTo = Get-File-Literal-Path($oTo)
+			
+			$LeftHash = $null
+			$RightHash = $null
 
-        if ( Test-Path -LiteralPath $FromPath ) {
-            $LeftLength = ( Get-Item -Force -LiteralPath $FromPath ).Length
+			If ( $sFrom -ne $null ) {
+				$LeftHash = (Get-FileHash -LiteralPath $sFrom).hash
+			}
+			If ( $sTo -ne $null ) {
+				$RightHash = (Get-FileHash -LiteralPath $sTo).hash
+			}
+			If ($Verbose) { Write-Host "Hash comparison: ${LeftHash} vs. ${RightHash}" }
+			$Differentiated=($Differentiated -or ( $LeftHash -ne $RightHash))
         }
-        if ( Test-Path -LiteralPath $ToPath ) {
-            $RightLength = ( Get-Item -Force -LiteralPath $ToPath ).Length
-        }
-        $Differentiated=($Differentiated -or ( $LeftLength -ne $RightLength ))
     }
+	Else {
+		$Differentiated = ($oTo -ne $null)
+	}
 
-    If ( ( -Not $Differentiated ) -and ( $DiffLevel -gt 1 ) ) {
-        if ( Test-Path -LiteralPath $FromPath ) {
-            $LeftHash = Get-FileHash -LiteralPath $FromPath
-        }
-        if ( Test-Path -LiteralPath $ToPath ) {
-            $RightHash = Get-FileHash -LiteralPath $ToPath
-        }
-        $Differentiated=($Differentiated -or ( $LeftHash.hash -ne $RightHash.hash ))
-    }
-    return $Differentiated
+    Return $Differentiated
 }
 
 function Is-Matched-File ($From, $To, $DiffLevel=0) {
@@ -708,6 +738,7 @@ function Is-Matched-File ($From, $To, $DiffLevel=0) {
     if ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
         $ToPath = $To.FullName
     }
+
     $TreatAsMatched = ( Test-Path -LiteralPath "${ToPath}" )
     if ( $TreatAsMatched ) {
         $ObjectFile = (Get-Item -Force -LiteralPath "${ToPath}")
@@ -784,19 +815,24 @@ function Get-Matched-Items {
 ## COMMAND FUNCTIONS ########################################################################################
 #############################################################################################################
 
-function Do-Copy-Snapshot-File ($from, $to, $direction="over") {
+Function Do-Copy-Snapshot-File ($from, $to, $direction="over", $Batch=$false, [switch] $ReadOnly=$false) {
     $o1 = ( Get-Item -Force -LiteralPath "${from}" )
-    $o2 = ( Get-Item -Force -LiteralPath "${from}" )
 
-    if ( $o1.Count -eq $o2.Count ) {
-        try {
-            Start-BitsTransfer -Source "${from}" -Destination "${to}" -Description "$direction to $to" -DisplayName "Copy from $from" -ErrorAction Stop
-        } catch {
-            Write-Error "Start-BitsTransfer raised an exception"
+    If ( $o1.Count -gt 0 ) {
+        If ( $Batch ) {
+            Copy-Item -LiteralPath "${from}" -Destination "${to}"
+        }
+        Else {
+            Try {
+                Start-BitsTransfer -Source "${from}" -Destination "${to}" -Description "$direction to $to" -DisplayName "Copy from $from" -ErrorAction Stop
+            }
+            Catch {
+                Write-Error "Start-BitsTransfer raised an exception"
+            }
         }
     }
 
-    if ( -Not ( Test-Path -LiteralPath "${to}" ) ) {
+    If ( -Not ( Test-Path -LiteralPath "${to}" ) ) {
         Write-Error "Attempting to fall back to Copy-Item"
         Copy-Item -LiteralPath "${from}" -Destination "${to}"
     }
@@ -872,90 +908,16 @@ function Sync-Metadata ($from, $to, $verbose) {
     }
 }
 
-Function Do-Mirror-Directories {
-Param ($From, $to, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
-
-    Write-Progress -Id ($ProgressId + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 20
-
-    $aDirs = Get-ChildItem -Directory -LiteralPath "$From"
-    $N = $aDirs.Count
-    $aDirs | Get-Unmatched-Items -Match "${To}" -OnConsider {
-        Param($File, $Candidate, $DiffLevel, $I);
-        $sFileName = $File.Name
-        Write-Progress -Id ($ProgressId + 3) -Activity "Matching (mkdir): [${From}]" -Status $sFileName -percentComplete (100*$I / $N)
-    } | ForEach {
-        $CopyFrom = $_.FullName
-        $CopyTo = ($_ | Rebase-File -To "${To}")
-
-        Write-Output "${CopyFrom}\\ =>> ${CopyTo}\\"
-        Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
-    }
-    Write-Progress -Id ($ProgressId + 3) -Activity "Matching (mkdir): [${From}]" -Completed
-
-}
-
-Function Do-Mirror-Files {
-Param ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
-
-    Write-Progress -Id ($ProgressId + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 40
-
-    $i = 0
-    $aFiles = ( Get-ChildItem -File -LiteralPath "$From" )
-    $N = $aFiles.Count
-
-    $sProgressActivity = "Matching Files (cp) [${From} => ${To}]"
-    $aFiles = ( $aFiles | Get-Unmatched-Items -Match "${To}" -DiffLevel $DiffLevel -OnConsider {
-        Param($File, $Candidate, $DiffLevel, $I);
-        $sFileName = $File.Name
-        Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Status $sFileName -percentComplete (100*$I / $N)
-    })
-    $N = $aFiles.Count
-
-    $sProgressActivity = "Copying Unmatched Files [${From} => ${To}]"
-    $aFiles | ForEach {
-        $BaseName = $_.Name
-        $CopyFrom = $_.FullName
-        $CopyTo = ($_ | Rebase-File -To "${To}")
-        
-        Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Status "${BaseName}" -percentComplete (100*$i / $N)
-        $i = $i + 1
-
-        Write-Output "${CopyFrom} =>> ${CopyTo}"
-        
-        Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}"
-        
-    }
-    Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Completed
-}
-
-function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
-    $IdBase = (10 * $Depth)
-    If ($Depth -gt 0) {
-        $RootedIdBase = 10
-    }
-    Else {
-        $RootedIdBase = 0
-    }
-
-    ##################################################################################################################
-    ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
-    ##################################################################################################################
-
-    Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 0
-
-    $Level = ("="*$Depth)
-    if ($Depth -gt 0) {
-        $DirLevelHeader = $Level + " " + $From + " " + $Level
-    } else {
-        $DirLevelHeader = ""
-    }
+Function Do-Mirror-Clean-Up-Obsolete-Files {
+Param ($From, $To, $Trashcan, $Depth=0, $ProgressId=0, $NewProgressId=0)
 
     $aDirs = Get-ChildItem -Directory -LiteralPath "$To"
     $N = $aDirs.Count
-    $aDirs | Get-Unmatched-Items -Match "$From" -OnConsider {
+    $aDirs | Get-Unmatched-Items -Match "$From" -DiffLevel 0 -OnConsider {
         Param($File, $Candidate, $DiffLevel, $I);
-        $sFileName = $File.Name
-        Write-Progress -Id ($RootedIdBase + 3) -Activity "Matching (rm): [${To}]" -Status $sFileName -percentComplete (100*$I / $N)
+        If ( -Not $Batch ) {
+            Write-Progress -Id ($NewProgressId + 3) -Activity "Matching (rm): [${To}]" -Status $File.Name -percentComplete (100*$I/$N)
+        }
     } | ForEach {
 
         $BaseName = $_.Name
@@ -970,50 +932,146 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
             Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force
         }
     }
-    Write-Progress -Id ($RootedIdBase + 3) -Activity "Matching (rm): [${To}]" -Completed
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($NewProgressId + 3) -Activity "Matching (rm): [${To}]" -Completed
+    }
+
+}
+
+Function Do-Mirror-Directories {
+Param ($From, $to, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
+
+    $aDirs = Get-ChildItem -Directory -LiteralPath "$From"
+    $N = $aDirs.Count
+    $aDirs | Get-Unmatched-Items -Match "${To}" -DiffLevel 0 -OnConsider {
+        Param($File, $Candidate, $DiffLevel, $I);
+        If ( -Not $Batch ) {
+            $sFileName = $File.Name
+            Write-Progress -Id ($NewProgressId + 3) -Activity "Matching (mkdir): [${From}]" -Status $sFileName -percentComplete (100*$I / $N)
+        }
+    } | ForEach {
+        $CopyFrom = $_.FullName
+        $CopyTo = ($_ | Rebase-File -To "${To}")
+
+        Write-Output "${CopyFrom}\\ =>> ${CopyTo}\\"
+        Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
+    }
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($NewProgressId + 3) -Activity "Matching (mkdir): [${From}]" -Completed
+    }
+}
+
+Function Do-Mirror-Files {
+Param ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
+
+    $i = 0
+    $aFiles = ( Get-ChildItem -File -LiteralPath "$From" )
+    $N = $aFiles.Count
+
+    $sProgressActivity = "Matching Files (cp) [${From} => ${To}]"
+    $aFiles = ( $aFiles | Get-Unmatched-Items -Match "${To}" -DiffLevel $DiffLevel -OnConsider {
+        Param($File, $Candidate, $DiffLevel, $I);
+        If ( -Not $Batch ) {
+            $sFileName = $File.Name
+            Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Status $sFileName -percentComplete (100*$I / $N)
+        }
+    })
+    $N = $aFiles.Count
+
+    $sProgressActivity = "Copying Unmatched Files [${From} => ${To}]"
+    $aFiles | ForEach {
+        $BaseName = $_.Name
+        $CopyFrom = $_.FullName
+        $CopyTo = ($_ | Rebase-File -To "${To}")
+        
+        If ( -Not $Batch ) {
+            Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Status "${BaseName}" -percentComplete (100*$i / $N)
+        }
+        Else {
+            Write-Output "${CopyFrom} =>> ${CopyTo}"
+        }
+        $i = $i + 1
+
+        
+        Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch $Batch
+        
+    }
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Completed
+    }
+}
+
+Function Do-Mirror-Metadata {
+Param( $From, $To, $ProgressId, $NewProgressId )
+
+    $i = 0
+    $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" -DiffLevel 0 )
+    $N = $aFiles.Count
+
+    $aFiles | ForEach  {
+        $CopyFrom = $_.FullName
+        $CopyTo = ($_ | Rebase-File -To "${To}")
+
+        If ( -Not $Batch ) {
+            Write-Progress -Id ($NewProgressId + 1) -Activity "Synchronizing metadata [${From}]" -Status $_.Name -percentComplete (100*$i / $N)
+        }
+        $i = $i + 1
+
+        Do-Reset-Metadata -from "${CopyFrom}" -to "${CopyTo}" -verbose $false        
+    }
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($NewProgressId + 1) -Activity "Synchronizing metadata [${From}]" -Completed
+    }
+}
+
+function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
+    $IdBase = (10 * $Depth)
+    If ($Depth -gt 0) {
+        $RootedIdBase = 0
+    }
+    Else {
+        $RootedIdBase = 0
+    }
+
+    $sActScanning = "Scanning contents: [${From}]"
+    $sStatus = "*.*"
+
+    ##################################################################################################################
+    ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
+    ##################################################################################################################
+
+    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (rm)" -percentComplete 0
+    Do-Mirror-Clean-Up-Obsolete-Files -From $From -To $To -Trashcan $Trashcan -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## COPY OVER (mkdir): Create child directories on destination to mirror subdirectories of source. ################
     ##################################################################################################################
 
+    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (mkdir)" -percentComplete 20
     Do-Mirror-Directories -From $From -To $To -Trashcan $Trashcan -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
     ##################################################################################################################
 
+    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (cp)" -percentComplete 40
     Do-Mirror-Files -From $From -To $To -Trashcan $Trashcan -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## METADATA: Synchronize source file system meta-data to destination #############################################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 60
-
-    $i = 0
-    $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" )
-    $N = $aFiles.Count
-
-   $aFiles | ForEach  {
-        $BaseName = $_.Name
-        $CopyFrom = $_.FullName
-        $CopyTo = ($_ | Rebase-File -To "${To}")
-
-        Write-Progress -Id ($IdBase + 1) -Activity "Synchronizing metadata [${From}]" -Status "${BaseName}" -percentComplete (100*$i / $N)
-        $i = $i + 1
-
-        Do-Reset-Metadata -from "${CopyFrom}" -to "${CopyTo}" -verbose $false        
-    }
-    Write-Progress -Id ($IdBase + 1) -Activity "Synchronizing metadata [${From}]" -Completed
+    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (meta)" -percentComplete 60
+    Do-Mirror-Metadata -From $From -To $To -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity "Scanning contents: [${From}]" -Status "*.*" -percentComplete 80
+    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (chdir)" -percentComplete 80
 
     $i = 0
-    $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Items -Match "$To" )
+    $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Items -Match "$To" -DiffLevel 0 )
     $N = $aFiles.Count
     
     $aFiles | ForEach {
@@ -1040,6 +1098,7 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
     $N = $Pairs.Count
     $Pairs | ForEach {
         $Pair = $_
+
         if ( $mirrors.ContainsKey($Pair) ) {
             $locations = $mirrors[$Pair]
 
@@ -1063,11 +1122,16 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
                 $src = $locations[2]
                 $dest = $locations[1]
 
-                if ( $slug -eq $Pair ) {
+                If ( $slug -eq $Pair ) {
                     $recurseInto += @( $subPair )
                 }
             }
-            Do-Mirror-Repositories -Pairs $recurseInto -DiffLevel $DiffLevel
+            If ( $recurseInto.Count -gt 0 ) {
+                Do-Mirror-Repositories -Pairs $recurseInto -DiffLevel $DiffLevel
+            }
+            Else {
+                Write-Host "No such repository: ${Pair}."
+            }
         } # if
         $i = $i + 1
     }
@@ -1525,7 +1589,7 @@ if ( $Help -eq $true ) {
             $Words = @( )
         }
 
-        $DiffLevel = 1
+        $DiffLevel = 0
         if ($Diff) {
             $DiffLevel = 2
         }
