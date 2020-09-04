@@ -11,7 +11,7 @@ param (
 
 # coldstorage
 #
-# Last-Modified: 25 Sextilis 2020
+# Last-Modified: 4 September 2020
 
 Import-Module BitsTransfer
 
@@ -116,13 +116,18 @@ Function ColdStorage-Script-Dir () {
 
 Function ColdStorage-Settings-File () {
     $JsonDir = ( ColdStorage-Script-Dir ).FullName
-    $JsonPath = "${JsonDir}\settings.json"
-    If ( Test-Path -LiteralPath $JsonPath ) {
-        $File = (Get-Item -Force -LiteralPath $JsonPath)
+
+    $paths = "${JsonDir}\settings-${env:COMPUTERNAME}.json", "${JsonDir}\settings.json"
+    
+    $File = $null
+    $paths | % {
+        If ( $File -eq $null ) {
+            If ( Test-Path -LiteralPath $_ ) {
+                $File = (Get-Item -Force -LiteralPath $_)
+            }
+        }
     }
-    Else {
-        $File = $null
-    }
+
     return $File
 }
 
