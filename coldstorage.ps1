@@ -464,7 +464,7 @@ function Do-Bag-ERInstance ($DIRNAME) {
     Write-Output ""
     Write-Output "BagIt: ${PWD}"
     $BagIt = Get-BagIt-Path
-    & python.exe "${BagIt}\bagit.py" . 2>&1 | Write-Output
+    ( python.exe "${BagIt}\bagit.py" . 2>&1 ) | Write-Output
 
     chdir $Anchor
 }
