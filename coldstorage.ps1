@@ -1,6 +1,7 @@
 ﻿<#
 .Description
-Sync files to or from the ColdStorage server.
+coldstorage.ps1 mirror: Sync files to or from the ColdStorage server.
+coldstorage.ps1 validate: Validate BagIt-formatted preservation packages
 #>
 param (
     [switch] $Help = $false,
