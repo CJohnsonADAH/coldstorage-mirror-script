@@ -833,7 +833,7 @@ Param( $LiteralPath=$null, $Path=$null )
             $Item
         }
         ElseIf ( -Not ( Is-Indexed-Directory -File $Item ) ) {
-            Get-Bagged-Child-Items -LiteralPath $_.FullName
+            Get-Bagged-ChildItem -LiteralPath $_.FullName
         }
     }
 
