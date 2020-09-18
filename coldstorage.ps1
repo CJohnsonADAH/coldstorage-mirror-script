@@ -1128,6 +1128,8 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
 
 function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
 
+    $Pairs = ($Pairs | % { If ( $_.Length -gt 0 ) { $_ -split "," } })
+
     if ( $Pairs.Count -lt 1 ) {
         $Pairs = $mirrors.Keys
     }
