@@ -7,12 +7,13 @@ param (
     [switch] $Help = $false,
     [switch] $Quiet = $false,
     [switch] $Diff = $false,
-	[switch] $Batch = $false
+	[switch] $Batch = $false,
+    [switch] $Items = $false
 )
 
 # coldstorage
 #
-# Last-Modified: 4 September 2020
+# Last-Modified: 10 September 2020
 
 Import-Module BitsTransfer
 
@@ -1489,17 +1490,19 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
 
     $BagIt = Get-BagIt-Path
     If ( $Verbose ) {
-        & python.exe "${BagIt}\bagit.py" --validate . | Write-Host
+        & python.exe "${BagIt}\bagit.py" --validate . | Write-Output
     }
     Else {
-        & python.exe "${BagIt}\bagit.py" --validate --quiet . 2>&1 | Write-Host
+        $Output = ( & python.exe "${BagIt}\bagit.py" --validate . 2>&1 )
         $NotOK = $LastExitCode
 
         if ( $NotOK -gt 0 ) {
-            Do-Bleep-Bloop
-            & python.exe "${BagIt}\bagit.py" --validate . | Write-Host
+            #Do-Bleep-Bloop
+            $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
+            "ERR-BagIt: ${DIRNAME}", $Output | Write-Warning
+            $ErrorView = $OldErrorView
         } else {
-            Write-Output "OK-BagIt: ${DIRNAME}"
+            "OK-BagIt: ${DIRNAME}" # > stdout
         }
     }
     chdir $Anchor
@@ -1617,11 +1620,21 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false) {
             $EnteredRange = $false
             $ExitedRange = $false
 
-            Get-Content $MapFile | % {
+            $MapLines = Get-Content $MapFile
+            $nTotal = $MapLines.Count
+            $nGlanced = 0
+            $nChecked = 0
+            $nValidated = 0
+            $MapLines | % {
+                $nGlanced = $nGlanced + 1
+                $BagPathLeaf = (Split-Path -Leaf $_)
+                Write-Progress -Id 101 -Activity "Validating ${nTotal} BagIt directories in ${Pair}" -Status ("#${nGlanced}. Considering: ${BagPathLeaf}") -percentComplete (100*$nGlanced/$nTotal)
+
                 If ( -Not $EnteredRange ) {
                     $EnteredRange = ( $BagRange[0] -eq $_ )
                 }
-                Else {
+                
+                If ( $EnteredRange ) {
                     If ( -Not $ExitedRange ) {
                         $ExitedRange = ( $BagRange[1] -eq $_ )
                     }
@@ -1632,11 +1645,24 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false) {
                         $BagRange > $BookmarkFile
                                 
                         $BagPath = Get-File-Literal-Path -File $_
-                        Do-Validate-Bag -DIRNAME $BagPath -Verbose:$Verbose
+                        Write-Progress -Id 101 -Activity "Validating ${nTotal} BagIt directories in ${Pair}" -Status ("#${nGlanced}. Validating: ${BagPathLeaf}") -percentComplete (100*$nGlanced/$nTotal)
+                        $Validated = ( Do-Validate-Bag -DIRNAME $BagPath -Verbose:$Verbose )
 
+                        $nChecked = $nChecked + 1
+                        $nValidated = $nValidated + $Validated.Count
+
+                        $Validated # > stdout
                     }
 
                 }
+            }
+            Write-Progress -Id 101 -Activity "Validating ${nTotal} BagIt directories in ${Pair}" -Completd
+
+            "${nValidated}/${nChecked} BagIt packages validated OK." # > stdout
+
+            $nValidationFailed = ($nChecked - $nValidated)
+            If ( $nValidationFailed -gt 0 ) {
+                Write-Warning "${nValidationFailed}/${nChecked} BagIt packages failed validation!" # > stdwarn
             }
             $CompletedMap = $true
 
@@ -1739,7 +1765,24 @@ if ( $Help -eq $true ) {
         if ( $N -gt 0 ) {
             $Words = $args[1 .. $N]
         }
-        Do-Validate -Pairs $Words
+
+        If ( $Items ) {
+            $nChecked = 0
+            $nValidated = 0
+            $Words | Get-Item -Force | Select-BagIt-Formatted-Directories | % {
+                $Validated = ( Do-Validate-Bag -DIRNAME $_ -Verbose:$Verbose  )
+
+                $nChecked = $nChecked + 1
+                $nValidated = $nValidated + $Validated.Count
+
+                $Validated # > stdout
+            }
+
+            "Validation: ${nValidated} / ${nChecked} validated OK."
+        }
+        Else {
+            Do-Validate -Pairs $Words
+        }
     }
     ElseIf ( $verb -eq "bag" ) {
         $Words = @( )
@@ -1748,7 +1791,13 @@ if ( $Help -eq $true ) {
         if ( $N -gt 0 ) {
             $Words = $args[1 .. $N]
         }
-        Do-Bag -Pairs $Words
+
+        If ( $Items ) {
+            $Words | Get-Item -Force | Do-Clear-And-Bag 
+        }
+        Else {
+            Do-Bag -Pairs $Words
+        }
     }
     ElseIf ( $verb -eq "index" ) {
         if ( $N -gt 0 ) {
