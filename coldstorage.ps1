@@ -460,10 +460,10 @@ function Do-Bag-ERInstance ($DIRNAME) {
     $Anchor = $PWD
     chdir $DIRNAME
 
-    Write-Host ""
-    Write-Host "BagIt: ${PWD}"
+    Write-Output ""
+    Write-Output "BagIt: ${PWD}"
     $BagIt = Get-BagIt-Path
-    & python.exe "${BagIt}\bagit.py" . 2>&1 | Write-Host
+    & python.exe "${BagIt}\bagit.py" . 2>&1 | Write-Output
 
     chdir $Anchor
 }
@@ -710,7 +710,7 @@ Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
 			If ( $oTo -ne $null ) {
 				$RightLength = $oTo.Length
 			}
-			If ($Verbose) { Write-Host "Length comparison: ${LeftLength} vs. ${RightLength}" }
+			If ($Verbose) { Write-Output "Length comparison: ${LeftLength} vs. ${RightLength}" }
 			$Differentiated=($Differentiated -or ( $LeftLength -ne $RightLength ))
 		}
 
@@ -727,7 +727,7 @@ Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
 			If ( $sTo -ne $null ) {
 				$RightHash = (Get-FileHash -LiteralPath $sTo).hash
 			}
-			If ($Verbose) { Write-Host "Hash comparison: ${LeftHash} vs. ${RightHash}" }
+			If ($Verbose) { Write-Output "Hash comparison: ${LeftHash} vs. ${RightHash}" }
 			$Differentiated=($Differentiated -or ( $LeftHash -ne $RightHash))
         }
     }
@@ -1137,7 +1137,7 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
                 Do-Mirror-Repositories -Pairs $recurseInto -DiffLevel $DiffLevel
             }
             Else {
-                Write-Host "No such repository: ${Pair}."
+                Write-Output "No such repository: ${Pair}."
             }
         } # if
         $i = $i + 1
@@ -1438,9 +1438,9 @@ param (
     Begin { }
 
     Process {
-        Write-Host "ClamAV Scan: ${Path}" -InformationAction Continue
+        Write-Output "ClamAV Scan: ${Path}" -InformationAction Continue
         $ClamAV = Get-ClamAV-Path
-        & "${ClamAV}\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Host
+        & "${ClamAV}\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Output
         if ( $LastExitCode -ne 0 ) {
             $LastExitCode
         }
@@ -1579,7 +1579,7 @@ function Do-Rsync ($Pairs=$null, $DiffLevel=0) {
 function Do-Write-Usage ($cmd) {
     $Pairs = ( $mirrors.Keys -Join "|" )
 
-    Write-Host "Usage: $cmd mirror [$Pairs]"
+    Write-Output "Usage: $cmd mirror [$Pairs]"
 }
 
 if ( $Help -eq $true ) {
