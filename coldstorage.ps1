@@ -15,6 +15,7 @@ coldstorage.ps1 validate: Validate BagIt-formatted preservation packages
 param (
     [switch] $Help = $false,
     [switch] $Quiet = $false,
+    [switch] $Verbose = $false,
     [switch] $Diff = $false,
 	[switch] $Batch = $false,
     [switch] $Items = $false
@@ -57,6 +58,10 @@ function Do-Bleep-Bloop () {
     [console]::beep(440,275) ##a
 }
 
+Function Get-Command-With-Verb {
+    $sCommandWithVerb
+}
+
 function Rebase-File {
     [CmdletBinding()]
 
@@ -91,7 +96,7 @@ Function Get-File-Object ( $File ) {
         $oFile = $File
     }
 
-    return $oFile
+    $oFile
 }
 
 Function Get-File-Literal-Path {
@@ -113,7 +118,7 @@ Param($File)
 		$sFile = $oFile.FullName
 	}
 	
-	return $sFile
+	$sFile
 }
 
 #############################################################################################################
@@ -122,7 +127,8 @@ Param($File)
 
 Function ColdStorage-Script-Dir () {
     $ScriptPath = ( Split-Path -Parent $PSCommandPath )
-    return (Get-Item -Force -LiteralPath $ScriptPath)
+    
+    Get-Item -Force -LiteralPath $ScriptPath
 }
 
 Function ColdStorage-Settings-File () {
@@ -139,7 +145,7 @@ Function ColdStorage-Settings-File () {
         }
     }
 
-    return $File
+    $File
 }
 
 Function ColdStorage-Settings-Defaults {
@@ -289,7 +295,8 @@ function Is-Loose-File ( $File ) {
             }
         }
     }
-    return $result
+    
+    $result
 }
 
 function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
@@ -303,7 +310,8 @@ function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
             $result = $true
         }
     }
-    return $result
+    
+    $result
 }
 
 function Select-Bagged-Copies-of-Loose-Files {
@@ -367,7 +375,7 @@ function Get-Bagged-Copy-of-Loose-File ( $File ) {
         }
     }
 
-    return $result
+    $result
 }
 
 function Is-Unbagged-Loose-File ( $File ) {
@@ -385,11 +393,14 @@ function Is-Unbagged-Loose-File ( $File ) {
             }
         }
     }
-    return $result
+    
+    $result
 }
 
 
 function Do-Bag-Loose-File ($LiteralPath) {
+    $cmd = Get-Command-With-Verb
+
     $Anchor = $PWD
 
     $Item = Get-Item -Force -LiteralPath $LiteralPath
@@ -409,7 +420,7 @@ function Do-Bag-Loose-File ($LiteralPath) {
     if ( $LastExitCode -eq 0 ) {
         $NewFilePath = "${BagDir}\data\${OriginalFileName}"
         if ( Test-Path -LiteralPath "${NewFilePath}" ) {
-            New-Item -ItemType HardLink -Path $OriginalFullName -Target $NewFilePath
+            New-Item -ItemType HardLink -Path $OriginalFullName -Target $NewFilePath | %{ "[$cmd] Bagged ${BagDir}, created link to payload: $_" }
 	        
             Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
             Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
@@ -428,7 +439,8 @@ function Is-ER-Instance-Directory ( $File ) {
         $BaseName = $File.Name
         $result = ($BaseName -match "^[A-Za-z0-9]{2,3}_ER")
     }
-    return $result
+    
+    $result
 }
 
 function Select-ER-Instance-Directories () {
@@ -460,21 +472,30 @@ Process {
     }
     $ERMeta.ERCode = ( "{0}-{1}-{2}" -f $ERMeta.ERType, $ERMeta.ERCreator, $ERMeta.ERCreatorInstance )
 
-    return $ERMeta
+    $ERMeta
 }
 
 End { }
 }
 
-function Do-Bag-ERInstance ($DIRNAME) {
+Function Do-Bag-ERInstance ($DIRNAME, [switch] $Verbose=$false) {
 
     $Anchor = $PWD
     chdir $DIRNAME
 
-    Write-Output ""
-    Write-Output "BagIt: ${PWD}"
+    "PS ${PWD}> bagit.py ." | Write-Verbose
+    
     $BagIt = Get-BagIt-Path
-    ( python.exe "${BagIt}\bagit.py" . 2>&1 ) | Write-Output
+    $Output = ( & python.exe "${BagIt}\bagit.py" . 2>&1 )
+    $NotOK = $LASTEXITCODE
+
+    If ( $NotOK -gt 0 ) {
+        "ERR-BagIt: returned ${NotOK}" | Write-Verbose
+        $Output | Write-Error
+    }
+    Else {
+        $Output 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
+    }
 
     chdir $Anchor
 }
@@ -678,7 +699,8 @@ Param( $File )
         $NewFilePath = "${FilePath}\index.html"
         $result = Test-Path -LiteralPath "${NewFilePath}"
     }
-    return $result
+    
+    $result
 }
 
 function Is-Bagged-Indexed-Directory {
@@ -692,7 +714,8 @@ Param( $File )
         $payloadPath = "${FilePath}\data"
         $result = Is-Indexed-Directory($payloadPath)
     }
-    return $result
+    
+    $result
 }
 
 ############################################################################################################
@@ -746,7 +769,7 @@ Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
 		$Differentiated = ($oTo -ne $null)
 	}
 
-    Return $Differentiated
+    $Differentiated
 }
 
 function Is-Matched-File ($From, $To, $DiffLevel=0) {
@@ -762,7 +785,8 @@ function Is-Matched-File ($From, $To, $DiffLevel=0) {
             $TreatAsMatched = -Not ( Is-Different-File-Content -From $From -To $ObjectFile -DiffLevel $DiffLevel )
         }
     }
-    return $TreatAsMatched
+    
+    $TreatAsMatched
 }
 
 function Get-Unmatched-Items {
@@ -1252,13 +1276,25 @@ param (
             Write-Output "STUBBED: ${File}, indexed." #FIXME
         }
         Else {
-            Write-Output "Check for loosies."
+            Write-Verbose "CHECK: Checking [$File] for unbagged loose files."
             Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
                 If ( Is-Loose-File($_) ) {
                     If ( Is-Unbagged-Loose-File($_) ) {
                         $LooseFile = $_.Name
-                        Write-Output "UNBAGGED: ${LooseFile}, loose."
-                        Do-Bag-Loose-File -LiteralPath $_.FullName
+                        Write-Output "UNBAGGED: ${LooseFile}, loose file. Scan it, bag it and tag it."
+
+                        $NotOK = ( $LooseFile | Do-Scan-ERInstance )
+                        if ( $NotOK.Count -gt 0 ) {
+                            Do-Bleep-Bloop
+                            $ShouldWeContinue = Read-Host "Exit Code ${NotOK}, Continue (Y/N)? "
+                        } else {
+                            $ShouldWeContinue = "Y"
+                        }
+
+                        if ( $ShouldWeContinue -eq "Y" ) {
+                            Do-Bag-Loose-File -LiteralPath $_.FullName
+                        }
+
                     }
                 }
             }
@@ -1481,9 +1517,9 @@ param (
     Begin { }
 
     Process {
-        Write-Output "ClamAV Scan: ${Path}" -InformationAction Continue
+        "ClamAV Scan: ${Path}" | Write-Verbose -InformationAction Continue
         $ClamAV = Get-ClamAV-Path
-        & "${ClamAV}\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Output
+        & "${ClamAV}\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" | Write-Verbose
         if ( $LastExitCode -ne 0 ) {
             $LastExitCode
         }
@@ -1499,16 +1535,19 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
 
     $BagIt = Get-BagIt-Path
     If ( $Verbose ) {
-        & python.exe "${BagIt}\bagit.py" --validate . | Write-Output
+        "bagit.py --validate ${DIRNAME}" | Write-Verbose
+        & python.exe "${BagIt}\bagit.py" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
     }
     Else {
         $Output = ( & python.exe "${BagIt}\bagit.py" --validate . 2>&1 )
         $NotOK = $LastExitCode
 
         if ( $NotOK -gt 0 ) {
-            #Do-Bleep-Bloop
             $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
-            "ERR-BagIt: ${DIRNAME}", $Output | Write-Warning
+            
+            "ERR-BagIt: ${DIRNAME}" | Write-Warning
+            $Output |% { "$_" -replace "[`r`n]","" } | Write-Warning
+
             $ErrorView = $OldErrorView
         } else {
             "OK-BagIt: ${DIRNAME}" # > stdout
@@ -1737,11 +1776,18 @@ function Do-Write-Usage ($cmd) {
     Write-Output "Usage: `t$cmd mirror [-Batch] [-Diff] [$Pairs]","       `t$cmd bag [$Pairs]","       `t$cmd validate [$Pairs]"
 }
 
+$sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
+
+If ( $Verbose ) {
+    $VerbosePreference = "Continue"
+}
+
 if ( $Help -eq $true ) {
     Do-Write-Usage -cmd $MyInvocation.MyCommand
 } else {
     $verb = $args[0]
     $t0 = date
+    $sCommandWithVerb = "${sCommandWithVerb} ${verb}"
     
     If ( $verb -eq "mirror" ) {
         $N = ( $args.Count - 1 )
