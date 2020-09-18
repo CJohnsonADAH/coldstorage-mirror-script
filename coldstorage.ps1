@@ -1496,7 +1496,7 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
             Do-Bleep-Bloop
             & python.exe "${BagIt}\bagit.py" --validate . | Write-Host
         } else {
-            Write-Host "OK-BagIt: ${DIRNAME}"
+            Write-Output "OK-BagIt: ${DIRNAME}"
         }
     }
     chdir $Anchor
