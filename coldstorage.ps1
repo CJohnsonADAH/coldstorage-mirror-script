@@ -1734,7 +1734,7 @@ function Do-Rsync ($Pairs=$null, $DiffLevel=0) {
 function Do-Write-Usage ($cmd) {
     $Pairs = ( $mirrors.Keys -Join "|" )
 
-    Write-Output "Usage: $cmd mirror [$Pairs]"
+    Write-Output "Usage: `t$cmd mirror [-Batch] [-Diff] [$Pairs]","       `t$cmd bag [$Pairs]","       `t$cmd validate [$Pairs]"
 }
 
 if ( $Help -eq $true ) {
