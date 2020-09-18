@@ -815,10 +815,40 @@ function Get-Matched-Items {
    End {}
 }
 
+Function Get-Bagged-ChildItem {
+Param( $LiteralPath=$null, $Path=$null )
+
+    If ( $LiteralPath -ne $null ) {
+        $Items = Get-ChildItem -LiteralPath $LiteralPath -Directory
+    }
+    Else {
+        $Items = Get-ChildItem -Path $Path -Directory
+    }
+
+    $Items | % {
+        $Item = Get-File-Object -File $_
+
+        If ( Is-BagIt-Formatted-Directory $Item ) {
+            $Item
+        }
+        ElseIf ( -Not ( Is-Indexed-Directory -File $Item ) ) {
+            Get-Bagged-Child-Items -LiteralPath $_.FullName
+        }
+    }
+
+}
 
 #############################################################################################################
 ## COMMAND FUNCTIONS ########################################################################################
 #############################################################################################################
+
+Function Do-Make-Bagged-ChildItem-Map {
+Param( $LiteralPath=$null, $Path=$null)
+
+    Get-Bagged-ChildItem -LiteralPath $LiteralPath -Path $Path | % {
+        $_.FullName
+    }
+}
 
 Function Do-Copy-Snapshot-File ($from, $to, $direction="over", $Batch=$false, [switch] $ReadOnly=$false) {
     $o1 = ( Get-Item -Force -LiteralPath "${from}" )
@@ -852,7 +882,7 @@ Function Do-Copy-Snapshot-File ($from, $to, $direction="over", $Batch=$false, [s
     }
 }
 
-function Do-Reset-Metadata ($from, $to, $verbose) {
+function Do-Reset-Metadata ($from, $to, [switch] $Verbose) {
     
     if (Test-Path -LiteralPath $from) {
         $oFrom = (Get-Item -Force -LiteralPath $from)
@@ -911,7 +941,7 @@ function Sync-Metadata ($from, $to, $verbose) {
         $DestinationTargetPath = "${to}\${LocalSrcDirRelPath}${Basename}"
 
         Set-Location $LocalSrcDir
-        Do-Reset-Metadata $_.FullName $DestinationTargetPath $verbose
+        Do-Reset-Metadata -from $_.FullName -to $DestinationTargetPath -Verbose:$verbose
     }
 }
 
@@ -1024,7 +1054,7 @@ Param( $From, $To, $ProgressId, $NewProgressId )
         }
         $i = $i + 1
 
-        Do-Reset-Metadata -from "${CopyFrom}" -to "${CopyTo}" -verbose $false        
+        Do-Reset-Metadata -from "${CopyFrom}" -to "${CopyTo}" -Verbose:$false
     }
     If ( -Not $Batch ) {
         Write-Progress -Id ($NewProgressId + 1) -Activity "Synchronizing metadata [${From}]" -Completed
@@ -1548,6 +1578,93 @@ function Do-Check ($Pairs=$null) {
 
 }
 
+Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false) {
+    If ( $Pairs.Count -lt 1 ) {
+        $Pairs = $mirrors.Keys
+    }
+
+    $i = 0
+    $N = $Pairs.Count
+    $Pairs | ForEach {
+        $Pair = $_
+        if ( $mirrors.ContainsKey($Pair) ) {
+            $locations = $mirrors[$Pair]
+
+            $slug = $locations[0]
+            $src = $locations[2]
+            $dest = $locations[1]
+
+            $MapFile = "${src}\validate-bags.map.txt"
+            $BookmarkFile = "${src}\validate-bags.bookmark.txt"
+
+            If ( -Not ( Test-Path -LiteralPath $MapFile ) ) {
+                Do-Make-Bagged-ChildItem-Map $src > $MapFile
+            }
+            
+            If ( -Not ( Test-Path -LiteralPath $BookmarkFile ) ) {
+                $BagRange = @( Get-Content $MapFile -First 1 )
+                $BagRange += $BagRange[0]
+                $BagRange > $BookmarkFile
+            }
+            Else {
+                $BagRange = ( Get-Content $BookmarkFile )
+            }
+
+            $CompletedMap = $false
+            $EnteredRange = $false
+            $ExitedRange = $false
+
+            Get-Content $MapFile | % {
+                If ( -Not $EnteredRange ) {
+                    $EnteredRange = ( $BagRange[0] -eq $_ )
+                }
+                Else {
+                    If ( -Not $ExitedRange ) {
+                        $ExitedRange = ( $BagRange[1] -eq $_ )
+                    }
+
+                    If ( $ExitedRange ) {
+
+                        $BagRange[1] = $_
+                        $BagRange > $BookmarkFile
+                                
+                        $BagPath = Get-File-Literal-Path -File $_
+                        Do-Validate-Bag -DIRNAME $BagPath -Verbose:$Verbose
+
+                    }
+
+                }
+            }
+            $CompletedMap = $true
+
+            If ( $CompletedMap ) {
+                Remove-Item -LiteralPath $MapFile -Verbose:$Verbose
+                Remove-Item -LiteralPath $BookmarkFile -Verbose:$Verbose
+            }
+
+        } else {
+            $recurseInto = @( )
+            $mirrors.Keys | ForEach {
+                $subPair = $_
+                $locations = $mirrors[$subPair]
+                $slug = $locations[0]
+                $src = $locations[2]
+                $dest = $locations[1]
+        
+                if ( $slug -eq $Pair ) {
+                    $recurseInto += @( $subPair )
+                }
+            }
+            If ( $recurseInto.Count -gt 0 ) {
+                Do-Validate -Pairs $recurseInto
+            }
+        } # if
+
+        $i = $i + 1
+    }
+
+}
+
 function Do-Rsync ($Pairs=$null, $DiffLevel=0) {
     
     if ( $Pairs.Count -lt 1 ) {
@@ -1611,6 +1728,15 @@ if ( $Help -eq $true ) {
             $Words = $args[1 .. $N]
         }
         Do-Check -Pairs $Words
+    }
+    ElseIf ( $verb -eq "validate" ) {
+        $Words = @( )
+
+        $N = ( $args.Count - 1 )
+        if ( $N -gt 0 ) {
+            $Words = $args[1 .. $N]
+        }
+        Do-Validate -Pairs $Words
     }
     ElseIf ( $verb -eq "bag" ) {
         $Words = @( )
