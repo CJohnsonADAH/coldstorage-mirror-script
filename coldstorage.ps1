@@ -1,5 +1,14 @@
 ﻿<#
-.Description
+.SYNOPSIS
+ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
+
+.PARAMETER Diff
+coldstorage.ps1 mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
+
+.PARAMETER Batch
+coldstorage.ps1 mirror -Batch formats output for log files and channels it to easily redirectable stdout, error and warning output streams. Ideal for tasks run from Task Scheduler.
+
+.DESCRIPTION
 coldstorage.ps1 mirror: Sync files to or from the ColdStorage server.
 coldstorage.ps1 validate: Validate BagIt-formatted preservation packages
 #>
@@ -13,7 +22,7 @@ param (
 
 # coldstorage
 #
-# Last-Modified: 10 September 2020
+# Last-Modified: 18 September 2020
 
 Import-Module BitsTransfer
 
@@ -1509,7 +1518,7 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
 }
 
 function Do-Bag-Repo-Dirs ($Pair, $From, $To) {
-    $Anchor = $PWD
+    $Anchor = $PWD 
 
     chdir $From
     dir -Attributes Directory | Do-Clear-And-Bag -Quiet -Exclude $null
