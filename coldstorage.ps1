@@ -180,11 +180,12 @@ Param($File)
     $oFile = Get-File-Object -File $File
     If ( $oFile ) {
         If ( Get-Member -InputObject $oFile -name "Directory" -MemberType Properties ) {
-            $oFile.Directory
+            $oLoc = ( $oFile.Directory | Add-Member -Force -NotePropertyMembers @{Leaf=( $oFile.Name ); Location=( $oFile.Directory.FullName ); RelativePath=@( $oFile.Directory.Name, $oFile.Name ) } -PassThru )
         }
         Else {
-            $oFile
+            $oLoc = ( $oFile | Add-Member -Force -NotePropertyMembers @{Leaf="."; Location=( $oFile.FullName ); RelativePath=@( $oFile.Name ) } -PassThru )
         }
+        $oLoc
     }
 }
 
@@ -211,7 +212,7 @@ Param($File)
 }
 
 Function Get-File-Repository-Candidates {
-Param ( $Key )
+Param ( $Key, [switch] $UNC=$false )
 
     $repo = $mirrors[$Key]
 
@@ -222,15 +223,17 @@ Param ( $Key )
         $sTestRepo # > stdout
 
         $sLocalTestRepo = ( $oTestRepo | Resolve-UNC-Path-To-Local-If-Local ).FullName
-        If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
-            $sLocalTestRepo # > stdout
+        If ( -Not ( $UNC ) ) {
+            If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
+                $sLocalTestRepo # > stdout
+            }
         }
     }
 
 }
 
 Function Get-File-Repository {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Slug=$false )
 
 Begin { }
 
@@ -239,17 +242,29 @@ Process {
     # get self if $File is a directory, parent if it is a leaf node
     $oDir = ( Get-File-FileSystem-Location $File | Resolve-UNC-Path -ReturnObject )
 
-    $oRepos = ( $mirrors.Keys |% { $oCands = ( Get-File-Repository-Candidates -Key $_ ); ($oCands -ieq $oDir.FullName) } )
+    $oRepos = ( $mirrors.Keys |% { $sKey = $_; $oCands = ( Get-File-Repository-Candidates -Key $_ ); If ($oCands -ieq $oDir.FullName) {
+        If ($Slug) { $sKey }
+        Else { $oDir.FullName }
+    } } )
 
     $oRepos
     If ( ( $oRepos.Count -lt 1 ) -and ( $oDir.Parent ) ) {
-        $oDir.Parent | Get-File-Repository        
+        $oDir.Parent | Get-File-Repository -Slug:$Slug
     }
 
 }
 
 End { }
 
+}
+
+Function Get-Trashcan-Location {
+Param ( $Repository )
+
+    $location = $mirrors[$Repository]
+    $slug = $location[0]
+
+    "${ColdStorageBackup}\${slug}_${Repository}"
 }
 
 #############################################################################################################
@@ -349,6 +364,10 @@ function Get-BagIt-Path () {
     return ( ColdStorage-Settings("BagIt") | ColdStorage-Settings-ToFilePath )
 }
 
+Function Get-7z-Path () {
+    return ( ColdStorage-Settings("7za") | ColdStorage-Settings-ToFilePath )
+}
+
 Function ColdStorage-Command-Line {
 Param( [Parameter(ValueFromPipeline=$true)] $Parameter, $Default )
 
@@ -369,6 +388,18 @@ End {
     }
 }
 
+}
+
+Function Compress-Archive-7z {
+Param ( [switch] $WhatIf=$false, $LiteralPath, $DestinationPath )
+
+    $ZipExePath = Get-7z-Path
+    $ZipExe = "${ZipExePath}\7za.exe"
+    $add = "a"
+    $zip = "-tzip"
+    $batch = "-y"
+
+    ( & "${ZipExe}" "${add}" "${zip}" "${batch}" "${DestinationPath}" "${LiteralPath}" ) | Write-Host
 }
 
 #############################################################################################################
@@ -404,16 +435,30 @@ Process { if ( Is-BagIt-Formatted-Directory($File) ) { $File } }
 End { }
 }
 
-function Select-BagIt-Payload () {
+Function Select-BagIt-Payload-Directory {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 Begin { }
 
 Process {
-    if ( Is-BagIt-Formatted-Directory($File) ) {
-        $oFile = Get-File-Object($File)
-        $payloadPath = $oFile.FullName + "\data"
-        Get-ChildItem -Force -Recurse -LiteralPath "${payloadPath}"
+    $oFile = Get-File-Object($File)
+    $sPath = $oFile.FullName
+    Get-Item -Force -LiteralPath "${sPath}\data"
+}
+
+End { }
+
+}
+
+function Select-BagIt-Payload {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    $File | Select-BagIt-Payload-Directory |% {
+        $sPath = $_.FullName
+        Get-ChildItem -Force -Recurse -LiteralPath "${sPath}"
     }
 }
 
@@ -426,13 +471,18 @@ End { }
 #############################################################################################################
 
 Function Get-Bagged-Item-Notice {
-Param ( $Prefix, $FileName, $ERCode=$null, $Suffix=$null )
+Param ( $Prefix, $FileName, $ERCode=$null, $Zip=$false, $Suffix=$null )
     $LogMesg = "${Prefix}: " 
 
     If ( $ERCode -ne $null ) {
         $LogMesg += "${ERCode}, "
     }
     $LogMesg += $FileName
+
+    If ( $Zip ) {
+        $sZip = $Zip.Name
+        $LogMesg += " (ZIP=${sZip})"
+    }
 
     If ( $Suffix -ne $null ) {
         If ( $Suffix -notmatch "^\s+" ) {
@@ -446,19 +496,29 @@ Param ( $Prefix, $FileName, $ERCode=$null, $Suffix=$null )
 }
 
 Function Write-Bagged-Item-Notice {
-Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
+Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, $Zip=$false, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
 
     $Prefix = "BAGGED"
     If ( $Status -ne $null ) {
         $Prefix = $Status
     }
+
+    If ( $Prefix -like "BAG*" ) {
+        If ( $Zip ) {
+            $Prefix = "BAG/ZIP"
+        }
+    }
+
     If ( ( $Debug ) -and ( $Line -ne $null ) ) {
         $Prefix = "${Prefix}:${Line}"
     }
 
-    $LogMesg = (Get-Bagged-Item-Notice -Prefix $Prefix -FileName $FileName -ERCode $ERCode -Suffix $Message)
+    $LogMesg = (Get-Bagged-Item-Notice -Prefix $Prefix -FileName $FileName -ERCode $ERCode -Zip $Zip -Suffix $Message)
 
-    If ( $Verbose ) {
+    If ( $Zip -eq $null ) { # a ZIP package was expected, but was not found.
+        Write-Warning $LogMesg
+    }
+    ElseIf ( $Verbose ) {
         Write-Verbose $LogMesg
     }
     ElseIf ( $Quiet -eq $false ) {
@@ -744,6 +804,30 @@ End { }
 ## ZIP ###############################################################################################
 ######################################################################################################
 
+
+Function ColdStorage-Location {
+Param ( $Repository )
+
+    $aRepo = $mirrors[$Repository]
+
+    If ( ( $aRepo[1] -Like "${ColdStorageER}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageDA}\*" ) ) {
+        $aRepo[1]
+    }
+    Else {
+        $aRepo[2]
+    }
+}
+
+Function ColdStorage-Zip-Location {
+Param ( $Repository )
+
+    $BaseDir = ColdStorage-Location -Repository $Repository
+
+    If ( Test-Path -LiteralPath "${BaseDir}\ZIP" ) {
+        Get-Item -Force -LiteralPath "${BaseDir}\ZIP"
+    }
+}
+
 Function Is-Zipped-Bag {
 
 Param ( $LiteralPath )
@@ -920,6 +1004,11 @@ Process {
 
         if ($ReturnObject) {
             $output = (Get-Item -Force -LiteralPath $output)
+            $File | Get-Member -Type NoteProperty | ForEach-Object {
+                If ( -Not ( $output | Get-Member -Type NoteProperty -Name $_.Name ) ) {
+                    $output | Add-Member -Type NoteProperty -Name $_.Name -Value ( $File | Select -ExpandProperty $_.Name )
+                }
+            }
         }
         $output
     }
@@ -941,6 +1030,10 @@ Begin {
 }
 
 Process {
+    If ( $File -is [string] ) {
+        $File = Get-File-Object($File)
+    }
+
     $Output = $File
 
     If ( $File.PSDrive ) {
@@ -1216,6 +1309,63 @@ function Get-Matched-Items {
    }
 
    End {}
+}
+
+Function Get-Mirror-Matched-Item {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair, [switch] $Original=$false, [switch] $Reflection=$false, $Repositories=$null )
+
+Begin { }
+
+Process {
+    
+    If ( $Original ) {
+        $Range = @(0)
+    }
+    ElseIf ( $Reflection ) {
+        $Range = @(1)
+    }
+    Else {
+        $Range = @(0..1)
+    }
+
+    # get self if $File is a directory, parent if it is a leaf node
+    $oDir = ( Get-File-FileSystem-Location $File | Resolve-UNC-Path -ReturnObject )
+
+    If ( $Repositories.Count -eq 0 ) {
+        $Repositories = ( $mirrors[$Pair][1..2] | Resolve-UNC-Path-To-Local-If-Local |% { $_.FullName } )
+        $Matchable = $Repositories[$Range]
+    }
+
+    $Matched = ( $Matchable -ieq $oDir.FullName )
+    If ( $Matched ) {
+        ($Repositories -ine $oDir.FullName)
+    }
+    ElseIf ( $oDir ) {
+        
+        $Child = ( $oDir.RelativePath -join "\" )
+        $Parent = $oDir.Parent
+        $sParent = $Parent.FullName
+
+        If ( $Parent ) {
+            $sParent = ( $sParent | Get-Mirror-Matched-Item -Pair $Pair -Repositories $Repositories -Original:$Original -Reflection:$Reflection )
+            If ( $sParent.Length -gt 0 ) {
+                $oParent = ( Get-Item -Force -LiteralPath "${sParent}" )
+                $sParent = $oParent.FullName
+            }
+            ((( @($sParent) + $oDir.RelativePath ) -ne $null ) -ne "") -join "\"
+        }
+        Else {
+
+            $oDir.FullName
+
+        }
+        
+    }
+
+}
+
+End { }
+
 }
 
 Function Get-Bagged-ChildItem-Candidates {
@@ -1534,6 +1684,14 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
     $sActScanning = "Scanning contents: [${From}]"
     $sStatus = "*.*"
 
+    $sTo = $To
+    If (Is-BagIt-Formatted-Directory -File $To) {
+        If ( -Not ( Is-BagIt-Formatted-Directory -File $From ) ) {
+            $oPayload = ( Get-File-Object($To) | Select-BagIt-Payload-Directory )
+            $To = $oPayload.FullName
+        }
+    }
+
     ##################################################################################################################
     ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
     ##################################################################################################################
@@ -1605,7 +1763,7 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
             $slug = $locations[0]
             $src = (Get-Item -Force -LiteralPath $locations[2] | Resolve-UNC-Path-To-Local-If-Local ).FullName
             $dest = (Get-Item -Force -LiteralPath $locations[1] | Resolve-UNC-Path-To-Local-If-Local ).FullName
-            $TrashcanLocation = "${ColdStorageBackup}\${slug}_${Pair}"
+            $TrashcanLocation = ( Get-Trashcan-Location -Repository $Pair )
 
             if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
                 mkdir "${TrashcanLocation}"
@@ -1767,13 +1925,16 @@ param (
     $Exclude="^$",
 
     [ScriptBlock]
-    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; Write-Bagged-Item-Notice -FileName $File.FullName -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Verbose -Quiet:$Quiet },
+    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-Zipped-Bag-Of-Bag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
 
     [ScriptBlock]
     $OnDiff={ Param($File, $Payload, $LeftHash, $RightHash, $Quiet); },
 
     [ScriptBlock]
     $OnUnbagged={ Param($File, $Quiet); Write-Unbagged-Item-Notice -FileName $File.FullName -Line ( Get-CurrentLine ) -Quiet:$Quiet },
+
+    [ScriptBlock]
+    $OnZipped={ Param($File, $Quiet); $FilePath = $File.FullName; If ( -Not $Quiet )  { Write-Verbose "ZIP: ${FilePath}" } },
 
     [Parameter(ValueFromPipeline=$true)]
     $File
@@ -1796,7 +1957,11 @@ param (
         $CardBag = ( $File | Bagged-File-Path -Wildcard )
 
         $BagPayload = $null
-        if ( Test-Path -Path $CardBag ) {
+        If ( Is-Zipped-Bag($File) ) {
+            $BagPayload = $File
+            $OnZipped.Invoke($File, $Quiet)
+        }
+        ElseIf ( Test-Path -Path $CardBag ) {
             Dir -Force -Path $CardBag | ForEach {
                 $BagPath = $_
                 $BagData = $BagPath.FullName + "\data"
@@ -1893,7 +2058,8 @@ param (
             If ( -not ( $BaseName -match $Exclude ) ) {
 
                 if ( Is-BagIt-Formatted-Directory($File) ) {
-                    Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                    $oZip = ( Get-Zipped-Bag-Of-Bag -File $File )
+                    Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Zip $oZip -Quiet:$Quiet -Line ( Get-CurrentLine )
 
                 } else {
                     Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
@@ -1907,7 +2073,8 @@ param (
 
         }
         ElseIf ( Is-BagIt-Formatted-Directory($File) ) {
-            Write-Bagged-Item-Notice -FileName $DirName -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+            $oZip = ( Get-Zipped-Bag-Of-Bag -File $File )
+            Write-Bagged-Item-Notice -FileName $DirName -Zip $oZip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
         }
         ElseIf ( Is-Indexed-Directory($File) ) {
             Write-Unbagged-Item-Notice -FileName $DirName -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
@@ -2270,7 +2437,7 @@ Process {
                 $sArchive = "${sRepository}\${sZipName}.zip"
 
                 Write-Progress -Id 101 -Activity "Processing ${sArchiveFile}" -Status "Compressing archive" -PercentComplete 25
-                Compress-Archive -WhatIf:$WhatIf -LiteralPath ${sFile} -DestinationPath ${sArchive}
+                Compress-Archive-7z -WhatIf:$WhatIf -LiteralPath ${sFile} -DestinationPath ${sArchive}
 
                 Write-Progress -Id 101 -Activity "Processing ${sArchiveFile}" -Status "Computing MD5 checksum" -PercentComplete 50
                 If ( -Not $WhatIf ) {
@@ -2310,34 +2477,6 @@ End { }
 
 }
 
-function Do-Rsync ($Pairs=$null, $DiffLevel=0) {
-    
-    if ( $Pairs.Count -lt 1 ) {
-        $Pairs = $mirrors.Keys
-    }
-    
-    $i = 0
-    $N = ($Pairs.Count * 2)
-    $Pairs | ForEach {
-        $Pair = $_
-        $locations = $mirrors[$Pair]
-        
-        $slug = $locations[0]
-        $src = $locations[2]
-        $dest = $locations[1]
-
-        Write-Progress -Id 1137 -Activity "rsync between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-        wsl -- "~/bin/coldstorage/coldstorage-mirror.bash" "${Pair}"
-        $i = $i + 1 # Step 1
-
-        Write-Progress -Id 1137 -Activity "rsync between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-        Do-Mirror-Repositories -Pair "${Pair}" -DiffLevel $DiffLevel
-
-        $i = $i + 1 # Step 2
-    }
-    Write-Progress -Id 1137 -Activity "rsync between ADAHFS servers and ColdStorage" -Completed
-}
-
 function Do-Write-Usage ($cmd) {
     $Pairs = ( $mirrors.Keys -Join "|" )
     $PairedCmds = ("bag", "zip", "validate")
@@ -2371,7 +2510,39 @@ if ( $Help -eq $true ) {
             $DiffLevel = 2
         }
 
-        Do-Mirror-Repositories -Pairs $Words -DiffLevel $DiffLevel
+        If ( $Items ) {
+            $Words |% {
+                $File = Get-File-Object($_)
+                If ( $File ) {
+                    $Repository = ( Get-File-Repository -File $File )
+                    $RepositorySlug = ( Get-File-Repository -File $Repository -Slug )
+                    $TrashcanLocation = ( Get-Trashcan-Location -Repository $RepositorySlug )
+
+                    $Src = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Original )
+                    $Dest = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Reflection )
+
+                    Write-Host "REPOSITORY: ${Repository}", "SLUG: ${RepositorySlug}", "FROM:", $Src, "TO:", $Dest, "TRASHCAN: ${TrashcanLocation}", "DIFF LEVEL: ${DiffLevel}"
+                    if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
+                        mkdir "${TrashcanLocation}"
+                    }
+
+                    Do-Mirror -From "${Src}" -To "${Dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel
+
+                }
+
+                #$locations = $mirrors[$Pair]
+
+                #$slug = $locations[0]
+                #$src = (Get-Item -Force -LiteralPath $locations[2] | Resolve-UNC-Path-To-Local-If-Local ).FullName
+                #$dest = (Get-Item -Force -LiteralPath $locations[1] | Resolve-UNC-Path-To-Local-If-Local ).FullName
+                #$TrashcanLocation = "${ColdStorageBackup}\${slug}_${Pair}"
+
+            }
+        }
+        Else {
+            Do-Mirror-Repositories -Pairs $Words -DiffLevel $DiffLevel
+        }
+
     }
     ElseIf ( $Verb -eq "check" ) {
         $N = ( $Words.Count )
@@ -2429,6 +2600,39 @@ if ( $Help -eq $true ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
             Do-Make-Index-Html -Directory $_
+        }
+    }
+    ElseIf ( $Verb -eq "stats" ) {
+        $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
+        $Words |% {
+
+            Write-Progress -Id 101 -Activity "Scanning ${sRepo}"
+            $sRepo = $_
+
+            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Getting locations" -PercentComplete 0
+
+            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Counting zipped bags" -PercentComplete 50
+
+            $ZipLocation = ( ColdStorage-Zip-Location -Repository $_ )
+            If ( $ZipLocation ) {
+                $nZipped = ( Get-ChildItem -LiteralPath $ZipLocation.FullName ).Count
+            }
+            Else {
+                $nZipped = 0
+            }
+
+            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Counting bags" -PercentComplete 75
+    
+            $Location = ( Get-Item -Force -LiteralPath ( ColdStorage-Location -Repository $_ ) )
+
+            $nBagged = ( Get-Bagged-ChildItem -LiteralPath $Location.FullName ).Count
+
+            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100
+   
+            @{} | Select-Object @{n='Location';e={ $sRepo }}, @{n='Bagged';e={ $nBagged }}, @{n='Zipped';e={ $nZipped }}
+
+            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100 -Completed
+   
         }
     }
     ElseIf ( $Verb -eq "settings" ) {
