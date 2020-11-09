@@ -1832,6 +1832,9 @@ param (
     [String]
     $Exclude="^$",
 
+    [Switch]
+    $Rebag=$false,
+
     [Parameter(ValueFromPipeline=$true)]
     $File
 )
@@ -1875,6 +1878,47 @@ param (
         }
         ElseIf ( Is-BagIt-Formatted-Directory($File) ) {
             Write-Bagged-Item-Notice -FileName $File.Name -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
+            If ( $Rebag ) {
+                $Payload = ( $File | Select-BagIt-Payload-Directory )
+                $Bag = ( $Payload.Parent )
+                
+                $OldManifest = "bagged-${Date}"
+                Write-Verbose "We'll have to rebag it, I spose."
+
+                $Anchor = $PWD
+                Set-Location $Bag.FullName
+                
+                $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
+                $sDate = ($Dates[0])
+                $OldManifest = ".\bagged-${sDate}"
+                  
+                Get-ChildItem -LiteralPath . |% { If ( $_.Name -ne $Payload.Name ) {
+                    $ChildName = $_.Name
+                    $Dest = "${OldManifest}\${ChildName}"
+
+                    If ( -Not ( Test-Path -LiteralPath $OldManifest ) ) {
+                        New-Item -ItemType Directory -Path $OldManifest
+                    }
+
+                    Move-Item $_.FullName -Destination $Dest -Verbose
+                } }
+
+                Move-Item $Payload -Destination "rebag-data" -Verbose
+                
+                Set-Location "rebag-data"
+
+                Do-Bag-Directory -DIRNAME ( $PWD )
+                
+                Get-ChildItem -LiteralPath . |% {
+                    Move-Item $_.FullName -Destination $Bag.FullName -Verbose
+                }
+
+                Set-Location $Anchor
+
+                Write-Verbose ( $Bag ).FullName
+                #Move-Item -LiteralPath ( $payloadDir ).FullName -
+            }
+
         }
         ElseIf ( Is-Indexed-Directory($File) ) {
             Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
@@ -2610,6 +2654,12 @@ if ( $Help -eq $true ) {
         }
         Else {
             Do-Bag -Pairs $Words
+        }
+    }
+    ElseIf ( $Verb -eq "rebag" ) {
+        $N = ( $Words.Count )
+        If ( $Items ) {
+            $Words | Get-Item -Force |% { Write-Verbose ( "CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Rebag
         }
     }
     ElseIf ( $Verb -eq "zip" ) {
