@@ -368,6 +368,19 @@ Function Get-7z-Path () {
     return ( ColdStorage-Settings("7za") | ColdStorage-Settings-ToFilePath )
 }
 
+Function Get-Python-Path () {
+	return ( ColdStorage-Settings("Python") | ColdStorage-Settings-ToFilePath )
+}
+
+Function Get-Python-Path-Exe () {
+	$Exe = "python.exe"
+	$PyPath = Get-Python-Path
+	If ( $PyPath ) {
+		$Exe = "${PyPath}\${Exe}"
+	}
+	( $Exe )
+}
+
 Function ColdStorage-Command-Line {
 Param( [Parameter(ValueFromPipeline=$true)] $Parameter, $Default )
 
@@ -702,7 +715,8 @@ Function Do-Bag-Directory ($DIRNAME, [switch] $Verbose=$false) {
     "PS ${PWD}> bagit.py ." | Write-Verbose
     
     $BagIt = Get-BagIt-Path
-    $Output = ( & python.exe "${BagIt}\bagit.py" . 2>&1 )
+	$Python = Get-Python-Path-Exe
+    $Output = ( & $( Get-Python-Path-Exe ) "${BagIt}\bagit.py" . 2>&1 )
     $NotOK = $LASTEXITCODE
 
     If ( $NotOK -gt 0 ) {
@@ -2134,14 +2148,26 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
     chdir $DIRNAME
 
     $BagIt = Get-BagIt-Path
+	$Python = Get-Python-Path-Exe
     If ( $Verbose ) {
         "bagit.py --validate ${DIRNAME}" | Write-Verbose
-        & python.exe "${BagIt}\bagit.py" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
-    }
-    Else {
-        $Output = ( & python.exe "${BagIt}\bagit.py" --validate . 2>&1 )
+        & $( Get-Python-Path-Exe ) "${BagIt}\bagit.py" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
         $NotOK = $LastExitCode
 
+        if ( $NotOK -gt 0 ) {
+            $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
+            
+            "ERR-BagIt: ${DIRNAME}" | Write-Warning
+
+            $ErrorView = $OldErrorView
+        } else {
+            "OK-BagIt: ${DIRNAME}" # > stdout
+        }
+
+    }
+    Else {
+        $Output = ( & $( Get-Python-Path-Exe ) "${BagIt}\bagit.py" --validate . 2>&1 )
+        $NotOK = $LastExitCode
         if ( $NotOK -gt 0 ) {
             $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
             
@@ -2153,6 +2179,7 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
             "OK-BagIt: ${DIRNAME}" # > stdout
         }
     }
+
     chdir $Anchor
 }
 
