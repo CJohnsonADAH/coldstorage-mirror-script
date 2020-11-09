@@ -1092,16 +1092,22 @@ End { }
 }
 
 function Select-URI-Link {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false )
 
     Begin { Push-Location; Set-Location $RelativeTo }
 
     Process {
         $URL = $File.FileURI
 
-        $HREF = [System.Web.HttpUtility]::HtmlEncode($URL)
-
         $FileName = ($File | Resolve-Path -Relative)
+
+        If ( $RelativeHref ) {
+            $RelativeURL = (($FileName.Split("\") | % { [URI]::EscapeDataString($_) }) -join "/")
+            $HREF = [System.Web.HttpUtility]::HtmlEncode($RelativeURL)
+        }
+        Else {
+            $HREF = [System.Web.HttpUtility]::HtmlEncode($URL)
+        }
 
         $TEXT = [System.Web.HttpUtility]::HtmlEncode($FileName)
 
@@ -1113,12 +1119,17 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo )
 }
 
 function Add-File-URI {
-Param( [Parameter(ValueFromPipeline=$true)] $File )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null )
 
     Begin { }
 
     Process {
         $UNC = $File.FullName
+		If ($RelativeTo -ne $null) {
+			$BaseUNC = $RelativeTo.FullName
+			
+		}
+		
         $Nodes = $UNC.Split("\") | % { [URI]::EscapeDataString($_) }
 
         $URL = ( $Nodes -Join "/" )
@@ -1133,7 +1144,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File )
 }
 
 function Do-Make-Index-Html {
-Param( $Directory )
+Param( $Directory, [switch] $RelativeHref=$false )
 
     if ( $Directory -eq $null ) {
         $Path = ( Get-Location )
@@ -1147,7 +1158,7 @@ Param( $Directory )
         $indexHtmlPath = "${UNC}\index.html"
 
         if ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
-            $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Resolve-UNC-Path -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC
+            $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Resolve-UNC-Path -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC -RelativeHref:${RelativeHref}
 
             $NL = [Environment]::NewLine
 
@@ -2626,7 +2637,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "index" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
-            Do-Make-Index-Html -Directory $_
+            Do-Make-Index-Html -Directory $_ -RelativeHref
         }
     }
     ElseIf ( $Verb -eq "stats" ) {
