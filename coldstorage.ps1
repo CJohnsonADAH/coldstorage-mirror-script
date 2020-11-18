@@ -37,20 +37,32 @@ $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 #
 # Last-Modified: 14 October 2020
 
+Function ColdStorage-Script-Dir {
+Param ( $File=$null )
+
+    $ScriptPath = ( Split-Path -Parent $PSCommandPath )
+    
+    If ( $File -ne $null ) {
+        $Item = ( Get-Item -Force -LiteralPath "${ScriptPath}\${File}" )
+    }
+    Else {
+        $Item = ( Get-Item -Force -LiteralPath $ScriptPath )
+    }
+
+    $Item
+}
+
 Import-Module BitsTransfer
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
 $ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
-
-$mirrors = @{
-    Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageER}\Processed" )
-    Working_ER=( "ER", "${ColdStorageER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
-    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageER}\Unprocessed" )
-    Masters=( "DA", "${ColdStorageDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
-    Access=( "DA", "${ColdStorageDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
-    Working_DA=( "DA", "${ColdStorageDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
-}
 
 Function Did-It-Have-Validation-Errors {
 Param ( [Parameter(ValueFromPipeline=$true)] $Message )
@@ -159,25 +171,11 @@ function Rebase-File {
    End {}
 }
 
-Function Get-File-Object ( $File ) {
-    
-    $oFile = $null
-    If ( $File -is [String] ) {
-        If ( Test-Path -LiteralPath "${File}" ) {
-            $oFile = ( Get-Item -Force -LiteralPath "${File}" )
-        }
-    }
-    Else {
-        $oFile = $File
-    }
-
-    $oFile
-}
 
 Function Get-File-FileSystem-Location {
 Param($File)
 
-    $oFile = Get-File-Object -File $File
+    $oFile = Get-FileObject -File $File
     If ( $oFile ) {
         If ( Get-Member -InputObject $oFile -name "Directory" -MemberType Properties ) {
             $oLoc = ( $oFile.Directory | Add-Member -Force -NotePropertyMembers @{Leaf=( $oFile.Name ); Location=( $oFile.Directory.FullName ); RelativePath=@( $oFile.Directory.Name, $oFile.Name ) } -PassThru )
@@ -189,36 +187,17 @@ Param($File)
     }
 }
 
-Function Get-File-Literal-Path {
-Param($File)
-
-	$sFile = $null
-
-	If ( $File -eq $null ) {
-		$oFile = $null
-	}
-	ElseIf ( -Not ( Get-Member -InputObject $File -name "FullName" -MemberType Properties ) ) {
-		$oFile = Get-File-Object($File)
-	}
-	Else {
-		$oFile = $File
-	}
-
-	If ( Get-Member -InputObject $oFile -name "FullName" -MemberType Properties ) {
-		$sFile = $oFile.FullName
-	}
-	
-	$sFile
-}
 
 Function Get-File-Repository-Candidates {
 Param ( $Key, [switch] $UNC=$false )
+
+    $mirrors = ( Get-ColdStorageRepositories )
 
     $repo = $mirrors[$Key]
 
     $mirrors[$Key][1..2] |% {
         $sTestRepo = ( $_ ).ToString()
-        $oTestRepo = Get-File-Object -File $sTestRepo
+        $oTestRepo = Get-FileObject -File $sTestRepo
 
         $sTestRepo # > stdout
 
@@ -235,7 +214,7 @@ Param ( $Key, [switch] $UNC=$false )
 Function Get-File-Repository {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Slug=$false )
 
-Begin { }
+Begin { $mirrors = ( Get-ColdStorageRepositories ) }
 
 Process {
     
@@ -261,6 +240,8 @@ End { }
 Function Get-Trashcan-Location {
 Param ( $Repository )
 
+    $mirrors = ( Get-ColdStorageRepositories )
+
     $location = $mirrors[$Repository]
     $slug = $location[0]
 
@@ -270,12 +251,6 @@ Param ( $Repository )
 #############################################################################################################
 ## SETTINGS: PATHS, ETC. ####################################################################################
 #############################################################################################################
-
-Function ColdStorage-Script-Dir () {
-    $ScriptPath = ( Split-Path -Parent $PSCommandPath )
-    
-    Get-Item -Force -LiteralPath $ScriptPath
-}
 
 Function ColdStorage-Settings-File () {
     $JsonDir = ( ColdStorage-Script-Dir ).FullName
@@ -419,65 +394,6 @@ Param ( [switch] $WhatIf=$false, $LiteralPath, $DestinationPath )
 ## BagIt DIRECTORIES ########################################################################################
 #############################################################################################################
 
-function Is-BagIt-Formatted-Directory ( $File ) {
-    $result = $false # innocent until proven guilty
-
-    $oFile = Get-File-Object -File $File   
-
-    $BagDir = $oFile.FullName
-    if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
-        $PayloadDir = "${BagDir}\data"
-        if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
-            $BagItTxt = "${BagDir}\bagit.txt"
-            if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
-                $result = $true
-            }
-        }
-    }
-
-    return $result
-}
-
-function Select-BagIt-Formatted-Directories () {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process { if ( Is-BagIt-Formatted-Directory($File) ) { $File } }
-
-End { }
-}
-
-Function Select-BagIt-Payload-Directory {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $oFile = Get-File-Object($File)
-    $sPath = $oFile.FullName
-    Get-Item -Force -LiteralPath "${sPath}\data"
-}
-
-End { }
-
-}
-
-function Select-BagIt-Payload {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $File | Select-BagIt-Payload-Directory |% {
-        $sPath = $_.FullName
-        Get-ChildItem -Force -Recurse -LiteralPath "${sPath}"
-    }
-}
-
-End { }
-
-}
 
 #############################################################################################################
 ## BagIt PACKAGING CONVENTIONS ##############################################################################
@@ -562,155 +478,14 @@ Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, [switch] $Quiet=
 
 }
 
-Function Is-HiddenOrSystem-File ( $File ) {
-    $oFile = Get-File-Object $File
-    $screen = ( [IO.FileAttributes]::System + [IO.FileAttributes]::Hidden )
-
-    ( ( $oFile.Attributes -band $screen ) -ne 0 )
-}
-
-Function Is-Loose-File ( $File ) {
-    
-    $oFile = Get-File-Object($File)
-
-    $result = $false
-    If ( -Not ( $oFile -eq $null ) ) {
-        If ( Test-Path -LiteralPath $oFile.FullName -PathType Leaf ) {
-            $result = $true
-
-            $Context = $oFile.Directory
-            $sContext = $Context.FullName
-
-            If ( Is-Indexed-Directory($sContext) ) {
-                $result = $false
-            }
-            ElseIf  ( Is-Bagged-Indexed-Directory($sContext) ) {
-                $result = $false
-            }
-            ElseIf ( Is-ER-Instance-Directory($Context) ) {
-                $result = $false
-            }
-            ElseIf ( Is-Zipped-Bag($oFile) ) {
-                $result = $false
-            }
-            ElseIf ( Is-HiddenOrSystem-File($oFile) ) {
-                $result = $false
-            }
-        }
-    }
-    
-    $result
-}
-
-function Is-Bagged-Copy-of-Loose-File ( $File, $Context ) {
-    $result = $false # innocent until proven guilty
-
-    if ( Is-BagIt-Formatted-Directory( $File ) ) {
-        $BagDir = $File.FullName
-        $payload = ( Get-ChildItem -Force -LiteralPath "${BagDir}\data" | Measure-Object )
-
-        if ($payload.Count -eq 1) {
-            $result = $true
-        }
-    }
-    
-    $result
-}
-
-function Select-Bagged-Copies-of-Loose-Files {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [string] $Wildcard = '*' )
-
-Begin { }
-
-Process {
-    If ( $File.Name -Like $Wildcard ) {
-        If ( Is-Bagged-Copy-of-Loose-File($File) ) {
-            $File
-        }
-    }
-}
-
-End { }
-}
-
-function Match-Bagged-Copy-to-Loose-File {
-Param ( [Parameter(ValueFromPipeline=$true)] $Bag, $File, $DiffLevel=0 )
-
-Begin { }
-
-Process {
-    If ( Is-Loose-File($File) ) {
-        $oBag = Get-File-Object -File $Bag
-        $Payload = ( Get-Item -Force -LiteralPath $oBag.FullName | Select-BagIt-Payload )
-        If ( Is-Bagged-Copy-of-Loose-File($Bag) ) {
-            If ( $Payload.Count -eq 1 ) {
-                $oFile = Get-File-Object -File $File
-                
-                $Mismatched = $false
-                If ( $Payload.Name -ne $oFile.Name ) {
-                    $Mismatched = $true
-                }
-                ElseIf ( $Payload.Length -ne $oFile.Length ) {
-                    $Mismatched = $true
-                }
-                ElseIf ( $DiffLevel -gt 0 ) {
-                    If ( Is-Different-File-Content -From $Payload -To $File -DiffLevel $DiffLevel ) {
-                        $Mismatched = $true
-                    }
-                }
-
-                if ( -Not $Mismatched ) {
-                    $Bag
-                }
-            }
-        }
-    }
-}
-
-End { }
-}
-
-function Get-Bagged-Copy-of-Loose-File ( $File ) {
-    $result = $null
-
-    If ( Is-Loose-File($File) ) {
-        $oFile = Get-File-Object($File)
-        $Parent = $oFile.Directory
-        $Wildcard = ( $oFile | Bagged-File-Path -Wildcard )
-        $match = ( Get-ChildItem -Directory $Parent | Select-Bagged-Copies-of-Loose-Files -Wildcard $Wildcard | Match-Bagged-Copy-to-Loose-File -File $oFile )
-
-        if ( $match.Count -gt 0 ) {
-            $result = $match
-        }
-    }
-
-    $result
-}
-
-function Is-Unbagged-Loose-File ( $File ) {
-
-    $oFile = Get-File-Object($File)
-    
-    $result = $false
-    If ( -Not ( $oFile -eq $null ) ) {
-        If ( Is-Loose-File($File) ) {
-            $result = $true
-            $bag = Get-Bagged-Copy-of-Loose-File -File $oFile
-                       
-            if ( $bag.Count -gt 0 ) {
-                $result = $false
-            }
-        }
-    }
-    
-    $result
-}
-
-
 Function Do-Bag-Directory ($DIRNAME, [switch] $Verbose=$false) {
 
     $Anchor = $PWD
     chdir $DIRNAME
+
+    If ( Test-Path -LiteralPath ".\Thumbs.db" ) {
+        Remove-Item -LiteralPath ".\Thumbs.db" -Verbose:$Verbose
+    }
 
     "PS ${PWD}> bagit.py ." | Write-Verbose
     
@@ -761,112 +536,9 @@ function Do-Bag-Loose-File ($LiteralPath) {
     chdir $Anchor
 }
 
-#############################################################################################################
-## ER INSTANCE DIRECTORIES: Typically found in ER Unprocessed directory #####################################
-#############################################################################################################
-
-function Is-ER-Instance-Directory ( $File ) {
-    $result = $false # innocent until proven guilty
-
-    $LiteralPath = Get-File-Literal-Path -File $File
-    If ( $LiteralPath -ne $null ) {
-        If ( Test-Path -LiteralPath $LiteralPath -PathType Container ) {
-            $BaseName = $File.Name
-            $result = ($BaseName -match "^[A-Za-z0-9]{2,3}_ER")
-        }
-    }
-    
-    $result
-}
-
-function Select-ER-Instance-Directories () {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process { if ( Is-ER-Instance-Directory($File) ) { $File } }
-
-End { }
-}
-
-function Select-ER-Instance-Data () {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $BaseName = $File.Name
-    
-    $DirParts = $BaseName.Split("_")
-
-    $ERMeta = @{
-        CURNAME=( $DirParts[0] )
-        ERType=( $DirParts[1] )
-        ERCreator=( $DirParts[2] )
-        ERCreatorInstance=( $DirParts[3] )
-        Slug=( $DirParts[4] )
-    }
-    $ERMeta.ERCode = ( "{0}-{1}-{2}" -f $ERMeta.ERType, $ERMeta.ERCreator, $ERMeta.ERCreatorInstance )
-
-    $ERMeta
-}
-
-End { }
-}
-
 ######################################################################################################
 ## ZIP ###############################################################################################
 ######################################################################################################
-
-
-Function ColdStorage-Location {
-Param ( $Repository )
-
-    $aRepo = $mirrors[$Repository]
-
-    If ( ( $aRepo[1] -Like "${ColdStorageER}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageDA}\*" ) ) {
-        $aRepo[1]
-    }
-    Else {
-        $aRepo[2]
-    }
-}
-
-Function ColdStorage-Zip-Location {
-Param ( $Repository )
-
-    $BaseDir = ColdStorage-Location -Repository $Repository
-
-    If ( Test-Path -LiteralPath "${BaseDir}\ZIP" ) {
-        Get-Item -Force -LiteralPath "${BaseDir}\ZIP"
-    }
-}
-
-Function Is-Zipped-Bag {
-
-Param ( $LiteralPath )
-
-    $oFile = Get-File-Object -File $LiteralPath
-
-    ( ( $oFile -ne $null ) -and ( $oFile.Name -like '*_md5_*.zip' ) )
-}
-
-Function Select-Zipped-Bags {
-
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $oFile = Get-File-Object -File $File
-    If ( Is-Zipped-Bag -LiteralPath $oFile ) {
-        $oFile
-    }
-}
-
-End { }
-
-}
 
 Function Get-Zipped-Bag-MD5 {
 
@@ -875,7 +547,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    $oFile = Get-File-Object -File $File
+    $oFile = Get-FileObject -File $File
     $reMD5 = "^.*_md5_([A-Za-z0-9]+)[.]zip$"
 
     If ( $oFile.Name -imatch $reMD5 ) {
@@ -893,7 +565,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    $oFile = Get-File-Object -File $File
+    $oFile = Get-FileObject -File $File
 
     # Fully qualified file system path to the containing parent
     $sFilePath = $oFile.Parent.FullName
@@ -903,7 +575,7 @@ Process {
     $sFileUNCPath = $oFileUNCPath.FullName
 
     # Slice off the root directory up to the node name of the repository container
-    $oRepository = Get-File-Object -File ( $oFileUNCPath | Get-File-Repository )
+    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-File-Repository )
     $sRepository = $oRepository.FullName
     $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
 
@@ -929,7 +601,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    If ( Is-BagIt-Formatted-Directory -File $File ) {
+    If ( Test-BagItFormattedDirectory -File $File ) {
         $Repository = ( $File | Get-Zipped-Bag-Location )
         $Prefix = ( Get-Bag-Zip-Name-Prefix -File $File )
         Get-ChildItem -Path "${Repository}\${Prefix}_z*_md5_*.zip"
@@ -979,7 +651,7 @@ Begin {}
 Process {
     $output = $null
 
-    $FileObject = Get-File-Object($File)
+    $FileObject = Get-FileObject($File)
 
     $Drive = $null
     $Root = $null
@@ -1045,7 +717,7 @@ Begin {
 
 Process {
     If ( $File -is [string] ) {
-        $File = Get-File-Object($File)
+        $File = Get-FileObject($File)
     }
 
     $Output = $File
@@ -1174,89 +846,9 @@ Param( $Directory, [switch] $RelativeHref=$false )
     }
 }
 
-function Is-Indexed-Directory {
-Param( $File )
-
-    $FileObject = Get-File-Object($File)
-    $FilePath = $FileObject.FullName
-
-    $result = $false
-    if ( Test-Path -LiteralPath "${FilePath}" ) {
-        $NewFilePath = "${FilePath}\index.html"
-        $result = Test-Path -LiteralPath "${NewFilePath}"
-    }
-    
-    $result
-}
-
-function Is-Bagged-Indexed-Directory {
-Param( $File )
-
-    $FileObject = Get-File-Object($File)
-    $FilePath = $FileObject.FullName
-
-    $result = $false
-    if ( Is-BagIt-Formatted-Directory($File) ) {
-        $payloadPath = "${FilePath}\data"
-        $result = Is-Indexed-Directory($payloadPath)
-    }
-    
-    $result
-}
-
 ############################################################################################################
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
-
-Function Is-Different-File-Content {
-Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
-
-    # We go through some rigamarole here because each side of the comparison MAY be
-    # a valid file path whose content we can hash, OR it MAY be a string of a path
-    # to a file that does not (yet) exist.
-
-	$oFrom = Get-File-Object($From)
-	$oTo = Get-File-Object($To)
-	
-	If ( $oFrom -ne $null ) {
-		$Differentiated = ($oTo -eq $null)
-	
-		If ( ( -Not $Differentiated ) -and ( $DiffLevel -gt 0 ) ) {
-			$LeftLength = $null
-			$RightLength = $null
-			If ( $oFrom -ne $null ) {
-				$LeftLength = $oFrom.Length
-			}
-			If ( $oTo -ne $null ) {
-				$RightLength = $oTo.Length
-			}
-			If ($Verbose) { Write-Output "Length comparison: ${LeftLength} vs. ${RightLength}" }
-			$Differentiated=($Differentiated -or ( $LeftLength -ne $RightLength ))
-		}
-
-		If ( ( -Not $Differentiated ) -and ( $DiffLevel -gt 1 ) ) {
-			$sFrom = Get-File-Literal-Path($oFrom)
-			$sTo = Get-File-Literal-Path($oTo)
-			
-			$LeftHash = $null
-			$RightHash = $null
-
-			If ( $sFrom -ne $null ) {
-				$LeftHash = (Get-FileHash -LiteralPath $sFrom).hash
-			}
-			If ( $sTo -ne $null ) {
-				$RightHash = (Get-FileHash -LiteralPath $sTo).hash
-			}
-			If ($Verbose) { Write-Output "Hash comparison: ${LeftHash} vs. ${RightHash}" }
-			$Differentiated=($Differentiated -or ( $LeftHash -ne $RightHash))
-        }
-    }
-	Else {
-		$Differentiated = ($oTo -ne $null)
-	}
-
-    $Differentiated
-}
 
 function Is-Matched-File ($From, $To, $DiffLevel=0) {
     $ToPath = $To
@@ -1268,7 +860,7 @@ function Is-Matched-File ($From, $To, $DiffLevel=0) {
     if ( $TreatAsMatched ) {
         $ObjectFile = (Get-Item -Force -LiteralPath "${ToPath}")
         if ( $DiffLevel -gt 0 ) {
-            $TreatAsMatched = -Not ( Is-Different-File-Content -From $From -To $ObjectFile -DiffLevel $DiffLevel )
+            $TreatAsMatched = -Not ( Test-DifferentFileContent -From $From -To $ObjectFile -DiffLevel $DiffLevel )
         }
     }
     
@@ -1339,7 +931,7 @@ function Get-Matched-Items {
 Function Get-Mirror-Matched-Item {
 Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair, [switch] $Original=$false, [switch] $Reflection=$false, $Repositories=$null )
 
-Begin { }
+Begin { $mirrors = ( Get-ColdStorageRepositories ) }
 
 Process {
     
@@ -1390,85 +982,6 @@ Process {
 }
 
 End { }
-
-}
-
-Function Get-Bagged-ChildItem-Candidates {
-Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false )
-
-    If ( $Zipped ) {
-        If ( $LiteralPath -ne $null ) {
-            $Zips = Get-ChildItem -LiteralPath $LiteralPath -File | Select-Zipped-Bags
-        }
-        Else {
-            $Zips = Get-ChildItem -Path $Path -File | Select-Zipped-Bags
-        }
-        $Zips
-    }
-
-    If ( $LiteralPath -ne $null ) {
-        $Dirs = Get-ChildItem -LiteralPath $LiteralPath -Directory
-    }
-    Else {
-        $Dirs = Get-ChildItem -Path $Path -Directory
-    }
-    $Dirs
-}
-
-Function Get-Bagged-ChildItem {
-Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false )
-
-    Get-Bagged-ChildItem-Candidates -LiteralPath:$LiteralPath -Path:$Path -Zipped:$Zipped |% {
-        $Item = Get-File-Object -File $_
-        If ( Is-BagIt-Formatted-Directory($Item) ) {
-            $Item
-        }
-        ElseIf ( Is-Zipped-Bag $Item ) {
-            $Item
-        }
-        ElseIf ( Is-Indexed-Directory -File $Item ) {
-            # NOOP - Do not descend into an unbagged indexed directory
-        }
-        ElseIf ( Test-Path -LiteralPath $Item.FullName -PathType Container ) {
-            # Descend to next directory level
-            Get-Bagged-ChildItem -LiteralPath $Item.FullName
-        }
-    }
-
-}
-
-Function Get-Unbagged-ChildItem {
-Param( $LiteralPath=$null, $Path=$null )
-
-    If ( $LiteralPath -ne $null ) {
-        $Items = Get-ChildItem -LiteralPath $LiteralPath
-    }
-    ElseIf ( $Path -ne $null ) {
-        $Items = Get-ChildItem -Path $Path
-    }
-    Else {
-        Write-Verbose "Using PWD ${PWD} as directory."
-        $Items = Get-ChildItem -LiteralPath $PWD
-    }
-
-    $Items | % {
-        Write-Debug ( "Considering: " + $_.FullName )
-
-        $Item = Get-File-Object -File $_
-
-        If ( Is-BagIt-Formatted-Directory $Item ) {
-            # NOOP
-        }
-        ElseIf ( Is-Indexed-Directory -File $Item ) {
-            $Item
-        }
-        ElseIf ( Is-Unbagged-Loose-File -File $Item ) {
-            $Item
-        }
-        ElseIf ( $Item -is [System.IO.DirectoryInfo] ) {
-            Get-Unbagged-ChildItem -LiteralPath $_.FullName
-        }
-    }
 
 }
 
@@ -1595,8 +1108,8 @@ Param ($From, $To, $Trashcan, $Depth=0, $ProgressId=0, $NewProgressId=0)
         $MoveFrom = $_.FullName
         $MoveTo = ($_ | Rebase-File -To $Trashcan)
 
-        If ( -Not ( Is-Bagged-Copy-of-Loose-file -File ( Get-Item -LiteralPath $_.FullName ) ) ) {
-            If ( -Not ( Is-Zipped-Bag -LiteralPath $_.FullName ) ) {
+        If ( -Not ( Test-BaggedCopyOfLooseFile -File ( Get-Item -LiteralPath $_.FullName ) ) ) {
+            If ( -Not ( Test-ZippedBag -LiteralPath $_.FullName ) ) {
                 "Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force"
                 if ( -Not ( Test-Path -LiteralPath $Trashcan ) ) {
                     mkdir $Trashcan
@@ -1710,9 +1223,9 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
     $sStatus = "*.*"
 
     $sTo = $To
-    If (Is-BagIt-Formatted-Directory -File $To) {
-        If ( -Not ( Is-BagIt-Formatted-Directory -File $From ) ) {
-            $oPayload = ( Get-File-Object($To) | Select-BagIt-Payload-Directory )
+    If (Test-BagItFormattedDirectory -File $To) {
+        If ( -Not ( Test-BagItFormattedDirectory -File $From ) ) {
+            $oPayload = ( Get-FileObject($To) | Select-BagItPayloadDirectory )
             $To = $oPayload.FullName
         }
     }
@@ -1770,6 +1283,8 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
 }
 
 function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
+
+    $mirrors = ( Get-ColdStorageRepositories )
 
     $Pairs = ($Pairs | % { If ( $_.Length -gt 0 ) { $_ -split "," } })
 
@@ -1850,14 +1365,14 @@ param (
 
         $DirName = $File.FullName
         $BaseName = $File.Name
-        If ( Is-ER-Instance-Directory($File) ) {
+        If ( Test-ERInstanceDirectory($File) ) {
             If ( -not ( $BaseName -match $Exclude ) ) {
-                $ERMeta = ( $File | Select-ER-Instance-Data )
+                $ERMeta = ( $File | Get-ERInstanceData )
                 $ERCode = $ERMeta.ERCode
 
                 chdir $DirName
 
-                if ( Is-BagIt-Formatted-Directory($File) ) {
+                if ( Test-BagItFormattedDirectory($File) ) {
                     Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
                 else {
@@ -1876,10 +1391,10 @@ param (
 
             chdir $Anchor
         }
-        ElseIf ( Is-BagIt-Formatted-Directory($File) ) {
+        ElseIf ( Test-BagItFormattedDirectory($File) ) {
             Write-Bagged-Item-Notice -FileName $File.Name -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
             If ( $Rebag ) {
-                $Payload = ( $File | Select-BagIt-Payload-Directory )
+                $Payload = ( $File | Select-BagItPayloadDirectory )
                 $Bag = ( $Payload.Parent )
                 
                 $OldManifest = "bagged-${Date}"
@@ -1920,7 +1435,7 @@ param (
             }
 
         }
-        ElseIf ( Is-Indexed-Directory($File) ) {
+        ElseIf ( Test-IndexedDirectory($File) ) {
             Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
             If ( $File.FullName | Do-Scan-ERInstance | Shall-We-Continue ) {
@@ -2026,7 +1541,7 @@ param (
         $CardBag = ( $File | Bagged-File-Path -Wildcard )
 
         $BagPayload = $null
-        If ( Is-Zipped-Bag($File) ) {
+        If ( Test-ZippedBag($File) ) {
             $BagPayload = $File
             $OnZipped.Invoke($File, $Quiet)
         }
@@ -2114,19 +1629,19 @@ param (
     Process {
         $Anchor = $PWD
 
-        $DirName = Get-File-Literal-Path -File $File
+        $DirName = Get-FileLiteralPath -File $File
         $BaseName = $File.Name
 
         # Is this an ER Instance directory?
-        If ( Is-ER-Instance-Directory($File) ) {
+        If ( Test-ERInstanceDirectory($File) ) {
             
             chdir $DirName
-            $ERMeta = ($File | Select-ER-Instance-Data)
+            $ERMeta = ($File | Get-ERInstanceData)
             $ERCode = $ERMeta.ERCode
 
             If ( -not ( $BaseName -match $Exclude ) ) {
 
-                if ( Is-BagIt-Formatted-Directory($File) ) {
+                if ( Test-BagItFormattedDirectory($File) ) {
                     $oZip = ( Get-Zipped-Bag-Of-Bag -File $File )
                     Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Zip $oZip -Quiet:$Quiet -Line ( Get-CurrentLine )
 
@@ -2141,11 +1656,11 @@ param (
             chdir $Anchor
 
         }
-        ElseIf ( Is-BagIt-Formatted-Directory($File) ) {
+        ElseIf ( Test-BagItFormattedDirectory($File) ) {
             $oZip = ( Get-Zipped-Bag-Of-Bag -File $File )
             Write-Bagged-Item-Notice -FileName $DirName -Zip $oZip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
         }
-        ElseIf ( Is-Indexed-Directory($File) ) {
+        ElseIf ( Test-IndexedDirectory($File) ) {
             Write-Unbagged-Item-Notice -FileName $DirName -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
         }
         Else {
@@ -2244,7 +1759,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    $sFile = Get-File-Literal-Path $File
+    $sFile = Get-FileLiteralPath $File
     $md5 = ($File | Get-Zipped-Bag-MD5 )
     $oChecksum = ( Get-FileHash -LiteralPath $sFile -Algorithm MD5 )
     $sHash = $oChecksum.hash
@@ -2272,13 +1787,13 @@ Begin {
 
 Process {
     $Item | Get-Item -Force | %{
-        $sLiteralPath = Get-File-Literal-Path -File $_
+        $sLiteralPath = Get-FileLiteralPath -File $_
 
         $Validated = $null
-        If ( Is-BagIt-Formatted-Directory -File $sLiteralPath ) {
+        If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
             $Validated = ( Do-Validate-Bag -DIRNAME $_ -Verbose:$Verbose  )
         }
-        ElseIf ( Is-Zipped-Bag -LiteralPath $sLiteralPath ) {
+        ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
             $Validated = ( $_ | Do-Validate-Zipped-Bag )
         }
 
@@ -2306,6 +1821,8 @@ function Do-Bag-Repo-Dirs ($Pair, $From, $To) {
 }
 
 function Do-Bag ($Pairs=$null) {
+    $mirrors = ( Get-ColdStorageRepositories )
+
     if ( $Pairs.Count -lt 1 ) {
         $Pairs = $mirrors.Keys
     }
@@ -2336,6 +1853,8 @@ function Do-Check-Repo-Dirs ($Pair, $From, $To) {
 }
 
 function Do-Check ($Pairs=$null) {
+    $mirrors = ( Get-ColdStorageRepositories )
+
     if ( $Pairs.Count -lt 1 ) {
         $Pairs = $mirrors.Keys
     }
@@ -2377,6 +1896,8 @@ function Do-Check ($Pairs=$null) {
 }
 
 Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false) {
+    $mirrors = ( Get-ColdStorageRepositories )
+
     If ( $Pairs.Count -lt 1 ) {
         $Pairs = $mirrors.Keys
     }
@@ -2436,7 +1957,7 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$
                         $BagRange[1] = $_
                         $BagRange > $BookmarkFile
                                 
-                        $BagPath = Get-File-Literal-Path -File $_
+                        $BagPath = Get-FileLiteralPath -File $_
                         Write-Progress -Id 101 -Activity "Validating ${nTotal} BagIt directories in ${Pair}" -Status ("#${nGlanced}. Validating: ${BagPathLeaf}") -percentComplete (100*$nGlanced/$nTotal)
                         $Validated = ( $BagPath | Do-Validate-Item -Verbose:$Verbose -Summary:$false )
                         
@@ -2493,9 +2014,9 @@ Begin { }
 
 Process {
     
-    If ( Is-BagIt-Formatted-Directory -File $File ) {
-        $oFile = Get-File-Object -File $File
-        $sFile = Get-File-Literal-Path -File $File
+    If ( Test-BagItFormattedDirectory -File $File ) {
+        $oFile = Get-FileObject -File $File
+        $sFile = Get-FileLiteralPath -File $File
 
         $Validated = ( Do-Validate-Bag -DIRNAME $sFile )
         
@@ -2560,6 +2081,8 @@ End { }
 }
 
 function Do-Write-Usage ($cmd) {
+    $mirrors = ( Get-ColdStorageRepositories )
+
     $Pairs = ( $mirrors.Keys -Join "|" )
     $PairedCmds = ("bag", "zip", "validate")
 
@@ -2594,7 +2117,7 @@ if ( $Help -eq $true ) {
 
         If ( $Items ) {
             $Words |% {
-                $File = Get-File-Object($_)
+                $File = Get-FileObject($_)
                 If ( $File ) {
                     $Repository = ( Get-File-Repository -File $File )
                     $RepositorySlug = ( Get-File-Repository -File $Repository -Slug )
@@ -2666,12 +2189,12 @@ if ( $Help -eq $true ) {
         $N = ( $Words.Count )
 
         $Words |% {
-            $sFile = Get-File-Literal-Path -File $_
-            If ( Is-BagIt-Formatted-Directory -File $_ ) {
+            $sFile = Get-FileLiteralPath -File $_
+            If ( Test-BagItFormattedDirectory -File $_ ) {
                 $_ | Do-Zip-Bagged-Directory
             }
-            ElseIf ( Is-Loose-File -File $_ ) {
-                $oBag = ( Get-Bagged-Copy-of-Loose-File -File $_ )
+            ElseIf ( Test-LooseFile -File $_ ) {
+                $oBag = ( Test-BaggedCopyOfLooseFile -File $_ )
                 If ($oBag) {
                     $oBag | Do-Zip-Bagged-Directory
                 }
@@ -2692,36 +2215,7 @@ if ( $Help -eq $true ) {
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
-        $Words |% {
-
-            Write-Progress -Id 101 -Activity "Scanning ${sRepo}"
-            $sRepo = $_
-
-            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Getting locations" -PercentComplete 0
-
-            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Counting zipped bags" -PercentComplete 50
-
-            $ZipLocation = ( ColdStorage-Zip-Location -Repository $_ )
-            If ( $ZipLocation ) {
-                $nZipped = ( Get-ChildItem -LiteralPath $ZipLocation.FullName ).Count
-            }
-            Else {
-                $nZipped = 0
-            }
-
-            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Counting bags" -PercentComplete 75
-    
-            $Location = ( Get-Item -Force -LiteralPath ( ColdStorage-Location -Repository $_ ) )
-
-            $nBagged = ( Get-Bagged-ChildItem -LiteralPath $Location.FullName ).Count
-
-            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100
-   
-            @{} | Select-Object @{n='Location';e={ $sRepo }}, @{n='Bagged';e={ $nBagged }}, @{n='Zipped';e={ $nZipped }}
-
-            Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100 -Completed
-   
-        }
+        $Words | Get-RepositoryStats
     }
     ElseIf ( $Verb -eq "settings" ) {
         ColdStorage-Settings -Name $args[1]
@@ -2730,7 +2224,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "repository" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
-            $File = Get-File-Object -File $_
+            $File = Get-FileObject -File $_
             "FILE:", $File.FullName, "REPO:", ($File | Get-File-Repository)
         }
         $Quiet = $true
@@ -2738,7 +2232,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "zipname" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
-            $File = Get-File-Object -File $_
+            $File = Get-FileObject -File $_
             "FILE:", $File.FullName, "PREFIX:", ($File | Get-Bag-Zip-Name-Prefix)
         }
         $Quiet = $true
