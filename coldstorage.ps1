@@ -1414,13 +1414,17 @@ param (
                   
                 Get-ChildItem -LiteralPath . |% { If ( $_.Name -ne $Payload.Name ) {
                     $ChildName = $_.Name
-                    $Dest = "${OldManifest}\${ChildName}"
 
-                    If ( -Not ( Test-Path -LiteralPath $OldManifest ) ) {
-                        New-Item -ItemType Directory -Path $OldManifest
+                    If ( -Not ( $ChildName -match "^bagged-[0-9]+$" ) ) {
+                        $Dest = "${OldManifest}\${ChildName}"
+
+                        If ( -Not ( Test-Path -LiteralPath $OldManifest ) ) {
+                            New-Item -ItemType Directory -Path $OldManifest
+                        }
+
+                        Move-Item $_.FullName -Destination $Dest -Verbose
                     }
 
-                    Move-Item $_.FullName -Destination $Dest -Verbose
                 } }
 
                 Move-Item $Payload -Destination "rebag-data" -Verbose
@@ -1432,6 +1436,9 @@ param (
                 Get-ChildItem -LiteralPath . |% {
                     Move-Item $_.FullName -Destination $Bag.FullName -Verbose
                 }
+
+                Set-Location $Bag.FullName
+                Remove-Item "rebag-data"
 
                 Set-Location $Anchor
 
