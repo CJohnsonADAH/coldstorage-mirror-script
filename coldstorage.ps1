@@ -1456,7 +1456,7 @@ param (
         }
         Else {
             Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
-                If ( Is-Unbagged-Loose-File($_) ) {
+                If ( Test-UnbaggedLooseFile($_) ) {
                     $LooseFile = $_.Name
                     Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
