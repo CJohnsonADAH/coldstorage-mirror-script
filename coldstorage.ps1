@@ -874,6 +874,9 @@ function Get-Unmatched-Items {
     [String]
     $Match,
 
+    [String]
+    $Exclude="^$",
+
     [Int]
     $DiffLevel = 0,
 
@@ -890,10 +893,12 @@ function Get-Unmatched-Items {
 
    Process {
         $iCounter = $iCounter + 1
-        $Object = ($File | Rebase-File -To $Match)
-        $OnConsider.Invoke($File, $Object, $DiffLevel, $iCounter)
-        if ( -Not ( Is-Matched-File -From $File -To $Object -DiffLevel $DiffLevel ) ) {
-            $File
+        If ( -Not ( $File.Name -match $Exclude ) ) { 
+            $Object = ($File | Rebase-File -To $Match)
+            $OnConsider.Invoke($File, $Object, $DiffLevel, $iCounter)
+            if ( -Not ( Is-Matched-File -From $File -To $Object -DiffLevel $DiffLevel ) ) {
+                $File
+            }
         }
    }
 
@@ -1155,7 +1160,7 @@ Param ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgres
     $N = $aFiles.Count
 
     $sProgressActivity = "Matching Files (cp) [${From} => ${To}]"
-    $aFiles = ( $aFiles | Get-Unmatched-Items -Match "${To}" -DiffLevel $DiffLevel -OnConsider {
+    $aFiles = ( $aFiles | Get-Unmatched-Items -Exclude "Thumbs[.]db" -Match "${To}" -DiffLevel $DiffLevel -OnConsider {
         Param($File, $Candidate, $DiffLevel, $I);
         If ( -Not $Batch ) {
             $sFileName = $File.Name
