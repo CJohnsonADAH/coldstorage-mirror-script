@@ -198,15 +198,17 @@ Param ( $Key, [switch] $UNC=$false )
 
     $mirrors[$Key][1..2] |% {
         $sTestRepo = ( $_ ).ToString()
-        $oTestRepo = Get-FileObject -File $sTestRepo
+        If ( $oTestRepo = Get-FileObject -File $sTestRepo ) {
 
-        $sTestRepo # > stdout
+            $sTestRepo # > stdout
 
-        $sLocalTestRepo = ( $oTestRepo | Resolve-UNC-Path-To-Local-If-Local ).FullName
-        If ( -Not ( $UNC ) ) {
-            If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
-                $sLocalTestRepo # > stdout
+            $sLocalTestRepo = ( $oTestRepo | Resolve-UNC-Path-To-Local-If-Local ).FullName
+            If ( -Not ( $UNC ) ) {
+                If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
+                    $sLocalTestRepo # > stdout
+                }
             }
+
         }
     }
 
