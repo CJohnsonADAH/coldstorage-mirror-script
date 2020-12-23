@@ -255,21 +255,39 @@ Param ( $Repository )
 ## SETTINGS: PATHS, ETC. ####################################################################################
 #############################################################################################################
 
-Function ColdStorage-Settings-File () {
+Function Get-TablesMerged {
+
+    $Output = @{ }
+    ForEach ( $Table in ( $Input + $Args ) ) {
+        
+        If ( $Table -is [Hashtable] ) {
+            ForEach ( $Key in $Table.Keys ) {
+                $Output.$Key = $Table.$Key
+            }
+        }
+        ElseIf ( $Table -is [Object] ) {
+            $Table.PSObject.Properties | ForEach {
+                $Output."$($_.Name)" = $( $_.Value )
+            }
+        }
+
+
+    }
+    $Output
+
+}
+
+Function Get-ColdStorageSettingsFiles () {
     $JsonDir = ( ColdStorage-Script-Dir ).FullName
 
-    $paths = "${JsonDir}\settings-${env:COMPUTERNAME}.json", "${JsonDir}\settings.json"
+    $paths = "${JsonDir}\settings.json", "${JsonDir}\settings-${env:COMPUTERNAME}.json"
     
     $File = $null
     $paths | % {
-        If ( $File -eq $null ) {
-            If ( Test-Path -LiteralPath $_ ) {
-                $File = (Get-Item -Force -LiteralPath $_)
-            }
+        If ( Test-Path -LiteralPath $_ ) {
+            (Get-Item -Force -LiteralPath $_) | Write-Output
         }
     }
-
-    $File
 }
 
 Function ColdStorage-Settings-Defaults {
@@ -281,13 +299,13 @@ Function ColdStorage-Settings-Defaults {
 }
 
 Function ColdStorage-Settings-Json {
-    ColdStorage-Settings-File | % {
+    Get-ColdStorageSettingsFiles | % {
         If ( $_ -eq $null ) {
             ColdStorage-Settings-Defaults | ConvertTo-Json
         } Else {
             Get-Content -Raw $_
         }
-    }
+    } | Get-Json-Settings | Get-TablesMerged | ConvertTo-Json
 }
 
 Function ColdStorage-Settings-ToFilePath {
