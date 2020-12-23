@@ -1773,7 +1773,7 @@ param (
     $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-Zipped-Bag-Of-Bag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
 
     [ScriptBlock]
-    $OnDiff={ Param($File, $Payload, $LeftHash, $RightHash, $Quiet); },
+    $OnDiff={ Param($File, $Payload, $Quiet); },
 
     [ScriptBlock]
     $OnUnbagged={ Param($File, $Quiet); Write-Unbagged-Item-Notice -FileName $File.FullName -Line ( Get-CurrentLine ) -Quiet:$Quiet },
@@ -1799,31 +1799,22 @@ param (
 
         $FileName = $File.Name
         $FilePath = $File.FullName
-        $CardBag = ( $File | Bagged-File-Path -Wildcard )
+        $CardBag = ( $File | Get-PathToBaggedCopyOfLooseFile -Wildcard )
 
         $BagPayload = $null
         If ( Test-ZippedBag($File) ) {
             $BagPayload = $File
             $OnZipped.Invoke($File, $Quiet)
         }
-        ElseIf ( Test-Path -Path $CardBag ) {
-            Dir -Force -Path $CardBag | ForEach {
-                $BagPath = $_
-                $BagData = $BagPath.FullName + "\data"
-                if ( Test-Path -LiteralPath $BagData ) {
-                    $BagPayloadPath = "${BagData}\${FileName}"
-                    if ( Test-Path -LiteralPath $BagPayloadPath ) {
-                    
-                        $LeftHash = Get-FileHash -LiteralPath $File
-                        $RightHash = Get-FileHash -LiteralPath $BagPayloadPath
-
-                        if ( $LeftHash.hash -eq $RightHash.hash ) {
-                            $BagPayload = ( Get-Item -Force -LiteralPath $BagPayloadPath )
-                            $OnBagged.Invoke($File, $BagPayload, $BagPath, $Quiet)
-                        } else {
-                            $OnDiff.Invoke($File, $(Get-Item -Force -LiteralPath $BagPayloadPath), $LeftHash, $RightHash, $Quiet )
-                        }
-                    }
+        Else {
+            ( $Bag = Get-BaggedCopyOfLooseFile -File $File ) | Select-BagItPayload |% {
+                $BagPayload = $_
+                
+                If ( Test-DifferentFileContent -From $File -To $BagPayload ) {
+                    $OnBagged.Invoke($File, $BagPayload, $Bag, $Quiet)
+                }
+                Else {
+                    $OnDiff.Invoke($File, $BagPayload, $Quiet )
                 }
             }
         }
