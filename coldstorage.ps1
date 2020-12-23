@@ -859,7 +859,7 @@ Param( $Directory, [switch] $RelativeHref=$false )
 
             $htmlOut = ( "<!DOCTYPE html>${NL}<html>${NL}<head>${NL}<title>{0}</title>${NL}</head>${NL}<body>${NL}<h1>{0}</h1>${NL}{1}${NL}</body>${NL}</html>${NL}" -f $htmlTitle, ( $htmlUL -Join "${NL}" ) )
 
-            $htmlOut > $indexHtmlPath
+            $htmlOut | Out-File -FilePath $indexHtmlPath -NoClobber -Encoding utf8
         } else {
             Write-Error "index.html already exists in ${Directory}!"
         }
