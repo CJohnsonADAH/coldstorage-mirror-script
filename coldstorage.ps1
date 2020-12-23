@@ -504,7 +504,7 @@ Function Do-Bag-Directory ($DIRNAME, [switch] $Verbose=$false) {
     chdir $DIRNAME
 
     If ( Test-Path -LiteralPath ".\Thumbs.db" ) {
-        Remove-Item -LiteralPath ".\Thumbs.db" -Verbose:$Verbose
+        Remove-Item -Force -LiteralPath ".\Thumbs.db" -Verbose:$Verbose
     }
 
     "PS ${PWD}> bagit.py ." | Write-Verbose
