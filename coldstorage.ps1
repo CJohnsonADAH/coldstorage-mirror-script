@@ -19,6 +19,7 @@ param (
     [switch] $Help = $false,
     [switch] $Quiet = $false,
     [switch] $Diff = $false,
+    [switch] $SizesOnly = $false,
 	[switch] $Batch = $false,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
@@ -2124,6 +2125,9 @@ if ( $Help -eq $true ) {
         $DiffLevel = 0
         if ($Diff) {
             $DiffLevel = 2
+        }
+        if ($SizesOnly) {
+            $DiffLevel = 1
         }
 
         If ( $Items ) {
