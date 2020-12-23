@@ -1748,6 +1748,9 @@ param (
                         Do-Bag-Loose-File -LiteralPath $_.FullName
                     }
                 }
+                Else {
+                    Write-Bagged-Item-Notice -FileName $File.Name -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
+                }
             }
         }
     }
