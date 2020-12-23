@@ -866,6 +866,179 @@ Param( $Directory, [switch] $RelativeHref=$false )
     }
 }
 
+#############################################################################################################
+## ADPNet ###################################################################################################
+#############################################################################################################
+
+Function Get-ADPNetAUTitle {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Process {
+    $oFile = Get-FileObject -File $File
+
+    # Fully qualified file system path to the containing parent
+    $sFilePath = $oFile.Parent.FullName
+    
+    # Fully qualified UNC path to the containing parent
+    $oFileUNCPath = ( $sFilePath | Resolve-UNC-Path -ReturnObject )
+    $sFileUNCPath = $oFileUNCPath.FullName
+
+    # Slice off the root directory up to the node name of the repository container
+    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-File-Repository )
+    $sRepository = $oRepository.FullName
+    $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
+
+    $reUNCRepo = [Regex]::Escape($sRepository)
+    $sPathRelativeToRepo = ( $sFileUNCPath -ireplace "^${reUNCRepo}\\+","" )
+    
+    $RepositoryNodes = ColdStorage-Settings -Name "AU-Titles"
+
+    $Title = $null
+    If ( $RepositoryNodes.${sRepositoryNode} ) {
+        $sFileName = $oFile.Name
+        $Node = $RepositoryNodes.${sRepositoryNode}
+
+        $Node.PSObject.Properties | ForEach {
+            $Wildcard = ( $_.Name | ColdStorage-Settings-ToFilePath )
+            $Props = $_.Value -split "//"
+            Write-Host "CHECK: ", $Wildcard, $Props
+            If ( ".\${sPathRelativeToRepo}\${sFileName}" -like $Wildcard ) {
+                $Pattern = $Props[0]
+                $Process = ( $Props[1] -split "/" )[0..1]
+
+                $sSlug = $oFile.NAme -replace $Process
+                $Title = $Pattern -f ( $sSlug )
+            }
+
+        }
+
+    }
+    
+    If ( $Title ) {
+        $Title | Write-Output
+    }
+}
+
+}
+
+Function Get-ADPNetStartDir {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    Get-Bag-Zip-Name-Prefix -File $File | Write-Output
+}
+
+End { }
+
+}
+
+Function Get-ADPNetStartURL {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { $hrefPrefix = ColdStorage-Settings -Name "Drop-Server-URL" }
+
+Process {
+    $hrefPath = ( $File | Get-ADPNetStartDir )
+    ( "{0}/{1}/" -f $hrefPrefix, $hrefPath ) | Write-Output
+}
+
+End { }
+
+}
+
+Function Get-LOCKSSManifestPath {
+Param( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    $sFile = Get-FileLiteralPath -File $File
+    "${sFile}\manifest.html" | Write-Output
+}
+
+End { }
+}
+
+Function Get-LOCKSSManifest {
+Param( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    
+    $sFile = Get-FileLiteralPath -File $File
+
+    If ( Test-Path -LiteralPath $sFile ) {
+
+        $manifest = ( $sFile | Get-LOCKSSManifestPath )
+        Get-FileObject -File $manifest | Write-Output
+
+    }
+
+}
+
+End { }
+}
+
+Function Do-Make-Manifest-HTML {
+Param( $Directory, [string] $Title )
+
+    if ( $Directory -eq $null ) {
+        $Path = ( Get-Location )
+    } else {
+        $Path = ( $Directory )
+    }
+
+    $TitlePrefix = ColdStorage-Settings -Name "Institution"
+
+    if ( Test-Path -LiteralPath "${Path}" ) {
+        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Resolve-UNC-Path -ReturnObject )
+
+        If ( $UNC | Get-LOCKSSManifest ) {
+            Write-Error "manifest already exists in ${Directory}!"
+        }
+        Else {
+
+            $NL = [Environment]::NewLine
+
+            $htmlStartLink = ( '<a href="{0}">{1}</a>' -f $( $Path | Get-ADPNetStartURL ), $Title )
+            
+            $htmlLOCKSSBadge = '<img src="LOCKSS-small.gif" alt="LOCKSS" width="108" height="108" />'
+            $htmlLOCKSSPermission = '<img src="LOCKSS-small.gif" alt="LOCKSS" width="108" height="108" />'
+            
+            $htmlBody = ( (
+                "<p>${htmlStartLink}</p>",
+                "<p>${htmlLOCKSSBadge} ${htmlLOCKSSPermission}</p>",
+                ""
+            ) -Join "${NL}" )
+            
+            $htmlTitle = ( "{0}: {1}" -f $TitlePrefix, $Title )
+
+            $htmlOut = (
+                (
+                    (
+                "<!DOCTYPE html>",
+                "<html>",
+                "<head>",
+                "<title>{0}</title>",
+                "</head>",
+                "<body>",
+                "<h1>{0}</h1>",
+                "{1}",
+                "</body>",
+                "</html>",
+                ""
+                    ) -join "${NL}"
+                ) -f $htmlTitle, $htmlBody
+            )
+
+            $htmlOut | Out-File -FilePath ( $UNC | Get-LOCKSSManifestPath ) -NoClobber -Encoding utf8
+        }
+    }
+}
+
 ############################################################################################################
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
@@ -1002,6 +1175,97 @@ Process {
 
         }
         
+    }
+
+}
+
+End { }
+
+}
+
+#############################################################################################################
+## ADPNET DROP SERVER FUNCTIONS #############################################################################
+#############################################################################################################
+
+Function Get-DropServerAuthority {
+
+    $address = ( ColdStorage-Settings -Name "Drop-Server-SFTP" )
+    
+    ( $address -split "@",2 ) | Write-Output
+
+}
+
+Function Get-DropServerHost {
+
+    ( Get-DropServerAuthority )[1]
+
+}
+
+Function Get-DropServerUser {
+
+    ( Get-DropServerAuthority )[0]
+
+}
+
+Function Get-DropServerPassword {
+Param ( [string] $SFTPHost )
+
+    $md5 = New-Object -TypeName System.Security.Cryptography.MD5CryptoServiceProvider
+    $utf8 = New-Object -TypeName System.Text.UTF8Encoding
+    $hash = [System.BitConverter]::ToString($md5.ComputeHash($utf8.GetBytes($SFTPHost)))
+
+    $FileName = "${hash}.txt"
+    $FilePath = ColdStorage-Script-Dir
+    $Txt = "${FilePath}\${FileName}"
+
+    If ( Test-Path -LiteralPath $Txt ) {
+        ( Get-Content -LiteralPath $Txt ).Trim()
+    }
+
+}
+
+Function New-DropServerSession {
+
+    $User = Get-DropServerUser
+    $PWord = ConvertTo-SecureString -String ( Get-DropServerPassword -SFTPHost ( Get-DropServerHost ) ) -AsPlainText -Force
+    $Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $User, $PWord
+
+    New-SFTPSession -ComputerName ( Get-DropServerHost ) -Credential ( $Credential )
+}
+
+Function Set-DropServerFolder {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { }
+
+Process {
+    $oFile = ( Get-FileObject -File $File )
+    $sFile = $oFile.FullName
+
+    $session = $null
+
+    If ( Test-BagItFormattedDirectory -File $sFile ) {
+
+        If ( $oFile | Get-LOCKSSManifest ) {
+            $session = ( New-DropServerSession )
+        }
+        Else {
+            Write-Error "Needs LOCKSS manifest, use & coldstorage manifest"
+        }
+
+    }
+    Else {
+
+        Write-Error "Needs bagit formatting"
+
+    }
+
+    If ( $session ) {
+
+        Set-SFTPLocation -SessionId $session.SessionId -Path "./drop_au_content_in_here"
+        Set-SFTPFolder -SessionId $session.SessionId -LocalFolder $sFile -RemotePath ( $oFile | Get-ADPNetStartDir )
+
+        Remove-SFTPSession -SessionId $session.SessionId
     }
 
 }
@@ -2247,6 +2511,43 @@ if ( $Help -eq $true ) {
         $Words | ForEach {
             Do-Make-Index-Html -Directory $_ -RelativeHref
         }
+    }
+    ElseIf ( $Verb -eq "manifest" ) {
+
+        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
+        $Words | ForEach {
+            $Location = ( Get-Item -LiteralPath $_ )
+            $sTitle = ( $Location | Get-ADPNetAUTitle )
+            If ( -Not $sTitle ) {
+                $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
+            }
+
+            Do-Make-Manifest-HTML -Directory $_ -Title $sTitle
+        }
+    }
+    ElseIf ( $Verb -eq "drop" ) {
+
+        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
+        $Words | ForEach {
+            $Location = ( Get-Item -LiteralPath $_ )
+            
+            $sLocation = $Location.FullName
+
+            If ( -Not ( $Location | Get-LOCKSSManifest ) ) {
+
+                $sTitle = ( $Location | Get-ADPNetAUTitle )
+                If ( -Not $sTitle ) {
+                    $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
+                }
+
+                Do-Make-Manifest-HTML -Directory $_ -Title $sTitle
+
+            }
+
+            ( $Location | Set-DropServerFolder )
+
+        }
+
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
