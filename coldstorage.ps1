@@ -1759,44 +1759,6 @@ param (
     }
 }
 
-function Bagged-File-Path {
-    param (
-        [Switch]
-        $FullName,
-
-        [Switch]
-        $Wildcard,
-
-        [Parameter(ValueFromPipeline=$true)]
-        $File
-    )
-
-    Begin { }
-
-    Process {
-        $Prefix = ""
-        if ( $FullName ) {
-            $Prefix = $File.Directory
-            $Prefix = "${Prefix}\"
-        }
-        $FileName = $File.Name
-        $FileName = ( $FileName -replace "[^A-Za-z0-9]", "_" )
-        
-        if ( $Wildcard ) {
-            # 4 = YYYY, 2 = mm, 2 = dd, 2 = HH, 2 = MM, 2 = SS
-            $Suffix = ( "[0-9]" * ( 4 + 2 + 2 + 2 + 2 + 2) )
-        } else {
-            $DateStamp = ( Date -UFormat "%Y%m%d%H%M%S" )
-            $Suffix = "${DateStamp}"
-        }
-        $Suffix = "_bagged_${Suffix}"
-
-        "${Prefix}${FileName}${Suffix}"
-    }
-
-    End { }
-}
-
 function Do-Scan-File-For-Bags {
     [CmdletBinding()]
 
