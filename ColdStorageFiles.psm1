@@ -22,7 +22,7 @@ Param($File)
 		$oFile = $null
 	}
 	ElseIf ( -Not ( Get-Member -InputObject $File -name "FullName" -MemberType Properties ) ) {
-		$oFile = Get-File-Object($File)
+		$oFile = Get-FileObject($File)
 	}
 	Else {
 		$oFile = $File

@@ -105,7 +105,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ReturnObject=$fals
 Begin { $timestamp = Get-Date }
 
 Process {
-    $oFile = Get-File-Object -File $File
+    $oFile = Get-FileObject -File $File
     $span = ( ( $timestamp ) - ( $oFile.CreationTime ) )
     If ( ( $span.Days ) -ge ( $RipeDays ) ) {
         If ( $ReturnObject ) {
@@ -330,7 +330,6 @@ Process {
 End { }
 }
 
-
 function Get-ClamAV-Path () {
     return ( ColdStorage-Settings("ClamAV") | ColdStorage-Settings-ToFilePath )
 }
@@ -515,7 +514,7 @@ function Do-Bag-Loose-File ($LiteralPath) {
     chdir $Item.DirectoryName
     $OriginalFileName = $Item.Name
     $OriginalFullName = $Item.FullName
-    $FileName = ( $Item | Bagged-File-Path )
+    $FileName = ( $Item | Get-PathToBaggedCopyOfLooseFile )
 
     $BagDir = ".\${FileName}"
     if ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
@@ -997,7 +996,7 @@ End { }
 Function Do-Make-Bagged-ChildItem-Map {
 Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false )
 
-    Get-Bagged-ChildItem -LiteralPath $LiteralPath -Path $Path -Zipped:${Zipped} | % {
+    Get-BaggedChildItem -LiteralPath $LiteralPath -Path $Path -Zipped:${Zipped} | % {
         $_.FullName
     }
 }
@@ -2215,7 +2214,7 @@ if ( $Help -eq $true ) {
                 }
             }
             Else {
-                $_ | Get-Item -Force |% { Get-Bagged-ChildItem -LiteralPath $_.FullName } | Do-Zip-Bagged-Directory
+                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Do-Zip-Bagged-Directory
             }
         }
     }

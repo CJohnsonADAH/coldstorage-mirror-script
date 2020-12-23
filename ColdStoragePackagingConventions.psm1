@@ -109,6 +109,44 @@ Function Test-LooseFile ( $File ) {
     $result
 }
 
+Function Get-PathToBaggedCopyOfLooseFile {
+    Param (
+        [Switch]
+        $FullName,
+
+        [Switch]
+        $Wildcard,
+
+        [Parameter(ValueFromPipeline=$true)]
+        $File
+    )
+
+    Begin { }
+
+    Process {
+        $Prefix = ""
+        if ( $FullName ) {
+            $Prefix = $File.Directory
+            $Prefix = "${Prefix}\"
+        }
+        $FileName = $File.Name
+        $FileName = ( $FileName -replace "[^A-Za-z0-9]", "_" )
+        
+        if ( $Wildcard ) {
+            # 4 = YYYY, 2 = mm, 2 = dd, 2 = HH, 2 = MM, 2 = SS
+            $Suffix = ( "[0-9]" * ( 4 + 2 + 2 + 2 + 2 + 2) )
+        } else {
+            $DateStamp = ( Date -UFormat "%Y%m%d%H%M%S" )
+            $Suffix = "${DateStamp}"
+        }
+        $Suffix = "_bagged_${Suffix}"
+
+        "${Prefix}${FileName}${Suffix}"
+    }
+
+    End { }
+}
+
 Function Test-UnbaggedLooseFile {
 Param ( $File )
 
@@ -135,7 +173,7 @@ Function Get-BaggedCopyOfLooseFile ( $File ) {
     If ( Test-LooseFile($File) ) {
         $oFile = Get-FileObject($File)
         $Parent = $oFile.Directory
-        $Wildcard = ( $oFile | Bagged-File-Path -Wildcard )
+        $Wildcard = ( $oFile | Get-PathToBaggedCopyOfLooseFile -Wildcard )
         $match = ( Get-ChildItem -Directory $Parent | Select-BaggedCopiesOfLooseFiles -Wildcard $Wildcard | Select-BaggedCopyMatchedToLooseFile -File $oFile )
 
         if ( $match.Count -gt 0 ) {
@@ -276,6 +314,7 @@ Export-ModuleMember -Function Test-ZippedBag
 Export-ModuleMember -Function Select-ZippedBags
 Export-ModuleMember -Function Test-LooseFile
 Export-ModuleMember -Function Test-UnbaggedLooseFile
+Export-ModuleMember -Function Get-PathToBaggedCopyOfLooseFile
 Export-ModuleMember -Function Get-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
