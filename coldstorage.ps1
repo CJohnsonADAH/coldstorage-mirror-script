@@ -2510,7 +2510,7 @@ if ( $Help -eq $true ) {
         $Words | Get-RepositoryStats
     }
     ElseIf ( $Verb -eq "settings" ) {
-        ColdStorage-Settings -Name $args[1]
+        ColdStorage-Settings -Name $Words
         $Quiet = $true
     }
     ElseIf ( $Verb -eq "repository" ) {
