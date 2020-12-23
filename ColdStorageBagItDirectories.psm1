@@ -58,9 +58,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    $oFile = Get-FileObject($File)
-    $sPath = $oFile.FullName
-    Get-Item -Force -LiteralPath "${sPath}\data"
+    If ( $File -ne $null ) {
+        $sPath = Get-FileObject($File).FullName
+        Get-Item -Force -LiteralPath "${sPath}\data"
+    }
 }
 
 End { }
