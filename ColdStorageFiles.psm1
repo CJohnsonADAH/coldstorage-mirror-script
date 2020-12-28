@@ -10,10 +10,12 @@ Module for utility functions dealing with the local or network-shared file syste
 Function Get-FileObject ( $File ) {
     
     $oFile = $null
-    If ( $File -is [String] ) {
+    If ( ( $File -is [String] ) -and ( $File.length -gt 0 ) ) {
+
         If ( Test-Path -LiteralPath "${File}" ) {
             $oFile = ( Get-Item -Force -LiteralPath "${File}" )
         }
+
     }
     Else {
         $oFile = $File
@@ -30,6 +32,9 @@ Param($File)
 	If ( $File -eq $null ) {
 		$oFile = $null
 	}
+	ElseIf ( $File -is [String] ) {
+		$oFile = Get-FileObject($File)
+    }
 	ElseIf ( -Not ( Get-Member -InputObject $File -name "FullName" -MemberType Properties ) ) {
 		$oFile = Get-FileObject($File)
 	}
@@ -37,8 +42,10 @@ Param($File)
 		$oFile = $File
 	}
 
-	If ( Get-Member -InputObject $oFile -name "FullName" -MemberType Properties ) {
-		$sFile = $oFile.FullName
+	If ( $oFile -ne $null ) {
+        If ( Get-Member -InputObject $oFile -name "FullName" -MemberType Properties ) {
+		    $sFile = $oFile.FullName
+        }
 	}
 	
 	$sFile
