@@ -42,6 +42,26 @@ Function Test-HiddenOrSystemFile ( $File ) {
     ( ( $oFile.Attributes -band $screen ) -ne 0 )
 }
 
+Function Test-SystemArtifactItem {
+Param ( $File )
+
+    $oFile = Get-FileObject $File
+    
+    If ( $oFile ) {
+        ( $oFile.Name -eq 'Thumbs.db' )
+    }
+    Else {
+        $false
+    }
+}
+
+Function Get-SystemArtifactItems {
+Param ( $LiteralPath )
+
+    Get-ChildItem -LiteralPath $LiteralPath -Force |% { If ( Test-SystemArtifactItem -File $_ ) { $_ } }
+
+}
+
 Function Test-DifferentFileContent {
 Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
 
@@ -92,7 +112,150 @@ Param ( $From, $To, [Int] $DiffLevel=2, [switch] $Verbose=$false )
     $Differentiated
 }
 
+# WAS/IS: Resolve-UNC-Path/Get-UNCPathResolved
+Function Get-UNCPathResolved {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ReturnObject=$false )
+
+Begin {}
+
+Process {
+    $output = $null
+
+    $FileObject = Get-FileObject($File)
+
+    $Drive = $null
+    $Root = $null
+
+    If ( -Not ( $FileObject -eq $null )) {
+        If ( Get-Member -InputObject $FileObject -Name "Root" -MemberType Properties ) {
+            $Root = $FileObject.Root
+        } ElseIf ( Get-Member -InputObject $FileObject -Name "Directory" -MemberType Properties ) {
+            $Parent = $FileObject.Directory
+            $Root = $Parent.Root
+        }
+    }
+
+    If ( -Not ( $Root -eq $null ) ) {
+        Try {
+            $Drive = New-Object System.IO.DriveInfo($Root)
+            $Drive.DriveType | Out-Null
+        } Catch {
+            $Drive = $null
+        }
+
+        If ($Drive -eq $null) {
+            $output = $FileObject.FullName
+        }
+        ElseIf ($Drive.DriveType -eq "Fixed") {
+            $output = $FileObject.FullName
+        }
+        Else {
+            $RootPath = $Parent
+            $currentDrive = Split-Path -Qualifier $Root.FullName
+            $logicalDisk = Gwmi Win32_LogicalDisk -filter "DriveType = 4 AND DeviceID = '${currentDrive}'"
+            $ProviderName = $logicalDisk.ProviderName
+            $unc = $FileObject.FullName.Replace($currentDrive, $ProviderName)
+            $output = $unc
+        }
+
+        if ($ReturnObject) {
+            $output = (Get-Item -Force -LiteralPath $output)
+            $File | Get-Member -Type NoteProperty | ForEach-Object {
+                If ( -Not ( $output | Get-Member -Type NoteProperty -Name $_.Name ) ) {
+                    $output | Add-Member -Type NoteProperty -Name $_.Name -Value ( $File | Select -ExpandProperty $_.Name )
+                }
+            }
+        }
+        $output
+    }
+}
+
+End {}
+
+}
+
+# WAs/IS: Resolve-UNC-Path-To-Local-If-Local/Get-LocalPathFromUNC
+Function Get-LocalPathFromUNC {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin {
+    $sHost = $env:COMPUTERNAME
+    $aShares = ( Get-WMIObject -ComputerName "${sHost}" -Query "SELECT * FROM Win32_Share" )
+
+    $sShareLocalPath = $null
+    $sLocalFullName = $null
+}
+
+Process {
+    If ( $File -is [string] ) {
+        $File = Get-FileObject($File)
+    }
+
+    $Output = $File
+
+    If ( $File.PSDrive ) {
+        # This is on a local drive, we're all good
+    }
+    ElseIf ( $File.Root ) {
+        $UNCRoot = $File.Root.FullName
+        $sShareLocalPath = $null
+        $sLocalFullName = $null
+
+        $aShares | ForEach {
+            $sSharePath = $_.Name
+            If ( $UNCRoot -eq "\\${sHost}\${sSharePath}" ) {
+                $sShareLocalPath = $_.Path
+            }
+        }
+        If ( $sShareLocalPath -ne $null ) {
+            $reUNCRoot = [Regex]::Escape($UNCRoot)
+            $replaceLocalPath = ($sShareLocalPath -replace [Regex]::Escape("$"), "\$&")
+            $sLocalFullName = $File.FullName -ireplace "^${reUNCRoot}","${replaceLocalPath}"
+        }
+
+        If ( $sLocalFullName -ne $null ) {
+            If ( Test-Path -LiteralPath $sLocalFullName ) {
+                $Output = ( Get-Item -Force -LiteralPath $sLocalFullName )
+            }
+        }
+        
+    }
+
+    If ( $Output ) {
+        $Output
+    }
+    Else {
+        $File
+    }
+
+}
+
+End { }
+
+}
+
+# WAS/IS: Get-File-FileSystem-Location/Get-ItemFileSystemLocation
+Function Get-ItemFileSystemLocation {
+Param($File)
+
+    $oFile = Get-FileObject -File $File
+    If ( $oFile ) {
+        If ( Get-Member -InputObject $oFile -name "Directory" -MemberType Properties ) {
+            $oLoc = ( $oFile.Directory | Add-Member -Force -NotePropertyMembers @{Leaf=( $oFile.Name ); Location=( $oFile.Directory.FullName ); RelativePath=@( $oFile.Directory.Name, $oFile.Name ) } -PassThru )
+        }
+        Else {
+            $oLoc = ( $oFile | Add-Member -Force -NotePropertyMembers @{Leaf="."; Location=( $oFile.FullName ); RelativePath=@( $oFile.Name ) } -PassThru )
+        }
+        $oLoc
+    }
+}
+
 Export-ModuleMember -Function Get-FileObject
 Export-ModuleMember -Function Get-FileLiteralPath
 Export-ModuleMember -Function Test-HiddenOrSystemFile
+Export-ModuleMember -Function Test-SystemArtifactItem
+Export-ModuleMember -Function Get-SystemArtifactItems
 Export-ModuleMember -Function Test-DifferentFileContent
+Export-ModuleMember -Function Get-UNCPathResolved
+Export-ModuleMember -Function Get-LocalPathFromUNC
+Export-ModuleMember -Function Get-ItemFileSystemLocation

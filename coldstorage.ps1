@@ -36,7 +36,7 @@ $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 
 # coldstorage
 #
-# Last-Modified: 14 October 2020
+# Last-Modified: 28 December 2020
 
 Function ColdStorage-Script-Dir {
 Param ( $File=$null )
@@ -60,6 +60,7 @@ Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -Fi
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
@@ -170,74 +171,6 @@ function Rebase-File {
    }
 
    End {}
-}
-
-
-Function Get-File-FileSystem-Location {
-Param($File)
-
-    $oFile = Get-FileObject -File $File
-    If ( $oFile ) {
-        If ( Get-Member -InputObject $oFile -name "Directory" -MemberType Properties ) {
-            $oLoc = ( $oFile.Directory | Add-Member -Force -NotePropertyMembers @{Leaf=( $oFile.Name ); Location=( $oFile.Directory.FullName ); RelativePath=@( $oFile.Directory.Name, $oFile.Name ) } -PassThru )
-        }
-        Else {
-            $oLoc = ( $oFile | Add-Member -Force -NotePropertyMembers @{Leaf="."; Location=( $oFile.FullName ); RelativePath=@( $oFile.Name ) } -PassThru )
-        }
-        $oLoc
-    }
-}
-
-
-Function Get-File-Repository-Candidates {
-Param ( $Key, [switch] $UNC=$false )
-
-    $mirrors = ( Get-ColdStorageRepositories )
-
-    $repo = $mirrors[$Key]
-
-    $mirrors[$Key][1..2] |% {
-        $sTestRepo = ( $_ ).ToString()
-        If ( $oTestRepo = Get-FileObject -File $sTestRepo ) {
-
-            $sTestRepo # > stdout
-
-            $sLocalTestRepo = ( $oTestRepo | Resolve-UNC-Path-To-Local-If-Local ).FullName
-            If ( -Not ( $UNC ) ) {
-                If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
-                    $sLocalTestRepo # > stdout
-                }
-            }
-
-        }
-    }
-
-}
-
-Function Get-File-Repository {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Slug=$false )
-
-Begin { $mirrors = ( Get-ColdStorageRepositories ) }
-
-Process {
-    
-    # get self if $File is a directory, parent if it is a leaf node
-    $oDir = ( Get-File-FileSystem-Location $File | Resolve-UNC-Path -ReturnObject )
-
-    $oRepos = ( $mirrors.Keys |% { $sKey = $_; $oCands = ( Get-File-Repository-Candidates -Key $_ ); If ($oCands -ieq $oDir.FullName) {
-        If ($Slug) { $sKey }
-        Else { $oDir.FullName }
-    } } )
-
-    $oRepos
-    If ( ( $oRepos.Count -lt 1 ) -and ( $oDir.Parent ) ) {
-        $oDir.Parent | Get-File-Repository -Slug:$Slug
-    }
-
-}
-
-End { }
-
 }
 
 Function Get-Trashcan-Location {
@@ -503,9 +436,7 @@ Function Do-Bag-Directory ($DIRNAME, [switch] $Verbose=$false) {
     $Anchor = $PWD
     chdir $DIRNAME
 
-    If ( Test-Path -LiteralPath ".\Thumbs.db" ) {
-        Remove-Item -Force -LiteralPath ".\Thumbs.db" -Verbose:$Verbose
-    }
+    Get-SystemArtifactItems -LiteralPath "." | Remove-Item -Force -Verbose:$Verbose
 
     "PS ${PWD}> bagit.py ." | Write-Verbose
     
@@ -556,232 +487,11 @@ function Do-Bag-Loose-File ($LiteralPath) {
     chdir $Anchor
 }
 
-######################################################################################################
-## ZIP ###############################################################################################
-######################################################################################################
-
-Function Get-Zipped-Bag-MD5 {
-
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $oFile = Get-FileObject -File $File
-    $reMD5 = "^.*_md5_([A-Za-z0-9]+)[.]zip$"
-
-    If ( $oFile.Name -imatch $reMD5 ) {
-        Write-Output ( $oFile.Name -ireplace $reMD5,'$1' )
-    }
-}
-
-End { }
-
-}
-
-Function Get-Bag-Zip-Name-Prefix {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $oFile = Get-FileObject -File $File
-
-    # Fully qualified file system path to the containing parent
-    $sFilePath = $oFile.Parent.FullName
-    
-    # Fully qualified UNC path to the containing parent
-    $oFileUNCPath = ( $sFilePath | Resolve-UNC-Path -ReturnObject )
-    $sFileUNCPath = $oFileUNCPath.FullName
-
-    # Slice off the root directory up to the node name of the repository container
-    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-File-Repository )
-    $sRepository = $oRepository.FullName
-    $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
-
-    $sFileName = $oFile.Name
-
-    $reUNCRepo = [Regex]::Escape($sRepository)
-    $sZipPrefix = ( $sFileUNCPath -ireplace "^${reUNCRepo}","${sRepositoryNode}" )
-        
-    $sZipPrefix = ( $sZipPrefix -replace "[^A-Za-z0-9]+","-" )
-
-    "${sZipPrefix}-${sFileName}" # > stdout
-
-}
-
-End { }
-
-}
-
-Function Get-Zipped-Bag-Of-Bag {
-
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    If ( Test-BagItFormattedDirectory -File $File ) {
-        $Repository = ( $File | Get-Zipped-Bag-Location )
-        $Prefix = ( Get-Bag-Zip-Name-Prefix -File $File )
-        Get-ChildItem -Path "${Repository}\${Prefix}_z*_md5_*.zip"
-    }
-}
-
-End { }
-
-}
-
-Function Get-Zipped-Bag-Location {
-
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $File | Get-File-Repository |% {
-        $sRepoDir = $_
-        $sZipDir = "${sRepoDir}\ZIP"
-        If ( -Not ( Test-Path -LiteralPath $sZipDir ) ) {
-            $oZipDir = ( New-Item -ItemType Directory -Path "${sZipDir}" )
-        }
-        Else {
-            $oZipDir = ( Get-Item -Force -LiteralPath "${sZipDir}" )
-        }
-        $oZipDir
-    }
-}
-
-End { }
-
-}
-
-
 #############################################################################################################
 ## index.html FOR BOUND SUBDIRECTORIES ######################################################################
 #############################################################################################################
 
 Add-Type -Assembly System.Web
-
-function Resolve-UNC-Path {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ReturnObject=$false )
-
-Begin {}
-
-Process {
-    $output = $null
-
-    $FileObject = Get-FileObject($File)
-
-    $Drive = $null
-    $Root = $null
-
-    If ( -Not ( $FileObject -eq $null )) {
-        If ( Get-Member -InputObject $FileObject -Name "Root" -MemberType Properties ) {
-            $Root = $FileObject.Root
-        } ElseIf ( Get-Member -InputObject $FileObject -Name "Directory" -MemberType Properties ) {
-            $Parent = $FileObject.Directory
-            $Root = $Parent.Root
-        }
-    }
-
-    If ( -Not ( $Root -eq $null ) ) {
-        Try {
-            $Drive = New-Object System.IO.DriveInfo($Root)
-            $Drive.DriveType | Out-Null
-        } Catch {
-            $Drive = $null
-        }
-
-        If ($Drive -eq $null) {
-            $output = $FileObject.FullName
-        }
-        ElseIf ($Drive.DriveType -eq "Fixed") {
-            $output = $FileObject.FullName
-        }
-        Else {
-            $RootPath = $Parent
-            $currentDrive = Split-Path -Qualifier $Root.FullName
-            $logicalDisk = Gwmi Win32_LogicalDisk -filter "DriveType = 4 AND DeviceID = '${currentDrive}'"
-            $ProviderName = $logicalDisk.ProviderName
-            $unc = $FileObject.FullName.Replace($currentDrive, $ProviderName)
-            $output = $unc
-        }
-
-        if ($ReturnObject) {
-            $output = (Get-Item -Force -LiteralPath $output)
-            $File | Get-Member -Type NoteProperty | ForEach-Object {
-                If ( -Not ( $output | Get-Member -Type NoteProperty -Name $_.Name ) ) {
-                    $output | Add-Member -Type NoteProperty -Name $_.Name -Value ( $File | Select -ExpandProperty $_.Name )
-                }
-            }
-        }
-        $output
-    }
-}
-
-End {}
-
-}
-
-Function Resolve-UNC-Path-To-Local-If-Local {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin {
-    $sHost = $env:COMPUTERNAME
-    $aShares = ( Get-WMIObject -ComputerName "${sHost}" -Query "SELECT * FROM Win32_Share" )
-
-    $sShareLocalPath = $null
-    $sLocalFullName = $null
-}
-
-Process {
-    If ( $File -is [string] ) {
-        $File = Get-FileObject($File)
-    }
-
-    $Output = $File
-
-    If ( $File.PSDrive ) {
-        # This is on a local drive, we're all good
-    }
-    ElseIf ( $File.Root ) {
-        $UNCRoot = $File.Root.FullName
-        $sShareLocalPath = $null
-        $sLocalFullName = $null
-
-        $aShares | ForEach {
-            $sSharePath = $_.Name
-            If ( $UNCRoot -eq "\\${sHost}\${sSharePath}" ) {
-                $sShareLocalPath = $_.Path
-            }
-        }
-        If ( $sShareLocalPath -ne $null ) {
-            $reUNCRoot = [Regex]::Escape($UNCRoot)
-            $replaceLocalPath = ($sShareLocalPath -replace [Regex]::Escape("$"), "\$&")
-            $sLocalFullName = $File.FullName -ireplace "^${reUNCRoot}","${replaceLocalPath}"
-        }
-
-        If ( $sLocalFullName -ne $null ) {
-            If ( Test-Path -LiteralPath $sLocalFullName ) {
-                $Output = ( Get-Item -Force -LiteralPath $sLocalFullName )
-            }
-        }
-        
-    }
-
-    If ( $Output ) {
-        $Output
-    }
-    Else {
-        $File
-    }
-
-}
-
-End { }
-
-}
 
 function Select-URI-Link {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false )
@@ -845,12 +555,12 @@ Param( $Directory, [switch] $RelativeHref=$false )
     }
 
     if ( Test-Path -LiteralPath "${Path}" ) {
-        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Resolve-UNC-Path -ReturnObject )
+        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
 
         $indexHtmlPath = "${UNC}\index.html"
 
         if ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
-            $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Resolve-UNC-Path -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC -RelativeHref:${RelativeHref}
+            $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Get-UNCPathResolved -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC -RelativeHref:${RelativeHref}
 
             $NL = [Environment]::NewLine
 
@@ -880,11 +590,11 @@ Process {
     $sFilePath = $oFile.Parent.FullName
     
     # Fully qualified UNC path to the containing parent
-    $oFileUNCPath = ( $sFilePath | Resolve-UNC-Path -ReturnObject )
+    $oFileUNCPath = ( $sFilePath | Get-UNCPathResolved -ReturnObject )
     $sFileUNCPath = $oFileUNCPath.FullName
 
     # Slice off the root directory up to the node name of the repository container
-    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-File-Repository )
+    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepository )
     $sRepository = $oRepository.FullName
     $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
 
@@ -927,7 +637,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    Get-Bag-Zip-Name-Prefix -File $File | Write-Output
+    Get-ZippedBagNamePrefix -File $File | Write-Output
 }
 
 End { }
@@ -994,7 +704,7 @@ Param( $Directory, [string] $Title )
     $TitlePrefix = ColdStorage-Settings -Name "Institution"
 
     if ( Test-Path -LiteralPath "${Path}" ) {
-        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Resolve-UNC-Path -ReturnObject )
+        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
 
         If ( $UNC | Get-LOCKSSManifest ) {
             Write-Error "manifest already exists in ${Directory}!"
@@ -1144,10 +854,10 @@ Process {
     }
 
     # get self if $File is a directory, parent if it is a leaf node
-    $oDir = ( Get-File-FileSystem-Location $File | Resolve-UNC-Path -ReturnObject )
+    $oDir = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject )
 
     If ( $Repositories.Count -eq 0 ) {
-        $Repositories = ( $mirrors[$Pair][1..2] | Resolve-UNC-Path-To-Local-If-Local |% { $_.FullName } )
+        $Repositories = ( $mirrors[$Pair][1..2] | Get-LocalPathFromUNC |% { $_.FullName } )
         $Matchable = $Repositories[$Range]
     }
 
@@ -1590,8 +1300,8 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
             $locations = $mirrors[$Pair]
 
             $slug = $locations[0]
-            $src = (Get-Item -Force -LiteralPath $locations[2] | Resolve-UNC-Path-To-Local-If-Local ).FullName
-            $dest = (Get-Item -Force -LiteralPath $locations[1] | Resolve-UNC-Path-To-Local-If-Local ).FullName
+            $src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
+            $dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
             $TrashcanLocation = ( Get-Trashcan-Location -Repository $Pair )
 
             if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
@@ -1770,7 +1480,7 @@ param (
     $Exclude="^$",
 
     [ScriptBlock]
-    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-Zipped-Bag-Of-Bag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
+    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-ZippedBagOfUnzippedBag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
 
     [ScriptBlock]
     $OnDiff={ Param($File, $Payload, $Quiet); },
@@ -1894,7 +1604,7 @@ param (
             If ( -not ( $BaseName -match $Exclude ) ) {
 
                 if ( Test-BagItFormattedDirectory($File) ) {
-                    $oZip = ( Get-Zipped-Bag-Of-Bag -File $File )
+                    $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
                     Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Zip $oZip -Quiet:$Quiet -Line ( Get-CurrentLine )
 
                 } else {
@@ -1909,7 +1619,7 @@ param (
 
         }
         ElseIf ( Test-BagItFormattedDirectory($File) ) {
-            $oZip = ( Get-Zipped-Bag-Of-Bag -File $File )
+            $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
             Write-Bagged-Item-Notice -FileName $DirName -Zip $oZip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
@@ -2005,29 +1715,6 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
     chdir $Anchor
 }
 
-Function Do-Validate-Zipped-Bag {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-Begin { }
-
-Process {
-    $sFile = Get-FileLiteralPath $File
-    $md5 = ($File | Get-Zipped-Bag-MD5 )
-    $oChecksum = ( Get-FileHash -LiteralPath $sFile -Algorithm MD5 )
-    $sHash = $oChecksum.hash
-
-    If ( $sHash -ieq $md5 ) {
-        "OK-Zip/MD5: ${sFile}"
-    }
-    Else {
-        "ERR-Zip/MD5: ${sFile} with MD5 checksum ${md5}" | Write-Warning
-    }
-}
-
-End { }
-
-}
-
 Function Do-Validate-Item {
 
 Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true )
@@ -2046,7 +1733,7 @@ Process {
             $Validated = ( Do-Validate-Bag -DIRNAME $_ -Verbose:$Verbose  )
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
-            $Validated = ( $_ | Do-Validate-Zipped-Bag )
+            $Validated = ( $_ | Test-ZippedBagIntegrity )
         }
 
         $nChecked = $nChecked + 1
@@ -2275,18 +1962,18 @@ Process {
         $Validated
         If ( $Validated | Did-It-Have-Validation-Errors | Shall-We-Continue ) {
 
-            $oZip = ( Get-Zipped-Bag-Of-Bag -File $oFile )
+            $oZip = ( Get-ZippedBagOfUnzippedBag -File $oFile )
 
             If ( $oZip.Count -gt 0 ) {
                 $sArchiveHashed = $oZip.FullName
                 "ZIP: ${sArchiveHashed}"
             }
             Else {
-                $oRepository = ( $oFile | Get-Zipped-Bag-Location )
+                $oRepository = ( $oFile | Get-ZippedBagsContainer )
                 $sRepository = $oRepository.FullName
 
                 $ts = $( Date -UFormat "%Y%m%d%H%M%S" )
-                $sZipPrefix = ( Get-Bag-Zip-Name-Prefix -File $oFile )
+                $sZipPrefix = ( Get-ZippedBagNamePrefix -File $oFile )
 
                 $sZipName = "${sZipPrefix}_z${ts}"
                 $sArchive = "${sRepository}\${sZipName}.zip"
@@ -2318,7 +2005,7 @@ Process {
                 "ZIP: ${sFile} -> ${sArchiveHashed}"
             }
 
-            Do-Validate-Zipped-Bag -File $sArchiveHashed
+            Test-ZippedBagIntegrity -File $sArchiveHashed
         }
     }
     Else {
@@ -2374,8 +2061,8 @@ if ( $Help -eq $true ) {
             $Words |% {
                 $File = Get-FileObject($_)
                 If ( $File ) {
-                    $Repository = ( Get-File-Repository -File $File )
-                    $RepositorySlug = ( Get-File-Repository -File $Repository -Slug )
+                    $Repository = ( Get-FileRepository -File $File )
+                    $RepositorySlug = ( Get-FileRepository -File $Repository -Slug )
                     $TrashcanLocation = ( Get-Trashcan-Location -Repository $RepositorySlug )
 
                     $Src = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Original )
@@ -2393,8 +2080,8 @@ if ( $Help -eq $true ) {
                 #$locations = $mirrors[$Pair]
 
                 #$slug = $locations[0]
-                #$src = (Get-Item -Force -LiteralPath $locations[2] | Resolve-UNC-Path-To-Local-If-Local ).FullName
-                #$dest = (Get-Item -Force -LiteralPath $locations[1] | Resolve-UNC-Path-To-Local-If-Local ).FullName
+                #$src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
+                #$dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
                 #$TrashcanLocation = "${ColdStorageBackup}\${slug}_${Pair}"
 
             }
@@ -2517,7 +2204,7 @@ if ( $Help -eq $true ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
             $File = Get-FileObject -File $_
-            "FILE:", $File.FullName, "REPO:", ($File | Get-File-Repository)
+            "FILE:", $File.FullName, "REPO:", ($File | Get-FileRepository)
         }
         $Quiet = $true
     }
@@ -2525,7 +2212,7 @@ if ( $Help -eq $true ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
             $File = Get-FileObject -File $_
-            "FILE:", $File.FullName, "PREFIX:", ($File | Get-Bag-Zip-Name-Prefix)
+            "FILE:", $File.FullName, "PREFIX:", ($File | Get-ZippedBagNamePrefix )
         }
         $Quiet = $true
     }

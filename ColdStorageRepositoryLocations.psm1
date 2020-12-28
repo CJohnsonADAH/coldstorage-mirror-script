@@ -63,7 +63,59 @@ Param ( $Repository )
     }
 }
 
+Function Get-FileRepositoryCandidates {
+Param ( $Key, [switch] $UNC=$false )
+
+    $mirrors = ( Get-ColdStorageRepositories )
+
+    $repo = $mirrors[$Key]
+
+    $mirrors[$Key][1..2] |% {
+        $sTestRepo = ( $_ ).ToString()
+        If ( $oTestRepo = Get-FileObject -File $sTestRepo ) {
+
+            $sTestRepo # > stdout
+
+            $sLocalTestRepo = ( $oTestRepo | Get-LocalPathFromUNC ).FullName
+            If ( -Not ( $UNC ) ) {
+                If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
+                    $sLocalTestRepo # > stdout
+                }
+            }
+
+        }
+    }
+
+}
+
+Function Get-FileRepository {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Slug=$false )
+
+Begin { $mirrors = ( Get-ColdStorageRepositories ) }
+
+Process {
+    
+    # get self if $File is a directory, parent if it is a leaf node
+    $oDir = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject )
+
+    $oRepos = ( $mirrors.Keys |% { $sKey = $_; $oCands = ( Get-FileRepositoryCandidates -Key $_ ); If ($oCands -ieq $oDir.FullName) {
+        If ($Slug) { $sKey }
+        Else { $oDir.FullName }
+    } } )
+
+    $oRepos
+    If ( ( $oRepos.Count -lt 1 ) -and ( $oDir.Parent ) ) {
+        $oDir.Parent | Get-FileRepository -Slug:$Slug
+    }
+
+}
+
+End { }
+
+}
+
+
 Export-ModuleMember -Function Get-ColdStorageRepositories
 Export-ModuleMember -Function Get-ColdStorageLocation
 Export-ModuleMember -Function Get-ColdStorageZipLocation
-
+Export-ModuleMember -Function Get-FileRepository
