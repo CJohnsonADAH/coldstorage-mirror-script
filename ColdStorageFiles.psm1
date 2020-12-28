@@ -1,4 +1,13 @@
-﻿Function Get-FileObject ( $File ) {
+﻿<#
+.SYNOPSIS
+Module for utility functions dealing with the local or network-shared file system.
+
+.DESCRIPTION
+
+@version 2020.1228
+#>
+
+Function Get-FileObject ( $File ) {
     
     $oFile = $null
     If ( $File -is [String] ) {
