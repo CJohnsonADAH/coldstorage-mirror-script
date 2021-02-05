@@ -78,7 +78,7 @@ Process {
     $oFile = Get-FileObject -File $File
 
     # Fully qualified file system path to the containing parent
-    $sFilePath = $oFile.Parent.FullName
+    $sFilePath = ( Get-ItemFileSystemParent $oFile ).FullName
     
     # Fully qualified UNC path to the containing parent
     $oFileUNCPath = ( $sFilePath | Get-UNCPathResolved -ReturnObject )
@@ -126,7 +126,7 @@ End { }
 # WAS/IS: Get-Zipped-Bag-Location/Get-ZippedBagsContainer
 Function Get-ZippedBagsContainer {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ) )
 
 Begin { }
 
@@ -144,6 +144,33 @@ Process {
     }
 }
 
+End {
+    $Repository |% {
+        $Location = Get-ColdStorageZipLocation -Repository:$_
+        If ( $Location ) {
+            $Location | Get-ZippedBagsContainer
+        }
+    }
+}
+
+}
+
+Function Test-ZippedBagsContainer {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+Begin { 
+    
+}
+
+Process {
+    $oFile = ( Get-FileObject $File )
+    $Parent = ( $File | Get-ItemFileSystemParent | Get-UNCPathResolved )
+    $Repository = ( $File | Get-FileRepository )
+
+    $result = ( ( $Parent -ieq $Repository ) -and ( $oFile.Name -eq "ZIP" ) )
+    $result | Write-Output
+}
+
 End { }
 
 }
@@ -153,3 +180,4 @@ Export-ModuleMember -Function Get-ZippedBagProfessedMD5
 Export-ModuleMember -Function Get-ZippedBagNamePrefix
 Export-ModuleMember -Function Get-ZippedBagOfUnzippedBag
 Export-ModuleMember -Function Get-ZippedBagsContainer
+Export-ModuleMember -Function Test-ZippedBagsContainer

@@ -4,7 +4,7 @@ Module for utility functions dealing with the local or network-shared file syste
 
 .DESCRIPTION
 
-@version 2020.1228
+@version 2021.0127
 #>
 
 Function Get-FileObject ( $File ) {
@@ -49,6 +49,29 @@ Param($File)
 	}
 	
 	$sFile
+}
+
+Function Get-ItemFileSystemParent {
+Param( [Parameter(ValueFromPipeline=$true)] $Piped, $File=$null)
+
+Begin { }
+
+Process {
+
+    $oFile = Get-FileObject ( $Piped )
+
+    If ( $oFile ) {
+        If ( $oFile.Parent ) {
+            $oFile.Parent
+        }
+        ElseIf ( $oFile.Directory ) {
+            $oFile.Directory
+        }
+    }
+}
+
+End { If ( $File.Count -gt 0 ) { $File | Get-ItemFileSystemParent -File:$null } }
+
 }
 
 Function Test-HiddenOrSystemFile ( $File ) {
@@ -252,9 +275,13 @@ End { }
 
 # WAS/IS: Get-File-FileSystem-Location/Get-ItemFileSystemLocation
 Function Get-ItemFileSystemLocation {
-Param($File)
+Param( [Parameter(ValueFromPipeline=$true)] $Piped, $File=$null )
 
-    $oFile = Get-FileObject -File $File
+Begin { }
+
+Process {
+
+    $oFile = Get-FileObject -File ( $Piped )
     If ( $oFile ) {
         If ( Get-Member -InputObject $oFile -name "Directory" -MemberType Properties ) {
             $oLoc = ( $oFile.Directory | Add-Member -Force -NotePropertyMembers @{Leaf=( $oFile.Name ); Location=( $oFile.Directory.FullName ); RelativePath=@( $oFile.Directory.Name, $oFile.Name ) } -PassThru )
@@ -266,6 +293,10 @@ Param($File)
     }
 }
 
+End { If ( $File.Count -gt 0 ) { $File | Get-ItemFileSystemLocation -File:$null } }
+
+}
+
 Export-ModuleMember -Function Get-FileObject
 Export-ModuleMember -Function Get-FileLiteralPath
 Export-ModuleMember -Function Test-HiddenOrSystemFile
@@ -275,3 +306,4 @@ Export-ModuleMember -Function Test-DifferentFileContent
 Export-ModuleMember -Function Get-UNCPathResolved
 Export-ModuleMember -Function Get-LocalPathFromUNC
 Export-ModuleMember -Function Get-ItemFileSystemLocation
+Export-ModuleMember -Function Get-ItemFileSystemParent

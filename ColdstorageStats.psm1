@@ -23,37 +23,72 @@ Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "Col
 #############################################################################################################
 
 Function Get-RepositoryStats {
-Param ( [Parameter(ValueFromPipeline=$true)] $Repository )
+Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $Batch=$false )
 
 Begin { }
 
 Process {
-    Write-Progress -Id 101 -Activity "Scanning ${sRepo}"
-    $sRepo = $_
+    $sRepo = $Repository
+    If ( -Not $Batch ) {
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}"
 
-    Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Getting locations" -PercentComplete 0
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status "Getting locations" -PercentComplete 20
 
-    Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Counting zipped bags" -PercentComplete 50
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status "Counting zipped bags" -PercentComplete 40
+    }
 
-    $ZipLocation = ( Get-ColdStorageZipLocation -Repository $_ )
+    $ZipLocation = ( Get-ColdStorageZipLocation -Repository $Repository )
     If ( $ZipLocation ) {
-        $nZipped = ( Get-ChildItem -LiteralPath $ZipLocation.FullName ).Count
+        $aZipped = ( Get-ChildItem -LiteralPath $ZipLocation.FullName )
+        
+        #$aZipped | Write-Verbose
+
+        $nZipped = $aZipped.Count
     }
     Else {
+        ( "{0} ZIP LOCATION: {1} DOES NOT EXIST." -f $sRepo,$ZipLocation ) | Write-Warning
         $nZipped = 0
     }
 
-    Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Counting bags" -PercentComplete 75
+    #Write-Verbose ( "ZIP: {0}" -f $ZipLocation )
     
+    If ( -Not $Batch ) {
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status "Counting bags in cloud storage" -PercentComplete 75
+    }
+    $bucket = ( $ZipLocation | Get-CloudStorageBucket )
+
+    #Write-Verbose ( "BUCKET: {0}" -f $bucket )
+
+    $nInCloud = 0
+    If ( $bucket ) {
+        If ( -Not $Batch ) {
+            Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status ("Counting bags in cloud storage [{0}]" -f $bucket) -PercentComplete 80
+        }
+        $aInCloud = ( $ZipLocation | Get-CloudStorageListing )
+        $nInCloud = $aInCloud.Count
+    }
+
+    If ( -Not $Batch ) {
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status "Counting bags" -PercentComplete 60
+    }
+
     $Location = ( Get-Item -Force -LiteralPath ( Get-ColdStorageLocation -Repository $_ ) )
 
-    $nBagged = ( Get-BaggedChildItem -LiteralPath $Location.FullName ).Count
+    $aBagged = ( Get-BaggedChildItem -LiteralPath $Location.FullName )
 
-    Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100
-   
-    @{} | Select-Object @{n='Location';e={ $sRepo }}, @{n='Bagged';e={ $nBagged }}, @{n='Zipped';e={ $nZipped }}
+    #$aBagged | Write-Verbose
 
-    Write-Progress -Id 101 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100 -Completed
+    $nBagged = $aBagged.Count
+
+    If ( -Not $Batch ) {
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100
+   }
+
+    @{} | Select-Object @{n='Location';e={ $sRepo }}, @{n='Bagged';e={ $nBagged }}, @{n='Zipped';e={ $nZipped }}, @{n='Cloud';e={ $nInCloud }}
+
+    If ( -Not $Batch ) {
+        Write-Progress -Id 102 -Activity "Scanning ${sRepo}" -Status "Writing object" -PercentComplete 100 -Completed
+    }
 }
 
 End { }

@@ -19,17 +19,29 @@ Param ( $Command, $File=$null )
 ## DATA #####################################################################################################
 #############################################################################################################
 
-$ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
-$ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
+$ColdStorageData = "\\ADAHColdStorage\ADAHDATA"
+$ColdStorageDataER = "${ColdStorageData}\ElectronicRecords"
+$ColdStorageDataDA = "${ColdStorageData}\Digitization"
+$ColdStorageER = "\\ADAHColdStorage\ElectronicRecords"
+$ColdStorageDA = "\\ADAHColdStorage\Digitization"
 $ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
 
 $mirrors = @{
-    Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageER}\Processed" )
-    Working_ER=( "ER", "${ColdStorageER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
-    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageER}\Unprocessed" )
-    Masters=( "DA", "${ColdStorageDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
-    Access=( "DA", "${ColdStorageDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
-    Working_DA=( "DA", "${ColdStorageDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
+    Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageDataER}\Processed" )
+    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageDataER}\Unprocessed" )
+    Working_ER=( "ER", "${ColdStorageDataER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
+    Masters=( "DA", "${ColdStorageDataDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
+    Access=( "DA", "${ColdStorageDataDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
+    Working_DA=( "DA", "${ColdStorageDataDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
+}
+$RepositoryAliases = @{
+    Processed=( "${ColdStorageER}\Processed", "${ColdStorageDataER}\Processed" )
+    Working_ER=( "${ColdStorageER}\Working-Mirror", "${ColdStorageDataER}\Working-Mirror" )
+    Unprocessed=( "${ColdStorageER}\Unprocessed", "${ColdStorageDataER}\Unprocessed" )
+    Masters=( "${ColdStorageDA}\Masters", "${ColdStorageDataDA}\Masters" )
+    Access=( "${ColdStorageDA}\Access", "${ColdStorageDataDA}\Access" )
+    Working_DA=( "${ColdStorageDA}\Working-Mirror", "${ColdStorageDataDA}\Working-Mirror" )
+    
 }
 
 #############################################################################################################
@@ -45,7 +57,7 @@ Param ( $Repository )
 
     $aRepo = $mirrors[$Repository]
 
-    If ( ( $aRepo[1] -Like "${ColdStorageER}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageDA}\*" ) ) {
+    If ( ( $aRepo[1] -Like "${ColdStorageER}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageDA}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageData}\*" ) ) {
         $aRepo[1]
     }
     Else {
@@ -68,15 +80,17 @@ Param ( $Key, [switch] $UNC=$false )
 
     $mirrors = ( Get-ColdStorageRepositories )
 
-    $repo = $mirrors[$Key]
+    $repo = $mirrors[$Key][1..2]
+    $aliases = $RepositoryAliases[$Key]
 
-    $mirrors[$Key][1..2] |% {
+    ( $repo + $aliases) |% {
         $sTestRepo = ( $_ ).ToString()
         If ( $oTestRepo = Get-FileObject -File $sTestRepo ) {
 
             $sTestRepo # > stdout
 
             $sLocalTestRepo = ( $oTestRepo | Get-LocalPathFromUNC ).FullName
+
             If ( -Not ( $UNC ) ) {
                 If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
                     $sLocalTestRepo # > stdout
@@ -98,9 +112,14 @@ Process {
     # get self if $File is a directory, parent if it is a leaf node
     $oDir = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject )
 
-    $oRepos = ( $mirrors.Keys |% { $sKey = $_; $oCands = ( Get-FileRepositoryCandidates -Key $_ ); If ($oCands -ieq $oDir.FullName) {
-        If ($Slug) { $sKey }
-        Else { $oDir.FullName }
+    $oRepos = ( $mirrors.Keys |% {
+        $sKey = $_;
+        $oCands = ( Get-FileRepositoryCandidates -Key $_ );
+
+        If ($oCands -ieq $oDir.FullName) {
+
+            If ($Slug) { $sKey }
+            Else { $oDir.FullName }
     } } )
 
     $oRepos

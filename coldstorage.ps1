@@ -21,9 +21,11 @@ param (
     [switch] $Diff = $false,
     [switch] $SizesOnly = $false,
 	[switch] $Batch = $false,
+    [switch] $Interactive = $false,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $NoScan = $false,
+    [switch] $Force = $false,
     #[switch] $Verbose = $false,
     #[switch] $Debug = $false,
     [switch] $WhatIf = $false,
@@ -61,6 +63,7 @@ Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -Fi
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
@@ -78,6 +81,34 @@ Process {
 }
 
 End { $ExitCode }
+
+}
+
+Function Test-UserApproved {
+Param ( [Parameter(ValueFromPipeline=$true)] $Candidate, [String] $Prompt, [String] $Default="N" )
+
+Begin { }
+
+Process {
+    $FormattedPrompt = $Prompt
+    If ( $Prompt -match "\{[0-9]\}" ) {
+        $FormattedPrompt = ( $Prompt -f $Candidate )
+    }
+
+    $ShouldWeContinue = ( Read-Host $FormattedPrompt )
+    If ( $ShouldWeContinue -match "^[YyNn].*" ) {
+        $ShouldWeContinue = ( $ShouldWeContinue )[0]
+    }
+    Else {
+        $ShouldWeContinue = $Default
+    }
+
+    If ( $ShouldWeContinue -eq "Y" ) {
+        $Candidate
+    }
+}
+
+End { }
 
 }
 
@@ -378,7 +409,7 @@ Param ( $Prefix, $FileName, $ERCode=$null, $Zip=$false, $Suffix=$null )
 }
 
 Function Write-Bagged-Item-Notice {
-Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, $Zip=$false, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
+Param( $FileName, $Item=$null, $ERCode=$null, $Status=$null, $Message=$null, $Zip=$false, [switch] $Quiet=$false, [switch] $Verbose=$false, [switch] $ReturnObject=$false, $Line=$null )
 
     $Prefix = "BAGGED"
     If ( $Status -ne $null ) {
@@ -402,6 +433,16 @@ Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, $Zip=$false, [sw
     }
     ElseIf ( $Verbose ) {
         Write-Verbose $LogMesg
+    }
+
+    If ( ( $ReturnObject ) -and ( $Status -ne "SKIPPED" ) ) {
+        Write-Output $Item
+    }
+    ElseIf ( $Zip -eq $null ) {
+        # NOOP
+    }
+    ElseIf ( $Verbose ) {
+        # NOOP
     }
     ElseIf ( $Quiet -eq $false ) {
         Write-Output $LogMesg
@@ -546,7 +587,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null )
 }
 
 function Do-Make-Index-Html {
-Param( $Directory, [switch] $RelativeHref=$false )
+Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
 
     if ( $Directory -eq $null ) {
         $Path = ( Get-Location )
@@ -569,7 +610,7 @@ Param( $Directory, [switch] $RelativeHref=$false )
 
             $htmlOut = ( "<!DOCTYPE html>${NL}<html>${NL}<head>${NL}<title>{0}</title>${NL}</head>${NL}<body>${NL}<h1>{0}</h1>${NL}{1}${NL}</body>${NL}</html>${NL}" -f $htmlTitle, ( $htmlUL -Join "${NL}" ) )
 
-            $htmlOut | Out-File -FilePath $indexHtmlPath -NoClobber -Encoding utf8
+            $htmlOut | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
         } else {
             Write-Error "index.html already exists in ${Directory}!"
         }
@@ -692,8 +733,8 @@ Process {
 End { }
 }
 
-Function Do-Make-Manifest-HTML {
-Param( $Directory, [string] $Title )
+Function Add-LOCKSSManifestHTML {
+Param( $Directory, [string] $Title, [switch] $Force=$false )
 
     if ( $Directory -eq $null ) {
         $Path = ( Get-Location )
@@ -705,9 +746,9 @@ Param( $Directory, [string] $Title )
 
     if ( Test-Path -LiteralPath "${Path}" ) {
         $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
-
-        If ( $UNC | Get-LOCKSSManifest ) {
-            Write-Error "manifest already exists in ${Directory}!"
+        $oManifest = ( $UNC | Get-LOCKSSManifest )
+        If ( ( $oManifest ) -and ( -Not $Force ) ) {
+            Write-Error ( "[manifest:${Directory}] manifest.html already exists for this AU ({0} bytes, created {1})" -f $oManifest.Length, $oManifest.CreationTime )
         }
         Else {
 
@@ -716,7 +757,7 @@ Param( $Directory, [string] $Title )
             $htmlStartLink = ( '<a href="{0}">{1}</a>' -f $( $Path | Get-ADPNetStartURL ), $Title )
             
             $htmlLOCKSSBadge = '<img src="LOCKSS-small.gif" alt="LOCKSS" width="108" height="108" />'
-            $htmlLOCKSSPermission = '<img src="LOCKSS-small.gif" alt="LOCKSS" width="108" height="108" />'
+            $htmlLOCKSSPermission = 'LOCKSS system has permission to collect, preserve, and serve this Archival Unit.'
             
             $htmlBody = ( (
                 "<p>${htmlStartLink}</p>",
@@ -744,7 +785,7 @@ Param( $Directory, [string] $Title )
                 ) -f $htmlTitle, $htmlBody
             )
 
-            $htmlOut | Out-File -FilePath ( $UNC | Get-LOCKSSManifestPath ) -NoClobber -Encoding utf8
+            $htmlOut | Out-File -FilePath ( $UNC | Get-LOCKSSManifestPath ) -NoClobber:(-Not $Force) -Encoding utf8
         }
     }
 }
@@ -834,6 +875,47 @@ function Get-Matched-Items {
    }
 
    End {}
+}
+
+Function Test-UnmirroredDerivedItem {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $LiteralPath=$null ) 
+
+Begin { }
+
+Process {
+    $result = $false
+
+    $Path = ( Get-FileLiteralPath -File $File )
+
+    If ( $Path ) {
+        If ( Test-Path -PathType Container -LiteralPath $Path ) { # Directory
+
+            If ( Test-ZippedBagsContainer -File $Path ) {
+                $result = $true        
+            }
+            Else {
+                $oFile = ( Get-FileObject -File $File )
+                If ( Test-BaggedCopyOfLooseFile -File $oFile ) {
+                    $result = $true
+                }
+            }
+
+        }
+        Else { # File
+
+            If ( Test-ZippedBag -LiteralPath $Path ) {
+                $result = $true
+            }
+
+        }
+    }
+
+    $result
+
+}
+
+End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedItem -LiteralPath:$null } }
+
 }
 
 Function Get-Mirror-Matched-Item {
@@ -946,42 +1028,140 @@ Function New-DropServerSession {
 Function Set-DropServerFolder {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
-Begin { }
+Begin {
+    $session = ( New-DropServerSession )
+}
 
 Process {
     $oFile = ( Get-FileObject -File $File )
     $sFile = $oFile.FullName
 
-    $session = $null
+    If ( $session ) {
+        If ( Test-BagItFormattedDirectory -File $sFile ) {
 
-    If ( Test-BagItFormattedDirectory -File $sFile ) {
+            If ( $oFile | Get-LOCKSSManifest ) {
 
-        If ( $oFile | Get-LOCKSSManifest ) {
-            $session = ( New-DropServerSession )
+                $RemoteRoot = "/drop_au_content_in_here"
+                Set-SFTPLocation -SessionId $session.SessionId -Path "${RemoteRoot}"
+
+                $RemoteDestination = ( $oFile | Get-ADPNetStartDir )
+                Get-SFTPChildItem -SessionId $session.SessionId -Path $RemoteRoot |% {
+
+                    If ( $_.Name -ieq "${RemoteDestination}" ) {
+                        $RemoteBase = $_
+                    }
+                }
+
+
+                If ( Test-SFTPPath -SFTPSession:$session -Path:$RemoteDestination ) { # Already uploaded; sync.
+                    Write-Verbose "[drop:$sFile] already exists; sync with local copy."
+                    $oFile | Sync-DropServerAU -SFTPSession:$session -RemoteRepository:$RemoteRoot
+                }
+                Else {
+                    Write-Verbose "[drop:$sFile] not yet staged; add local copy"
+                    $oFile | Add-DropServerAU -SFTPSession:$session -RemoteRepository:$RemoteRoot
+                }
+
+            }
+            Else {
+                Write-Error "[drop:$sFile]: Requires LOCKSS manifest.html file. Use: & coldstorage manifest -Items '${sFile}'"
+            }
+
         }
         Else {
-            Write-Error "Needs LOCKSS manifest, use & coldstorage manifest"
-        }
 
+            Write-Error "[drop:$sFile]: Requires bagit formatting. Use: & coldstorage bag -Items '${sFile}'"
+
+        }
     }
     Else {
 
-        Write-Error "Needs bagit formatting"
+        Write-Error "[drop:$sFile]: SFTP connection failed."
+        Write-Error $session
 
     }
 
+}
+
+End {
     If ( $session ) {
+        $removed = ( Remove-SFTPSession -SessionId $session.SessionId )
+    }
+}
 
-        Set-SFTPLocation -SessionId $session.SessionId -Path "./drop_au_content_in_here"
-        Set-SFTPFolder -SessionId $session.SessionId -LocalFolder $sFile -RemotePath ( $oFile | Get-ADPNetStartDir )
+}
 
-        Remove-SFTPSession -SessionId $session.SessionId
+Function Add-DropServerAU {
+    Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository )
+
+    Begin { }
+
+    Process {
+        $sLocalFullName = $LocalFolder.FullName
+        $sRemotePath = ( $LocalFolder | Get-ADPNetStartDir )
+        Set-SFTPFolder -SessionId:($SFTPSession.SessionId) -LocalFolder:$sLocalFullName -RemotePath:$sRemotePath
+    }
+
+    End { }
+
+}
+
+Function Sync-DropServerAU {
+Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository )
+
+Begin { }
+
+Process {
+    $RemoteDestination = ( $LocalFolder | Get-ADPNetStartDir )
+    Get-SFTPChildItem -SessionId:($SFTPSession.SessionId) -Path:$RemoteRepository |% {
+
+        If ( $_.Name -ieq "${RemoteDestination}" ) {
+            $RemoteBase = $_
+        }
+
+    }
+
+    Get-SFTPChildItem -SessionId $session.SessionId -Recursive -Path $RemoteDestination |% {
+        $RemoteFile = $_
+        $LocalFile = ( $_ | Get-ADPNetFileLocalPath -Session:$session -LocalBase:$LocalFolder -RemoteBase:$RemoteBase )
+        $RemoteAttr = Get-SFTPPathAttribute -SessionId $session.SessionId -Path $RemoteFile.FullName
+            
+        $LocalLength = $LocalFile.Length
+        $RemoteLength = $RemoteAttr.Size
+            
+        $WrittenLater = ( $LocalFile.LastWriteTime -gt $RemoteAttr.LastWriteTime )
+        $SizesDiffer = ( $LocalFile.Length -ne $RemoteAttr.Size )
+        If ( $RemoteAttr.IsRegularFile ) {
+            If ( $WrittenLater -or $SizesDiffer ) {
+                $FileName = $LocalFile.Name
+                Write-Warning "${FileName} differs. Local copy: ${LocalLength}; Remote: ${RemoteLength}"
+                $RemotePath = ( $RemoteFile.FullName -split "/" )
+                $RemoteParent = ( $RemotePath[0..($RemotePath.Count-2)] ) -join "/"
+                Set-SFTPItem -SFTPSession:$session -Path:($LocalFile.FullName) -Destination:($RemoteParent) -Force -Verbose
+            }
+        }
     }
 
 }
 
 End { }
+}
 
+Function Get-ADPNetFileLocalPath {
+Param ( [Parameter(ValueFromPipeline=$true)] $RemoteFile, $Session, $LocalBase, $RemoteBase )
+
+Begin { }
+
+Process {
+    $reRemoteBase = [Regex]::Escape($RemoteBase.FullName)
+    $remoteRelative = ( $RemoteFile.FullName -replace "^${reRemoteBase}/","" ) -replace "[/]","\"
+    $LocalizedFileName = ( $LocalBase.FullName + "\${remoteRelative}" )
+    If ( Test-Path -LiteralPath $LocalizedFileName ) {
+        Get-Item -Force -LiteralPath $LocalizedFileName | Write-Output
+    }
+}
+
+End { }
 }
 
 #############################################################################################################
@@ -996,7 +1176,7 @@ Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false )
     }
 }
 
-Function Do-Copy-Snapshot-File ($from, $to, $direction="over", $Batch=$false, [switch] $ReadOnly=$false) {
+Function Do-Copy-Snapshot-File ($from, $to, $direction="over", [switch] $Batch=$false, [switch] $ReadOnly=$false) {
     $o1 = ( Get-Item -Force -LiteralPath "${from}" )
 
     If ( $o1.Count -gt 0 ) {
@@ -1092,7 +1272,7 @@ function Sync-Metadata ($from, $to, $verbose) {
 }
 
 Function Do-Mirror-Clean-Up-Obsolete-Files {
-Param ($From, $To, $Trashcan, $Depth=0, $ProgressId=0, $NewProgressId=0)
+Param ($From, $To, $Trashcan, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $NewProgressId=0)
 
     $aDirs = Get-ChildItem -Directory -LiteralPath "$To"
     $N = $aDirs.Count
@@ -1107,14 +1287,15 @@ Param ($From, $To, $Trashcan, $Depth=0, $ProgressId=0, $NewProgressId=0)
         $MoveFrom = $_.FullName
         $MoveTo = ($_ | Rebase-File -To $Trashcan)
 
-        If ( -Not ( Test-BaggedCopyOfLooseFile -File ( Get-Item -LiteralPath $_.FullName ) ) ) {
-            If ( -Not ( Test-ZippedBag -LiteralPath $_.FullName ) ) {
-                "Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force"
-                if ( -Not ( Test-Path -LiteralPath $Trashcan ) ) {
-                    mkdir $Trashcan
-                }
-                Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force
+        If ( -Not ( $_ | Test-UnmirroredDerivedItem ) ) {
+            "Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force"
+            If ( -Not ( Test-Path -LiteralPath $Trashcan ) ) {
+                mkdir $Trashcan
             }
+            Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force
+        }
+        ElseIf ( $Verbose ) {
+            Write-Warning "SKIPPED (UNMIRRORED DERIVED ITEM): [${MoveFrom}]"
         }
     }
     If ( -Not $Batch ) {
@@ -1124,9 +1305,12 @@ Param ($From, $To, $Trashcan, $Depth=0, $ProgressId=0, $NewProgressId=0)
 }
 
 Function Do-Mirror-Directories {
-Param ($From, $to, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
+Param ($From, $to, $Trashcan, $DiffLevel=1, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $NewProgressId=0)
+    $aDirs = @( )
+    If ( Test-Path -LiteralPath "$From" ) {
+        $aDirs = Get-ChildItem -Directory -LiteralPath "$From"
+    }
 
-    $aDirs = Get-ChildItem -Directory -LiteralPath "$From"
     $N = $aDirs.Count
     $aDirs | Get-Unmatched-Items -Match "${To}" -DiffLevel 0 -OnConsider {
         Param($File, $Candidate, $DiffLevel, $I);
@@ -1147,10 +1331,13 @@ Param ($From, $to, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgres
 }
 
 Function Do-Mirror-Files {
-Param ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
+Param ($From, $To, $Trashcan, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
 
     $i = 0
-    $aFiles = ( Get-ChildItem -File -LiteralPath "$From" )
+    $aFiles = @( )
+    If ( Test-Path -LiteralPath "$From" ) {
+        $aFiles = ( Get-ChildItem -File -LiteralPath "$From" )
+    }
     $N = $aFiles.Count
 
     $sProgressActivity = "Matching Files (cp) [${From} => ${To}]"
@@ -1178,7 +1365,7 @@ Param ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgres
         $i = $i + 1
 
         
-        Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch $Batch
+        Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch:$Batch
         
     }
     If ( -Not $Batch ) {
@@ -1187,10 +1374,13 @@ Param ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgres
 }
 
 Function Do-Mirror-Metadata {
-Param( $From, $To, $ProgressId, $NewProgressId )
+Param( $From, $To, $ProgressId, $NewProgressId, [switch] $Batch=$false )
 
     $i = 0
-    $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" -DiffLevel 0 )
+    $aFiles = @( )
+    If ( Test-Path -LiteralPath "$From" ) {
+        $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" -DiffLevel 0 )
+    }
     $N = $aFiles.Count
 
     $aFiles | ForEach  {
@@ -1209,7 +1399,7 @@ Param( $From, $To, $ProgressId, $NewProgressId )
     }
 }
 
-function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
+function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Batch=$false) {
     $IdBase = (10 * $Depth)
     If ($Depth -gt 0) {
         $RootedIdBase = 0
@@ -1233,38 +1423,51 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
     ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (rm)" -percentComplete 0
-    Do-Mirror-Clean-Up-Obsolete-Files -From $From -To $To -Trashcan $Trashcan -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (rm)" -percentComplete 0
+    }
+    Do-Mirror-Clean-Up-Obsolete-Files -From $From -To $To -Trashcan $Trashcan -Batch:$Batch -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## COPY OVER (mkdir): Create child directories on destination to mirror subdirectories of source. ################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (mkdir)" -percentComplete 20
-    Do-Mirror-Directories -From $From -To $To -Trashcan $Trashcan -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (mkdir)" -percentComplete 20
+    }
+    Do-Mirror-Directories -From $From -To $To -Trashcan $Trashcan -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (cp)" -percentComplete 40
-    Do-Mirror-Files -From $From -To $To -Trashcan $Trashcan -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (cp)" -percentComplete 40
+    }
+    Do-Mirror-Files -From $From -To $To -Trashcan $Trashcan -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## METADATA: Synchronize source file system meta-data to destination #############################################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (meta)" -percentComplete 60
-    Do-Mirror-Metadata -From $From -To $To -ProgressId $RootedIdBase -NewProgressId $IdBase
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (meta)" -percentComplete 60
+    }
+    Do-Mirror-Metadata -From $From -To $To -Batch:$Batch -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
     ##################################################################################################################
 
-    Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (chdir)" -percentComplete 80
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (chdir)" -percentComplete 80
+    }
 
     $i = 0
-    $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Items -Match "$To" -DiffLevel 0 )
+    $aFiles = @( )
+    If ( Test-Path -LiteralPath "$From" ) {
+        $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Items -Match "$To" -DiffLevel 0 )
+    }
     $N = $aFiles.Count
     
     $aFiles | ForEach {
@@ -1274,14 +1477,17 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0) {
         $MirrorTrash = ($_ | Rebase-File -To "${Trashcan}")
 
         $i = $i + 1
-        Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Status "${BaseName}" -percentComplete (100*$i / $N)
-
-        Do-Mirror -From "${MirrorFrom}" -To "${MirrorTo}" -Trashcan "${MirrorTrash}" -DiffLevel $DiffLevel -Depth ($Depth + 1)
+        If ( -Not $Batch ) {
+            Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Status "${BaseName}" -percentComplete (100*$i / $N)
+        }
+        Do-Mirror -From "${MirrorFrom}" -To "${MirrorTo}" -Trashcan "${MirrorTrash}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch
     }
-    Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Completed
+    If ( -Not $Batch ) {
+        Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Completed
+    }
 }
 
-function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
+function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false) {
 
     $mirrors = ( Get-ColdStorageRepositories )
 
@@ -1309,7 +1515,7 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
             }
 
             Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-            Do-Mirror -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel
+            Do-Mirror -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel -Batch:$Batch
         } else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
@@ -1324,10 +1530,10 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1) {
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Do-Mirror-Repositories -Pairs $recurseInto -DiffLevel $DiffLevel
+                Do-Mirror-Repositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch
             }
             Else {
-                Write-Output "No such repository: ${Pair}."
+                Write-Warning "No such repository: ${Pair}."
             }
         } # if
         $i = $i + 1
@@ -1364,34 +1570,17 @@ param (
 
         $DirName = $File.FullName
         $BaseName = $File.Name
+
         If ( Test-ERInstanceDirectory($File) ) {
-            If ( -not ( $BaseName -match $Exclude ) ) {
-                $ERMeta = ( $File | Get-ERInstanceData )
-                $ERCode = $ERMeta.ERCode
-
-                chdir $DirName
-
-                if ( Test-BagItFormattedDirectory($File) ) {
-                    Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
-                }
-                else {
-                    Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
-                    
-                    $NotOK = ( $DirName | Do-Scan-ERInstance )
-                    If ( $NotOK | Shall-We-Continue ) {
-                        Do-Bag-Directory -DIRNAME $DirName
-                    }
-
-                }
-            }
-            Else {
-                Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
-            }
-
-            chdir $Anchor
+            $ERMeta = ( $File | Get-ERInstanceData )
+            $ERCode = $ERMeta.ERCode
         }
-        ElseIf ( Test-BagItFormattedDirectory($File) ) {
-            Write-Bagged-Item-Notice -FileName $File.Name -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
+        Else {
+            $ERCode = $null
+        }
+
+        If ( Test-BagItFormattedDirectory($File) ) {
+            Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "BagIt formatted directory" -ERCode:$ERCode -Verbose -Line ( Get-CurrentLine )
             If ( $Rebag ) {
                 $Payload = ( $File | Select-BagItPayloadDirectory )
                 $Bag = ( $Payload.Parent )
@@ -1441,6 +1630,32 @@ param (
             }
 
         }
+        ElseIf ( Test-ERInstanceDirectory($File) ) {
+            If ( -not ( $BaseName -match $Exclude ) ) {
+                $ERMeta = ( $File | Get-ERInstanceData )
+                $ERCode = $ERMeta.ERCode
+
+                chdir $DirName
+
+                if ( Test-BagItFormattedDirectory($File) ) {
+                    Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                }
+                else {
+                    Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+                    
+                    $NotOK = ( $DirName | Do-Scan-ERInstance )
+                    If ( $NotOK | Shall-We-Continue ) {
+                        Do-Bag-Directory -DIRNAME $DirName
+                    }
+
+                }
+            }
+            Else {
+                Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+            }
+
+            chdir $Anchor
+        }
         ElseIf ( Test-IndexedDirectory($File) ) {
             Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
@@ -1459,7 +1674,7 @@ param (
                     }
                 }
                 Else {
-                    Write-Bagged-Item-Notice -FileName $File.Name -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
+                    Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
                 }
             }
         }
@@ -1480,7 +1695,7 @@ param (
     $Exclude="^$",
 
     [ScriptBlock]
-    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-ZippedBagOfUnzippedBag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
+    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-ZippedBagOfUnzippedBag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Item:$File -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
 
     [ScriptBlock]
     $OnDiff={ Param($File, $Payload, $Quiet); },
@@ -1605,14 +1820,14 @@ param (
 
                 if ( Test-BagItFormattedDirectory($File) ) {
                     $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
-                    Write-Bagged-Item-Notice -FileName $DirName -ERCode $ERCode -Zip $oZip -Quiet:$Quiet -Line ( Get-CurrentLine )
+                    Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Zip $oZip -Quiet:$Quiet -Line ( Get-CurrentLine )
 
                 } else {
                     Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
             }
             Else {
-                Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
 
             chdir $Anchor
@@ -1620,7 +1835,7 @@ param (
         }
         ElseIf ( Test-BagItFormattedDirectory($File) ) {
             $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
-            Write-Bagged-Item-Notice -FileName $DirName -Zip $oZip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+            Write-Bagged-Item-Notice -FileName $DirName -Item:$File -Zip $oZip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
             Write-Unbagged-Item-Notice -FileName $DirName -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
@@ -2019,6 +2234,24 @@ End { }
 
 }
 
+Function Do-CloudUploadsAbort {
+
+    $Bucket = "er-collections-unprocessed"
+
+    $sMultipartUploadsJSON = ( & aws s3api list-multipart-uploads --bucket "${Bucket}" )
+    $oMultipartUploads = $( $sMultipartUploadsJSON | ConvertFrom-Json )
+    $oMultipartUploads.Uploads |% {
+        $Key = $_.Key
+        $UploadId = $_.UploadId
+        If ( $Key -and $UploadId ) {
+            $cAbort = ( Read-Host -Prompt "ABORT ${Key}, # ${UploadId}? (Y/N)" )
+            If ( $cAbort[0] -ieq 'Y' ) {
+                & aws s3api abort-multipart-upload --bucket "${Bucket}" --key "${Key}" --upload-id "${UploadId}"
+            }
+        }
+    }
+}
+
 function Do-Write-Usage ($cmd) {
     $mirrors = ( Get-ColdStorageRepositories )
 
@@ -2073,7 +2306,7 @@ if ( $Help -eq $true ) {
                         mkdir "${TrashcanLocation}"
                     }
 
-                    Do-Mirror -From "${Src}" -To "${Dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel
+                    Do-Mirror -From "${Src}" -To "${Dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel -Batch:$Batch
 
                 }
 
@@ -2087,7 +2320,7 @@ if ( $Help -eq $true ) {
             }
         }
         Else {
-            Do-Mirror-Repositories -Pairs $Words -DiffLevel $DiffLevel
+            Do-Mirror-Repositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch
         }
 
     }
@@ -2152,7 +2385,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "index" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
-            Do-Make-Index-Html -Directory $_ -RelativeHref
+            Do-Make-Index-Html -Directory $_ -RelativeHref -Force:$Force
         }
     }
     ElseIf ( $Verb -eq "manifest" ) {
@@ -2165,7 +2398,7 @@ if ( $Help -eq $true ) {
                 $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
             }
 
-            Do-Make-Manifest-HTML -Directory $_ -Title $sTitle
+            Add-LOCKSSManifestHTML -Directory $_ -Title $sTitle -Force:$Force
         }
     }
     ElseIf ( $Verb -eq "drop" ) {
@@ -2183,7 +2416,7 @@ if ( $Help -eq $true ) {
                     $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
                 }
 
-                Do-Make-Manifest-HTML -Directory $_ -Title $sTitle
+                Add-LOCKSSManifestHTML -Directory $_ -Title $sTitle -Force:$Force
 
             }
 
@@ -2192,33 +2425,70 @@ if ( $Help -eq $true ) {
         }
 
     }
+    ElseIf ( $Verb -eq "abort-cloud-uploads" ) {
+        $Words | Do-CloudUploadsAbort        
+    }
+    ElseIf ( $Verb -eq "bucket" ) {
+        $Words | Get-CloudStorageBucket
+        $Quiet = $true
+    }
+    ElseIf ( $Verb -eq "to" ) {
+        $Object, $Words = $Words
+        $Destinations = ("cloud", "drop")
+
+        If ( -Not $Items ) {
+            Write-Warning ( "[to:${Object}] Not yet implemented for repositories. Try: & coldstorage to ${Object} -Items [File1] [File2] [...]" )
+        }
+        ElseIf ( $Object -eq "cloud" ) {
+            $Words | Add-PackageToCloudStorageBucket
+        }
+        Else {
+            Write-Warning ( "[to:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
+        }
+    }
+    ElseIf ( $Verb -eq "cloud" ) {
+        If ( $Items ) {
+            $Words | Get-CloudStorageListing -Unmatched:$Diff
+        }
+        Else {
+            ( Get-ZippedBagsContainer -Repository:$Words ) | Get-CloudStorageListing -Unmatched:$Diff
+        }
+    }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
-        $Words | Get-RepositoryStats
+        $i = 0
+        $Words |% {
+            $Repository = $_
+            If ( -Not $Batch ) {
+                Write-Progress -Id 101 -Activity "Scanning Repositories" -Status $Repository -PercentComplete ($i*100.0/$Words.Count)
+            }
+            $Repository | Get-RepositoryStats -Verbose:$Verbose -Batch:$Batch
+            $i++
+        }
+        If ( -Not $Batch ) {
+            Write-Progress -Id 101 -Activity "Scanning Repositories" -Completed
+        }
     }
     ElseIf ( $Verb -eq "settings" ) {
         ColdStorage-Settings -Name $Words
         $Quiet = $true
     }
     ElseIf ( $Verb -eq "repository" ) {
-        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        $Words | ForEach {
+        $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $File = Get-FileObject -File $_
             "FILE:", $File.FullName, "REPO:", ($File | Get-FileRepository)
         }
         $Quiet = $true
     }
     ElseIf ( $Verb -eq "zipname" ) {
-        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        $Words | ForEach {
+        $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $File = Get-FileObject -File $_
             "FILE:", $File.FullName, "PREFIX:", ($File | Get-ZippedBagNamePrefix )
         }
         $Quiet = $true
     }
     ElseIf ( $Verb -eq "ripe" ) {
-        $Words = ( $Words | ColdStorage-Command-Line -Default ( Get-ChildItem ) )
-        $Words | ForEach {
+        $Words | ColdStorage-Command-Line -Default ( Get-ChildItem ) | ForEach {
             $ripe = ( ( Get-Item -Path $_ ) | Where-Item-Is-Ripe -ReturnObject )
             If ( $ripe.Count -gt 0 ) {
                 $ripe
