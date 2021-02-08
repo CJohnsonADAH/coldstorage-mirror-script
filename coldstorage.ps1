@@ -15,21 +15,23 @@ coldstorage.ps1 zip: Zip preservation packages into cloud storage-formatted arch
 coldstorage.ps1 validate: Validate BagIt-formatted preservation packages or cloud storage-formatted archival units
 #>
 param (
-    [string] $Verb,
+    [Parameter(Position=0)] [string] $Verb,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
     [switch] $Diff = $false,
     [switch] $SizesOnly = $false,
 	[switch] $Batch = $false,
     [switch] $Interactive = $false,
+    [switch] $Repository = $true,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $NoScan = $false,
     [switch] $Force = $false,
+    [String[]] $Side = "local,cloud",
     #[switch] $Verbose = $false,
     #[switch] $Debug = $false,
     [switch] $WhatIf = $false,
-    [Parameter(ValueFromRemainingArguments=$true)] $Words
+    [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words
 )
 $RipeDays = 7
 
@@ -887,7 +889,7 @@ End { }
 
 Function Get-DropServerAuthority {
 
-    $address = ( ColdStorage-Settings -Name "Drop-Server-SFTP" )
+    $address = ( Get-ColdStorageSettings -Name "Drop-Server-SFTP" )
     
     ( $address -split "@",2 ) | Write-Output
 
@@ -2200,14 +2202,14 @@ if ( $Help -eq $true ) {
             $Words |% {
                 $File = Get-FileObject($_)
                 If ( $File ) {
-                    $Repository = ( Get-FileRepository -File $File )
-                    $RepositorySlug = ( Get-FileRepository -File $Repository -Slug )
+                    $sRepository = ( Get-FileRepository -File $File )
+                    $RepositorySlug = ( Get-FileRepository -File $sRepository -Slug )
                     $TrashcanLocation = ( Get-Trashcan-Location -Repository $RepositorySlug )
 
                     $Src = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Original )
                     $Dest = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Reflection )
 
-                    Write-Host "REPOSITORY: ${Repository}", "SLUG: ${RepositorySlug}", "FROM:", $Src, "TO:", $Dest, "TRASHCAN: ${TrashcanLocation}", "DIFF LEVEL: ${DiffLevel}"
+                    Write-Host "REPOSITORY: ${sRepository}", "SLUG: ${RepositorySlug}", "FROM:", $Src, "TO:", $Dest, "TRASHCAN: ${TrashcanLocation}", "DIFF LEVEL: ${DiffLevel}"
                     if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
                         mkdir "${TrashcanLocation}"
                     }
@@ -2353,22 +2355,24 @@ if ( $Help -eq $true ) {
         }
     }
     ElseIf ( $Verb -eq "cloud" ) {
+        $aSide = ( $Side |% { $_ -split "," } )
+
         If ( $Items ) {
-            $Words | Get-CloudStorageListing -Unmatched:$Diff
+            $Words | Get-CloudStorageListing -Unmatched:$Diff -Side:($aSide)
         }
         Else {
-            ( Get-ZippedBagsContainer -Repository:$Words ) | Get-CloudStorageListing -Unmatched:$Diff
+            ( Get-ZippedBagsContainer -Repository:$Words ) | Get-CloudStorageListing -Unmatched:$Diff -Side:($aSide)
         }
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
         $i = 0
         $Words |% {
-            $Repository = $_
+            $sRepository = $_
             If ( -Not $Batch ) {
-                Write-Progress -Id 101 -Activity "Scanning Repositories" -Status $Repository -PercentComplete ($i*100.0/$Words.Count)
+                Write-Progress -Id 101 -Activity "Scanning Repositories" -Status $sRepository -PercentComplete ($i*100.0/$Words.Count)
             }
-            $Repository | Get-RepositoryStats -Verbose:$Verbose -Batch:$Batch
+            $sRepository | Get-RepositoryStats -Verbose:$Verbose -Batch:$Batch
             $i++
         }
         If ( -Not $Batch ) {

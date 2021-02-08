@@ -57,7 +57,7 @@ End {
 }
 
 Function Get-CloudStorageListing {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud") )
 
 Begin { $bucketFiles = @{ }; }
 
@@ -89,34 +89,52 @@ End {
         $Files = $bucketFiles[$Bucket]
 
         If ( $Files.Count -gt 1 ) {
-            $jsonReply = $( & aws s3api list-objects-v2 --bucket "${Bucket}" )
+            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-AWSCLIExe ),$Bucket )
+            $jsonReply = $( & $( Get-AWSCLIExe ) s3api list-objects-v2 --bucket "${Bucket}" )
         }
         Else {
             $FileName = $Files.Name
-            $jsonReply = $( & aws s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" )
+            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f $( Get-AWSCLIExe ),$Bucket,$FileName )
+            $jsonReply = $( & $( Get-AWSCLIExe ) s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" )
         }
     }
+
+    If ( -Not $Unmatched ) {
+        $Side = @("local", "cloud")
+    }
+
+    Write-Debug ( "Side(s): {0}" -f ( $Side -join ", " ) )
 
     If ( $jsonReply ) {
         $oReply = ( $jsonReply | ConvertFrom-Json )
 
         If ( $oReply ) {
+
+            If ( $oReply.Contents ) {
+
             $ObjectKeys = ( $oReply.Contents |% { $_.Key } )
             $sHeader = $null
-            If ( $Unmatched ) {
-                $sHeader = "=== ADAHColdStorage ==="
-            }
-            $Files |% {
-                $Match = ( @( ) + @( $ObjectKeys ) ) -ieq $_.Name
-                If ( $Unmatched -xor ( $Match.Count -gt 0 ) ) {
-                    If ( $sHeader ) { $sHeader; $sHeader = $null }
-                    $_.Name
+
+            If ( $Side -ieq "local" ) {
+                Write-Debug "[vs-cloud:${Bucket}] Local side"
+                If ( $Unmatched -And ( $Side.Count -gt 1 ) ) {
+                    $sHeader = "`r`n=== ADAHColdStorage ==="
+                }
+                $Files |% {
+                    $Match = ( @( ) + @( $ObjectKeys ) ) -ieq $_.Name
+                    If ( $Unmatched -xor ( $Match.Count -gt 0 ) ) {
+                        If ( $sHeader ) { $sHeader; $sHeader = $null }
+                        $_.Name
+                    }
                 }
             }
 
             $FileNames = ( $Files | Get-ItemPropertyValue -Name "Name" ) 
-            If ( $Unmatched ) {
-                $sHeader = "=== Cloud Storage (AWS) ==="
+            If ( $Unmatched -and ( $Side -ieq "cloud" ) ) {
+                Write-Debug "[vs-cloud:${Bucket}] Cloud side"
+                If ( $Side.Count -gt 1 ) {
+                    $sHeader = "`r`n=== Cloud Storage (AWS) ==="
+                }
                 $oReply.Contents |% {
                     $Match = ( @( ) + @( $FileNames ) ) -ieq $_.Key
                     If ( $Match.Count -eq 0 ) {
@@ -126,10 +144,21 @@ End {
                 }
             }
 
+            }
+            Else {
+                Write-Warning ( "[cloud:${Bucket}] could not find contents in JSON reply: {0}; object:" -f $jsonReply )
+                Write-Warning $oReply
+            }
+
+        }
+        Else {
+            Write-Warning ( "[cloud:${Bucket}] could not parse JSON reply: {0}" -f $jsonReply )
         }
     }
+    Else {
+        Write-Warning ( "[cloud:${Bucket}] null JSON reply: {0}" -f $jsonReply )
+    }
 
-    #FIXME: In -Diff mode ($Unmatched), also show objects in AWS bucket that do not match anything on ColdStorage???
 }
 
 }
