@@ -56,6 +56,7 @@ Param ( $File=$null )
 }
 
 Import-Module BitsTransfer
+Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
 Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
@@ -219,116 +220,21 @@ Param ( $Repository )
 ## SETTINGS: PATHS, ETC. ####################################################################################
 #############################################################################################################
 
-Function Get-TablesMerged {
-
-    $Output = @{ }
-    ForEach ( $Table in ( $Input + $Args ) ) {
-        
-        If ( $Table -is [Hashtable] ) {
-            ForEach ( $Key in $Table.Keys ) {
-                $Output.$Key = $Table.$Key
-            }
-        }
-        ElseIf ( $Table -is [Object] ) {
-            $Table.PSObject.Properties | ForEach {
-                $Output."$($_.Name)" = $( $_.Value )
-            }
-        }
-
-
-    }
-    $Output
-
-}
-
-Function Get-ColdStorageSettingsFiles () {
-    $JsonDir = ( ColdStorage-Script-Dir ).FullName
-
-    $paths = "${JsonDir}\settings.json", "${JsonDir}\settings-${env:COMPUTERNAME}.json"
-    
-    $File = $null
-    $paths | % {
-        If ( Test-Path -LiteralPath $_ ) {
-            (Get-Item -Force -LiteralPath $_) | Write-Output
-        }
-    }
-}
-
-Function ColdStorage-Settings-Defaults {
-    $Out=@{
-        BagIt="${HOME}\bin\bagit"
-        ClamAV="${HOME}\bin\clamav"
-    }
-    $Out
-}
-
-Function ColdStorage-Settings-Json {
-    Get-ColdStorageSettingsFiles | % {
-        If ( $_ -eq $null ) {
-            ColdStorage-Settings-Defaults | ConvertTo-Json
-        } Else {
-            Get-Content -Raw $_
-        }
-    } | Get-Json-Settings | Get-TablesMerged | ConvertTo-Json
-}
-
-Function ColdStorage-Settings-ToFilePath {
-Param ( [Parameter(ValueFromPipeline=$true)] $Path )
-
-Begin { }
-
-Process {
-    ( ( $Path -replace "[/]",'\' ) -replace '^~[\\]',"${HOME}\" )
-}
-
-End { }
-}
-
-Function Get-Json-Settings {
-Param([String] $Name="", [Parameter(ValueFromPipeline=$true)] $Json)
-
-Begin { }
-
-Process {
-    $Hashtable = ( $Json | ConvertFrom-Json )
-    If ( $Name.Length -gt 0 ) {
-        ( $Hashtable )."${Name}"
-    }
-    Else {
-        $Hashtable
-    }
-}
-
-End { }
-
-}
-
-Function ColdStorage-Settings {
-Param([String] $Name="")
-
-Begin { }
-
-Process {
-    ColdStorage-Settings-Json | Get-Json-Settings -Name $Name
-}
-
-End { }
-}
 
 function Get-ClamAV-Path () {
-    return ( ColdStorage-Settings("ClamAV") | ColdStorage-Settings-ToFilePath )
+    return ( Get-ColdStorageSettings("ClamAV") | ConvertTo-ColdStorageSettingsFilePath )
 }
 
 function Get-BagIt-Path () {
-    return ( ColdStorage-Settings("BagIt") | ColdStorage-Settings-ToFilePath )
+    return ( Get-ColdStorageSettings("BagIt") | ConvertTo-ColdStorageSettingsFilePath )
 }
 
 Function Get-7z-Path () {
-    return ( ColdStorage-Settings("7za") | ColdStorage-Settings-ToFilePath )
+    return ( Get-ColdStorageSettings("7za") | ConvertTo-ColdStorageSettingsFilePath )
 }
 
 Function Get-Python-Path () {
-	return ( ColdStorage-Settings("Python") | ColdStorage-Settings-ToFilePath )
+	return ( Get-ColdStorageSettings("Python") | ConvertTo-ColdStorageSettingsFilePath )
 }
 
 Function Get-Python-Path-Exe () {
@@ -642,7 +548,7 @@ Process {
     $reUNCRepo = [Regex]::Escape($sRepository)
     $sPathRelativeToRepo = ( $sFileUNCPath -ireplace "^${reUNCRepo}\\+","" )
     
-    $RepositoryNodes = ColdStorage-Settings -Name "AU-Titles"
+    $RepositoryNodes = Get-ColdStorageSettings -Name "AU-Titles"
 
     $Title = $null
     If ( $RepositoryNodes.${sRepositoryNode} ) {
@@ -650,7 +556,7 @@ Process {
         $Node = $RepositoryNodes.${sRepositoryNode}
 
         $Node.PSObject.Properties | ForEach {
-            $Wildcard = ( $_.Name | ColdStorage-Settings-ToFilePath )
+            $Wildcard = ( $_.Name | ConvertTo-ColdStorageSettingsFilePath )
             $Props = $_.Value -split "//"
             Write-Host "CHECK: ", $Wildcard, $Props
             If ( ".\${sPathRelativeToRepo}\${sFileName}" -like $Wildcard ) {
@@ -688,7 +594,7 @@ End { }
 Function Get-ADPNetStartURL {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
-Begin { $hrefPrefix = ColdStorage-Settings -Name "Drop-Server-URL" }
+Begin { $hrefPrefix = Get-ColdStorageSettings -Name "Drop-Server-URL" }
 
 Process {
     $hrefPath = ( $File | Get-ADPNetStartDir )
@@ -742,7 +648,7 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
         $Path = ( $Directory )
     }
 
-    $TitlePrefix = ColdStorage-Settings -Name "Institution"
+    $TitlePrefix = Get-ColdStorageSettings -Name "Institution"
 
     if ( Test-Path -LiteralPath "${Path}" ) {
         $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
@@ -2470,7 +2376,7 @@ if ( $Help -eq $true ) {
         }
     }
     ElseIf ( $Verb -eq "settings" ) {
-        ColdStorage-Settings -Name $Words
+        Get-ColdStorageSettings -Name $Words
         $Quiet = $true
     }
     ElseIf ( $Verb -eq "repository" ) {

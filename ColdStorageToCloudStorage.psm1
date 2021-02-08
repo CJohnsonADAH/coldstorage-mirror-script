@@ -15,6 +15,7 @@ Param ( $Command, $File=$null )
     $Path
 }
 
+Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageSettings.psm1" )
 Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageRepositoryLocations.psm1" )
 
 #############################################################################################################
@@ -146,7 +147,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false )
 
         If ( $sFile ) {
             If ( $Bucket ) {
-                & aws s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE
+                & $( Get-AWSCLIExe ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE
             }
             Else {
                 Write-Warning ( "[to cloud] Could not identify bucket: {0}" -f $File )
