@@ -786,7 +786,7 @@ function Get-Matched-Items {
 }
 
 Function Test-UnmirroredDerivedItem {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $LiteralPath=$null ) 
+Param( [Parameter(ValueFromPipeline=$true)] $File, $LiteralPath=$null, [switch] $MirrorBaggedCopies=$false ) 
 
 Begin { }
 
@@ -801,7 +801,7 @@ Process {
             If ( Test-ZippedBagsContainer -File $Path ) {
                 $result = $true        
             }
-            Else {
+            ElseIf ( -Not $MirrorBaggedCopies ) {
                 $oFile = ( Get-FileObject -File $File )
                 If ( Test-BaggedCopyOfLooseFile -File $oFile ) {
                     $result = $true
@@ -822,7 +822,7 @@ Process {
 
 }
 
-End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedItem -LiteralPath:$null } }
+End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedItem -LiteralPath:$null -MirrorBaggedCopies:$MirrorBaggedCopies } }
 
 }
 
@@ -1227,11 +1227,13 @@ Param ($From, $to, $Trashcan, $DiffLevel=1, [switch] $Batch=$false, $Depth=0, $P
             Write-Progress -Id ($NewProgressId + 3) -Activity "Matching (mkdir): [${From}]" -Status $sFileName -percentComplete (100*$I / $N)
         }
     } | ForEach {
-        $CopyFrom = $_.FullName
-        $CopyTo = ($_ | Rebase-File -To "${To}")
+        If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
+            $CopyFrom = $_.FullName
+            $CopyTo = ($_ | Rebase-File -To "${To}")
 
-        Write-Output "${CopyFrom}\\ =>> ${CopyTo}\\"
-        Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
+            Write-Output "${CopyFrom}\\ =>> ${CopyTo}\\"
+            Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
+        }
     }
     If ( -Not $Batch ) {
         Write-Progress -Id ($NewProgressId + 3) -Activity "Matching (mkdir): [${From}]" -Completed
@@ -1264,17 +1266,20 @@ Param ($From, $To, $Trashcan, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $P
         $CopyFrom = $_.FullName
         $CopyTo = ($_ | Rebase-File -To "${To}")
         
-        If ( -Not $Batch ) {
-            Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Status "${BaseName}" -percentComplete (100*$i / $N)
-        }
-        Else {
-            Write-Output "${CopyFrom} =>> ${CopyTo}"
-        }
-        $i = $i + 1
+        If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
+
+            If ( -Not $Batch ) {
+                Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Status "${BaseName}" -percentComplete (100*$i / $N)
+            }
+            Else {
+                Write-Output "${CopyFrom} =>> ${CopyTo}"
+            }
+            $i = $i + 1
 
         
-        Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch:$Batch
-        
+            Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch:$Batch
+        }
+
     }
     If ( -Not $Batch ) {
         Write-Progress -Id ($NewProgressId + 3) -Activity $sProgressActivity -Completed
