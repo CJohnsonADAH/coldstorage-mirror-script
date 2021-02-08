@@ -494,7 +494,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null )
 
 }
 
-function Do-Make-Index-Html {
+function Add-IndexHTML {
 Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
 
     if ( $Directory -eq $null ) {
@@ -2293,7 +2293,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "index" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
-            Do-Make-Index-Html -Directory $_ -RelativeHref -Force:$Force
+            Add-IndexHTML -Directory $_ -RelativeHref -Force:$Force
         }
     }
     ElseIf ( $Verb -eq "manifest" ) {
