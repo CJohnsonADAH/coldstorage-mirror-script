@@ -2282,7 +2282,7 @@ if ( $Help -eq $true ) {
                 $_ | Do-Zip-Bagged-Directory
             }
             ElseIf ( Test-LooseFile -File $_ ) {
-                $oBag = ( Test-BaggedCopyOfLooseFile -File $_ )
+                $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
                 If ($oBag) {
                     $oBag | Do-Zip-Bagged-Directory
                 }
