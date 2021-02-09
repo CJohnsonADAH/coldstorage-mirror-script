@@ -1674,6 +1674,10 @@ param (
         $FilePath = $File.FullName
         $CardBag = ( $File | Get-PathToBaggedCopyOfLooseFile -Wildcard )
 
+        If ( -Not $Batch ) {
+            Write-Progress -Id 201 -Activity ( "Checking {0}" -f ( $File.CheckedSpace ) ) -Status ( "Check FILE: {0}  ... {1}" -f ( $File.Directory ),$File.Name ) -PercentComplete 10
+        }
+
         $BagPayload = $null
         If ( Test-ZippedBag($File) ) {
             $BagPayload = $File
@@ -1738,6 +1742,9 @@ param (
     [Switch]
     $Quiet,
 
+    [Switch]
+    $Batch=$false,
+
     [String]
     $Exclude="^$",
 
@@ -1756,6 +1763,10 @@ param (
 
         $DirName = Get-FileLiteralPath -File $File
         $BaseName = $File.Name
+
+        If ( -Not $Batch ) {
+            Write-Progress -Id 201 -Activity ( "Checking {0}" -f ( $File.CheckedSpace ) ) -Status ( "Check DIR: {0} ... {0}" -f ( $File.Parent, $BaseName ) ) -PercentComplete 60
+        }
 
         # Is this an ER Instance directory?
         If ( Test-ERInstanceDirectory($File) ) {
@@ -1792,8 +1803,8 @@ param (
 
             chdir $DirName
             
-            dir -File | Do-Scan-File-For-Bags -Quiet:$Quiet
-            dir -Directory | Select-Unbagged-Dirs | Do-Scan-Dir-For-Bags -Quiet:$Quiet
+            dir -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-File-For-Bags -Quiet:$Quiet
+            dir -Directory | Select-Unbagged-Dirs | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-Dir-For-Bags -Quiet:$Quiet
 
             chdir $Anchor
         }
@@ -1944,17 +1955,35 @@ function Do-Bag ($Pairs=$null) {
     }
 }
 
-function Do-Check-Repo-Dirs ($Pair, $From, $To) {
+function Invoke-ColdStorageDirectoryCheck {
+Param ($Pair, $From, $To, [switch] $Batch=$false)
+
     $Anchor = $PWD
 
     chdir $From
-    dir -File | Do-Scan-File-For-Bags -Quiet:$Quiet
-    dir -Directory| Do-Scan-Dir-For-Bags -Quiet:$Quiet -Exclude $null
+
+    If ( -Not $Batch ) {
+        Write-Progress -Id 201 -Status ( "Checking {0}" -f $From ) -Activity "Files" -PercentComplete 1
+    }
+
+    dir -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-File-For-Bags -Quiet:$Quiet
+
+    If ( -Not $Batch ) {
+        Write-Progress -Id 201 -Status ( "Checking {0}" -f $From ) -Activity "Directories" -PercentComplete 51
+    }
+
+    dir -Directory | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-Dir-For-Bags -Quiet:$Quiet -Exclude $null
+
+    If ( -Not $Batch ) {
+        Write-Progress -Id 201 -Status ( "Checking {0}" -f $From ) -Completed
+    }
 
     chdir $Anchor
 }
 
-function Do-Check ($Pairs=$null) {
+Function Invoke-ColdStorageRepositoryCheck {
+Param ( $Pairs=$null )
+
     $mirrors = ( Get-ColdStorageRepositories )
 
     if ( $Pairs.Count -lt 1 ) {
@@ -1972,7 +2001,7 @@ function Do-Check ($Pairs=$null) {
             $src = $locations[2]
             $dest = $locations[1]
 
-            Do-Check-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
+            Invoke-ColdStorageDirectoryCheck -Pair "${Pair}" -From "${src}" -To "${dest}"
         } else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
@@ -1988,7 +2017,7 @@ function Do-Check ($Pairs=$null) {
             }
 
             If ( $recurseInto.Count -gt 0 ) {
-                Do-Check -Pairs $recurseInto
+                Invoke-ColdStorageRepositoryCheck -Pairs $recurseInto
             }
         } # if
 
@@ -2275,7 +2304,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "check" ) {
         $N = ( $Words.Count )
 
-        Do-Check -Pairs $Words
+        Invoke-ColdStorageRepositoryCheck -Pairs $Words
     }
     ElseIf ( $Verb -eq "validate" ) {
         $N = ( $Words.Count )
