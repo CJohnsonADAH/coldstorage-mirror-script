@@ -1645,7 +1645,7 @@ param (
     $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-ZippedBagOfUnzippedBag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Item:$File -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
 
     [ScriptBlock]
-    $OnDiff={ Param($File, $Payload, $Quiet); },
+    $OnDiff={ Param($File, $Payload, $Quiet); Write-Warning ( "DIFF: {0}, {1}" -f ( $File,$Payload ) ) },
 
     [ScriptBlock]
     $OnUnbagged={ Param($File, $Quiet); Write-Unbagged-Item-Notice -FileName $File.FullName -Line ( Get-CurrentLine ) -Quiet:$Quiet },
@@ -1661,6 +1661,7 @@ param (
         if ( $Exclude.Length -eq 0 ) {
             $Exclude = "^$"
         }
+
     }
 
     Process {
@@ -1682,7 +1683,7 @@ param (
             ( $Bag = Get-BaggedCopyOfLooseFile -File $File ) | Select-BagItPayload |% {
                 $BagPayload = $_
                 
-                If ( Test-DifferentFileContent -From $File -To $BagPayload ) {
+                If ( -Not ( Test-DifferentFileContent -From $File -To $BagPayload ) ) {
                     $OnBagged.Invoke($File, $BagPayload, $Bag, $Quiet)
                 }
                 Else {
