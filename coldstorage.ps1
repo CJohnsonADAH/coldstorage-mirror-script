@@ -3,16 +3,20 @@
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
 
 .PARAMETER Diff
-coldstorage.ps1 mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
+coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
 
 .PARAMETER Batch
-coldstorage.ps1 mirror -Batch formats output for log files and channels it to easily redirectable stdout, error and warning output streams. Ideal for tasks run from Task Scheduler.
+coldstorage mirror -Batch formats output for log files and channels it to easily redirectable stdout, error and warning output streams. Ideal for tasks run from Task Scheduler.
 
 .DESCRIPTION
-coldstorage.ps1 mirror: Sync files to or from the ColdStorage server.
-coldstorage.ps1 bag: Package files into BagIt-formatted preservation packages
-coldstorage.ps1 zip: Zip preservation packages into cloud storage-formatted archival units
-coldstorage.ps1 validate: Validate BagIt-formatted preservation packages or cloud storage-formatted archival units
+coldstorage mirror: Sync files to or from the ColdStorage server.
+coldstorage bag: Package files into BagIt-formatted preservation packages
+coldstorage zip: Zip preservation packages into cloud storage-formatted archival units
+coldstorage to: send a preservation package or an archival unit to external preservation sites (cloud, drop, ...)
+coldstorage vs: compare the packages preserved locally to those stored on an external preservation site (cloud, drop, etc.)
+coldstorage check: Check for new preservation items in a repository to be packaged, and check the status of already-processed preservation packages
+coldstorage stats: Compile statistics on the preservation packages in a repository
+coldstorage validate: Validate BagIt-formatted preservation packages or cloud storage-formatted archival units
 #>
 param (
     [Parameter(Position=0)] [string] $Verb,
