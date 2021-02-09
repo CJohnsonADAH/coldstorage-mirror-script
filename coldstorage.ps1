@@ -891,6 +891,36 @@ End { }
 ## ADPNET DROP SERVER FUNCTIONS #############################################################################
 #############################################################################################################
 
+Function Add-ADPNetAUToDropServerStagingDirectory {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+
+        $Location = ( Get-Item -LiteralPath $File )
+            
+        $sLocation = $Location.FullName
+
+        If ( -Not ( $Location | Get-LOCKSSManifest ) ) {
+
+            $sTitle = ( $Location | Get-ADPNetAUTitle )
+            If ( -Not $sTitle ) {
+                $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
+            }
+
+            Add-LOCKSSManifestHTML -Directory $File -Title $sTitle -Force:$Force
+
+        }
+
+        ( $Location | Set-DropServerFolder )
+
+    }
+
+    End { }
+
+}
+
 Function Get-DropServerAuthority {
 
     $address = ( Get-ColdStorageSettings -Name "Drop-Server-SFTP" )
@@ -2319,28 +2349,9 @@ if ( $Help -eq $true ) {
         }
     }
     ElseIf ( $Verb -eq "drop" ) {
-
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        $Words | ForEach {
-            $Location = ( Get-Item -LiteralPath $_ )
-            
-            $sLocation = $Location.FullName
 
-            If ( -Not ( $Location | Get-LOCKSSManifest ) ) {
-
-                $sTitle = ( $Location | Get-ADPNetAUTitle )
-                If ( -Not $sTitle ) {
-                    $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
-                }
-
-                Add-LOCKSSManifestHTML -Directory $_ -Title $sTitle -Force:$Force
-
-            }
-
-            ( $Location | Set-DropServerFolder )
-
-        }
-
+        $Words | Add-ADPNetAUToDropServerStagingDirectory
     }
     ElseIf ( $Verb -eq "abort-cloud-uploads" ) {
         $Words | Do-CloudUploadsAbort        
