@@ -31,6 +31,7 @@ param (
     [switch] $Recurse = $false,
     [switch] $NoScan = $false,
     [switch] $Force = $false,
+    [switch] $FullName = $false,
     [String[]] $Side = "local,cloud",
     #[switch] $Verbose = $false,
     #[switch] $Debug = $false,
@@ -2401,21 +2402,7 @@ if ( $Help -eq $true ) {
         ElseIf ( $Object -eq "cloud" ) {
             If ( $Diff ) {
                 $Anchor = $PWD
-                $Candidates = ( $Words |% {
-                    $oFile = $null
-                    If ( Test-Path -LiteralPath $_ -PathType Container ) {
-                        Set-Location -LiteralPath $_
-                        $oFile = Get-Item -Force -LiteralPath $_
-                    }
-                    ElseIf ( Test-Path -LiteralPath $_ -PathType Leaf ) {
-                        $oFile = Get-Item -Force -LiteralPath $_
-                        Set-Location $oFile.Directory
-                    }
-                    If ( $oFile ) {
-                        $oFile | Get-CloudStorageListing -Unmatched:$true -Side:("local") | Get-Item -Force |% { $_.FullName }
-                    }
-                    Set-Location $Anchor
-                } )
+                $Candidates = ( $Words | Get-Item -Force | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
                 $Candidates | Write-Verbose
                 $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
             }
@@ -2430,25 +2417,21 @@ if ( $Help -eq $true ) {
             Write-Warning ( "[${Verb}:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
         }
     }
-    ElseIf ( $Verb -eq "vs" ) {
-
+    ElseIf ( ("in","vs") -ieq $Verb ) {
+        $bUnmatched = ( $Verb -ieq "vs" )
         $Object, $Words = $Words
         $Destinations = ("cloud", "drop")
 
         If ( $Object -eq "cloud" ) {
 
             $aSide = ( $Side |% { $_ -split "," } )
+            $aItems = $( If ( $Items ) { $Words } Else { ( Get-ZippedBagsContainer -Repository:$Words ) } )
 
-            If ( $Items ) {
-                $Words | Get-CloudStorageListing -Unmatched:$true -Side:($aSide)
-            }
-            Else {
-                ( Get-ZippedBagsContainer -Repository:$Words ) | Get-CloudStorageListing -Unmatched:$Diff -Side:($aSide)
-            }
+            $aItems | Get-CloudStorageListing -Unmatched:$bUnmatched -Side:($aSide) -ReturnObject |% { If ( $FullName ) { $_.FullName } Else { $_.Name } }
 
         }
         Else {
-            Write-Warning ( "[to:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
+            Write-Warning ( "[${Verb}:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
         }
 
     }

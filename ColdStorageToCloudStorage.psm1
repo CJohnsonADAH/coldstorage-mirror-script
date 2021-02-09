@@ -57,7 +57,7 @@ End {
 }
 
 Function Get-CloudStorageListing {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud") )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject )
 
 Begin { $bucketFiles = @{ }; }
 
@@ -113,6 +113,7 @@ End {
             If ( $oReply.Contents ) {
 
             $ObjectKeys = ( $oReply.Contents |% { $_.Key } )
+            $ObjectObjects = ( $oReply.Contents |% { $sKey = $_.Key; @{ "${sKey}"=$_ } } )
             $sHeader = $null
 
             If ( $Side -ieq "local" ) {
@@ -123,8 +124,14 @@ End {
                 $Files |% {
                     $Match = ( @( ) + @( $ObjectKeys ) ) -ieq $_.Name
                     If ( $Unmatched -xor ( $Match.Count -gt 0 ) ) {
-                        If ( $sHeader ) { $sHeader; $sHeader = $null }
-                        $_.Name
+                        If ( $ReturnObject ) {
+                            $CloudCopy = ( $Match |% { $sKey = $_; $ObjectObjects.$sKey } )
+                            $_ | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $CloudCopy -Force -PassThru
+                        }
+                        Else {
+                            If ( $sHeader ) { $sHeader; $sHeader = $null }
+                            $_.Name
+                        }
                     }
                 }
             }
@@ -138,8 +145,13 @@ End {
                 $oReply.Contents |% {
                     $Match = ( @( ) + @( $FileNames ) ) -ieq $_.Key
                     If ( $Match.Count -eq 0 ) {
-                        If ( $sHeader ) { $sHeader; $sHeader = $null }
-                        $_.Key
+                        If ( $ReturnObject ) {
+                            $_
+                        }
+                        Else {
+                            If ( $sHeader ) { $sHeader; $sHeader = $null }
+                            $_.Key
+                        }
                     }
                 }
             }
