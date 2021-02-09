@@ -176,7 +176,17 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
 
         If ( $sFile ) {
             If ( $Bucket ) {
-                & $( Get-AWSCLIExe ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE
+                # AWS-CLI does not cope well with long path names even if Windows is configured to handle them.
+                # Workaround solution, from https://forums.aws.amazon.com/thread.jspa?threadID=322302&tstart=100 :
+                # Use the Win32 direct-to-filesystem bypass prefix \\?\
+                #
+                # More details: <https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file#win32-file-namespaces>
+                # on Win32 namespace prefixes and \\?\ in particular. Solution from 
+                If ( $sFile.Length -ge 260 ) {
+                    $sFile = ( '\\?\{0}' -f $sFile )
+                }
+
+                & $( Get-AWSCLIExe ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
             }
             Else {
                 Write-Warning ( "[to cloud] Could not identify bucket: {0}" -f $File )
