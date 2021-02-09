@@ -2349,16 +2349,65 @@ if ( $Help -eq $true ) {
         $Object, $Words = $Words
         $Destinations = ("cloud", "drop")
 
+        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         If ( -Not $Items ) {
-            Write-Warning ( "[to:${Object}] Not yet implemented for repositories. Try: & coldstorage to ${Object} -Items [File1] [File2] [...]" )
+            Write-Warning ( "[${Verb}:${Object}] Not yet implemented for repositories. Try: & coldstorage to ${Object} -Items [File1] [File2] [...]" )
         }
         ElseIf ( $Object -eq "cloud" ) {
-            $Words | Add-PackageToCloudStorageBucket
+            If ( $Diff ) {
+                $Anchor = $PWD
+                $Candidates = ( $Words |% {
+                    $oFile = $null
+                    If ( Test-Path -LiteralPath $_ -PathType Container ) {
+                        Set-Location -LiteralPath $_
+                        $oFile = Get-Item -Force -LiteralPath $_
+                    }
+                    ElseIf ( Test-Path -LiteralPath $_ -PathType Leaf ) {
+                        $oFile = Get-Item -Force -LiteralPath $_
+                        Set-Location $oFile.Directory
+                    }
+                    If ( $oFile ) {
+                        $oFile | Get-CloudStorageListing -Unmatched:$true -Side:("local") | Get-Item -Force |% { $_.FullName }
+                    }
+                    Set-Location $Anchor
+                } )
+                $Candidates | Write-Verbose
+                $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
+            }
+            Else {
+                $Words | Add-PackageToCloudStorageBucket
+            }
+        }
+        ElseIf ( $Object -eq "drop" ) {
+            $Words | Add-ADPNetAUToDropServerStagingDirectory
+        }
+        Else {
+            Write-Warning ( "[${Verb}:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
+        }
+    }
+    ElseIf ( $Verb -eq "vs" ) {
+
+        $Object, $Words = $Words
+        $Destinations = ("cloud", "drop")
+
+        If ( $Object -eq "cloud" ) {
+
+            $aSide = ( $Side |% { $_ -split "," } )
+
+            If ( $Items ) {
+                $Words | Get-CloudStorageListing -Unmatched:$true -Side:($aSide)
+            }
+            Else {
+                ( Get-ZippedBagsContainer -Repository:$Words ) | Get-CloudStorageListing -Unmatched:$Diff -Side:($aSide)
+            }
+
         }
         Else {
             Write-Warning ( "[to:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
         }
+
     }
+
     ElseIf ( $Verb -eq "cloud" ) {
         $aSide = ( $Side |% { $_ -split "," } )
 

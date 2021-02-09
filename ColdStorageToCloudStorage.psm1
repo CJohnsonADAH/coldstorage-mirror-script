@@ -164,9 +164,9 @@ End {
 }
 
 Function Add-PackageToCloudStorageBucket {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
 
-    Begin { }
+    Begin { If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
 
