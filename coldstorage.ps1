@@ -32,6 +32,9 @@ param (
     [switch] $NoScan = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
+    [switch] $Unbagged = $false,
+    [switch] $Report = $false,
+    [String] $Output = "-",
     [String[]] $Side = "local,cloud",
     #[switch] $Verbose = $false,
     #[switch] $Debug = $false,
@@ -63,15 +66,15 @@ Param ( $File=$null )
 }
 
 Import-Module BitsTransfer
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
-Import-Module -Verbose:( $Debug -ne $null ) -Force $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
+Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
@@ -217,8 +220,18 @@ Param ( $Repository )
 
     $mirrors = ( Get-ColdStorageRepositories )
 
-    $location = $mirrors[$Repository]
-    $slug = $location[0]
+    If ( $Repository -ne $null ) {
+        If ( $mirrors.ContainsKey($Repository) ) {
+            $location = $mirrors[$Repository]
+            $slug = $location[0]
+        }
+        Else {
+            Write-Warning "Requested repository [{0}] does not exist." -f $Repository
+        }
+    }
+    Else {
+        Write-Warning "Get-Trashcan-Location: no valid repository found (null Repository parameter)"
+    }
 
     "${ColdStorageBackup}\${slug}_${Repository}"
 }
@@ -851,9 +864,17 @@ Process {
     # get self if $File is a directory, parent if it is a leaf node
     $oDir = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject )
 
-    If ( $Repositories.Count -eq 0 ) {
-        $Repositories = ( $mirrors[$Pair][1..2] | Get-LocalPathFromUNC |% { $_.FullName } )
-        $Matchable = $Repositories[$Range]
+    If ( $Repositories.Count -eq 0 -and ( $Pair -ne $null ) ) {
+        If ( $mirrors.ContainsKey($Pair) ) {
+            $Repositories = ( $mirrors[$Pair][1..2] | Get-LocalPathFromUNC |% { $_.FullName } )
+            $Matchable = $Repositories[$Range]
+        }
+        Else {
+            Write-Warning ( "Get-Mirror-Matched-Item: Requested repository pair ({0}) does not exist." -f $Pair )
+        }
+    }
+    ElseIf ( $Pair -eq $null ) {
+        Write-Warning ( "Get-Mirror-Matched-Item: No valid Repository found for item ({0})." -f $File )
     }
 
     $Matched = ( $Matchable -ieq $oDir.FullName )
@@ -1976,7 +1997,7 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
     dir -Directory | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-Dir-For-Bags -Quiet:$Quiet -Exclude $null
 
     If ( -Not $Batch ) {
-        Write-Progress -Id 201 -Status ( "Checking {0}" -f $From ) -Completed
+        Write-Progress -Id 201 -Status ( "Checking {0}" -f $From ) -Activity "Completed." -Completed
     }
 
     chdir $Anchor
@@ -2448,18 +2469,51 @@ if ( $Help -eq $true ) {
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
-        $i = 0
-        $Words |% {
-            $sRepository = $_
-            If ( -Not $Batch ) {
-                Write-Progress -Id 101 -Activity "Scanning Repositories" -Status $sRepository -PercentComplete ($i*100.0/$Words.Count)
-            }
-            $sRepository | Get-RepositoryStats -Verbose:$Verbose -Batch:$Batch
-            $i++
+        $Table = ( $Words | Get-RepositoryStats -Count:($Words.Count) -Verbose:$Verbose -Batch:$Batch )
+        If ( "CSV" -ieq $Output ) {
+            $Table | ConvertTo-CSV
         }
-        If ( -Not $Batch ) {
-            Write-Progress -Id 101 -Activity "Scanning Repositories" -Completed
+        ElseIf ( "JSON" -ieq $Output ) {
+            $Table | ConvertTo-Json
         }
+        Else {
+            $Table | Write-Output
+        }
+
+    }
+    ElseIf ( $Verb -eq "packages" ) {
+
+        If ( $Items ) {
+            $Words | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% {
+                If ( -Not ( $Unbagged -and ( $_.CSPackageBagged ) ) ) {
+                    $_
+                }
+            } |% {
+                $sFullName = $_.FullName
+                $sRelName = ( $_.FullName | Resolve-Path -Relative )
+                If ( $FullName ) { $sTheName = $sFullName } Else { $sTheName = $sRelName }
+
+                If ( $Report ) {
+                    $sBagged = "unbagged"
+                    If ( $_.CSPackageBagged ) {
+                        $sBagged = "BAGGED"
+                    }
+                    $nContents = ( "{0:N0}" -f $_.CSPackageContents )
+                    $sFileSize = ( "{0}" -f ( $_.CSPackageFileSize | Format-BytesHumanReadable ) )
+                    ( "${sTheName} (${sBagged}), {0} file{1}, {2}" -f $nContents,$( If ( $nContents -ne 1 ) { "s" } Else { "" } ),$sFileSize )
+                    #$_.CSPackageContents | Write-Verbose
+                }
+                ElseIf ( $FullName ) {
+                    $_.FullName
+                }
+                Else {
+                    $_
+                } }
+        }
+        Else {
+            ( $Words |% { Get-ColdStorageLocation -Repository $_ } ) | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% { If ( $FullName ) { $_.FullName } Else { $_ } }
+        }
+        
     }
     ElseIf ( $Verb -eq "settings" ) {
         Get-ColdStorageSettings -Name $Words

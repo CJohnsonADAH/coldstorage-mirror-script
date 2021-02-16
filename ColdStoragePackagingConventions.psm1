@@ -189,15 +189,31 @@ Function Get-BaggedCopyOfLooseFile ( $File ) {
     $result
 }
 
-Function Test-BaggedCopyOfLooseFile ( $File, $Context ) {
+Function Test-BaggedCopyOfLooseFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context = $null, $DiffLevel=0 )
+
     $result = $false # innocent until proven guilty
 
-    if ( Test-BagItFormattedDirectory( $File ) ) {
-        $BagDir = $File.FullName
-        $payload = ( Get-ChildItem -Force -LiteralPath "${BagDir}\data" | Measure-Object )
+    $oFile = Get-FileObject -File $File
+    if ( Test-BagItFormattedDirectory( $oFile ) ) {
+        $BagDir = $oFile.FullName
+        $payload = ( Get-ChildItem -Force -LiteralPath "${BagDir}\data" )
 
-        if ($payload.Count -eq 1) {
+        if ($payload.Count -eq 1 -and ( Test-Path -LiteralPath $payload.FullName -PathType Leaf ) ) {
             $result = $true
+            If ( $DiffLevel -gt 0 ) {
+                $sCounterpart = ( "{0}\{1}" -f ( $File.Parent.FullName, $payload.Name ) )
+                $Counterpart = ( Get-FileObject -File $sCounterpart )
+
+                If ( $Counterpart -eq $null ) {
+                    $result = $false
+                }
+                ElseIf ( Test-DifferentFileContent -From $payload -To $Counterpart -DiffLevel $DiffLevel ) {
+                    $result = $false
+                }
+
+            }
+
         }
     }
     
@@ -255,6 +271,82 @@ Process {
 }
 
 End { }
+}
+
+Function Get-ChildItemPackages {
+
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $ShowWarnings=$false )
+
+    Begin { }
+
+    Process {
+        $oFile = ( Get-FileObject -File $File )
+        Write-Debug ( "Get-ChildItemPackages({0} -> {1})" -f $File, $oFile.Name )
+        
+        If ( $oFile -eq $null ) {
+            Write-Error ( "No such item: {0}" -f $File )
+        }
+        Else {
+
+        Get-ChildItem -LiteralPath $oFile.FullName |% {
+
+            $bBagged = ( Test-BagItFormattedDirectory -File $_ )
+            $aContents = @( )
+            
+            If ( Test-ZippedBag -LiteralPath $_.FullName ) {
+                If ( $ShowWarnings ) {
+                    ( "SKIPPED, ZIPPED BAG: {0}" -f $_.FullName ) | Write-Warning
+                }
+            }
+            ElseIf ( Test-ERInstanceDirectory -File $_ ) {
+                $aContents = @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName )
+            }
+            ElseIf ( Test-IndexedDirectory -File $_ ) {
+                $aContents = @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName )
+            }
+            ElseIf ( Test-BaggedCopyOfLooseFile -File $_ -DiffLevel 1 ) {
+                If ( $ShowWarnings ) {
+                    ( "SKIPPED, BAGGED COPY OF LOOSE FILE: {0}" -f $_.FullName ) | Write-Warning
+                }
+            }
+            ElseIf ( Test-BaggedIndexedDirectory -File $_ ) {
+                $aContents = ( @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName ) )
+            }
+            ElseIf ( Test-LooseFile -File $_ ) {
+                $bBagged = ( ( Get-BaggedCopyOfLooseFile -File $_ ).Count -gt 0 )
+                $aContents = @( $_ )
+            }
+            ElseIf ( $Recurse -and ( Test-Path -LiteralPath $_.FullName -PathType Container ) ) {
+                ( "RECURSE INTO DIRECTORY: {0}" -f $_.FullName ) | Write-Verbose
+                $aContents = @( )
+                Get-ChildItemPackages -File $_.FullName -Recurse
+            }
+            Else {
+                $aContents = @( )
+                If ( $ShowWarnings ) {
+                    ( "SKIPPED, MISC: {0}" -f $_.FullName ) | Write-Warning
+                }
+            }
+
+            If ( $aContents.Count -gt 0 ) {
+                $Package = $_
+                $mContents = ( $aContents | Measure-Object -Sum Length )
+                #$mContents = ( $aContents |% { $_ | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $_ | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
+                
+                $Package |
+                    Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -PassThru |
+                        Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -PassThru |
+                            Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -PassThru
+            }
+
+        }
+
+        }
+
+    }
+
+    End { }
+
 }
 
 
@@ -327,3 +419,4 @@ Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
 Export-ModuleMember -Function Test-ERInstanceDirectory
 Export-ModuleMember -Function Select-ERInstanceDirectories
 Export-ModuleMember -Function Get-ERInstanceData
+Export-ModuleMember -Function Get-ChildItemPackages
