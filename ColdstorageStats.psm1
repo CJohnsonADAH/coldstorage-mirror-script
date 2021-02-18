@@ -70,8 +70,8 @@ Param (
 Function Format-BytesHumanReadable {
 Param ( [Parameter(ValueFromPipeline=$true)] [ValidateNotNullOrEmpty()] [Float] $Number, [Int] $DecimalDigits=2, [Float] $MinimumMagnitude=1.0, [switch] $ReturnAltnerate=$false, [switch] $ReturnObject=$false )
 
-    Begin { $aSizes = 'B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB' }
-
+    Begin { $aSizes = 'B', 'KiB', 'MiB', 'GiB' } #, 'TiB', 'PiB' }
+    
     Process {
         $Output = ( $aSizes | Format-Bytes -DecimalDigits:$DecimalDigits -Number:$Number | Where-Object -Property Magnitude -GE $MinimumMagnitude )
 

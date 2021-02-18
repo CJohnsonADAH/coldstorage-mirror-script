@@ -79,7 +79,6 @@ Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -Fi
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
-$ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
 
 Function Did-It-Have-Validation-Errors {
 Param ( [Parameter(ValueFromPipeline=$true)] $Message )
@@ -214,27 +213,6 @@ function Rebase-File {
    }
 
    End {}
-}
-
-Function Get-Trashcan-Location {
-Param ( $Repository )
-
-    $mirrors = ( Get-ColdStorageRepositories )
-
-    If ( $Repository -ne $null ) {
-        If ( $mirrors.ContainsKey($Repository) ) {
-            $location = $mirrors[$Repository]
-            $slug = $location[0]
-        }
-        Else {
-            Write-Warning "Requested repository [{0}] does not exist." -f $Repository
-        }
-    }
-    Else {
-        Write-Warning "Get-Trashcan-Location: no valid repository found (null Repository parameter)"
-    }
-
-    "${ColdStorageBackup}\${slug}_${Repository}"
 }
 
 #############################################################################################################
@@ -562,7 +540,7 @@ Process {
     $sFileUNCPath = $oFileUNCPath.FullName
 
     # Slice off the root directory up to the node name of the repository container
-    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepository )
+    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
     $sRepository = $oRepository.FullName
     $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
 
@@ -813,6 +791,7 @@ Process {
     $result = $false
 
     $Path = ( Get-FileLiteralPath -File $File )
+    $oFile = ( Get-FileObject -File $File )
 
     If ( $Path ) {
         If ( Test-Path -PathType Container -LiteralPath $Path ) { # Directory
@@ -820,8 +799,10 @@ Process {
             If ( Test-ZippedBagsContainer -File $Path ) {
                 $result = $true        
             }
+            ElseIf ( $oFile | Test-ColdStorageRepositoryPropsDirectory ) {
+                $result = $true
+            }
             ElseIf ( -Not $MirrorBaggedCopies ) {
-                $oFile = ( Get-FileObject -File $File )
                 If ( Test-BaggedCopyOfLooseFile -File $oFile ) {
                     $result = $true
                 }
@@ -831,6 +812,9 @@ Process {
         Else { # File
 
             If ( Test-ZippedBag -LiteralPath $Path ) {
+                $result = $true
+            }
+            ElseIf ( $oFile | Test-ColdStorageRepositoryPropsFile ) {
                 $result = $true
             }
 
@@ -1478,7 +1462,7 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
             $slug = $locations[0]
             $src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
             $dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
-            $TrashcanLocation = ( Get-Trashcan-Location -Repository $Pair )
+            $TrashcanLocation = ( $Pair | Get-ColdStorageTrashLocation )
 
             if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
                 mkdir "${TrashcanLocation}"
@@ -2294,14 +2278,20 @@ if ( $Help -eq $true ) {
             $Words |% {
                 $File = Get-FileObject($_)
                 If ( $File ) {
-                    $sRepository = ( Get-FileRepository -File $File )
-                    $RepositorySlug = ( Get-FileRepository -File $sRepository -Slug )
-                    $TrashcanLocation = ( Get-Trashcan-Location -Repository $RepositorySlug )
+                    $oRepository = ( Get-FileRepositoryLocation -File $File )
+                    $sRepository = $oRepository.FullName
+                    $RepositorySlug = ( Get-FileRepositoryName -File $sRepository )
+                    $TrashcanLocation = ( $RepositorySlug | Get-ColdStorageTrashLocation )
 
                     $Src = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Original )
                     $Dest = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Reflection )
 
-                    Write-Host "REPOSITORY: ${sRepository}", "SLUG: ${RepositorySlug}", "FROM:", $Src, "TO:", $Dest, "TRASHCAN: ${TrashcanLocation}", "DIFF LEVEL: ${DiffLevel}"
+                    Write-Debug ( "REPOSITORY: {0}" -f $sRepository )
+                    Write-Debug ( "SLUG: {0}" -f $RepositorySlug )
+                    Write-Verbose ( "FROM: {0}; TO: {1}" -f $Src, $Dest )
+                    Write-Debug ( "TRASHCAN: {0}" -f $TrashcanLocation )
+                    Write-Verbose ( "DIFF LEVEL: {0}" -f $DiffLevel )
+
                     if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
                         mkdir "${TrashcanLocation}"
                     }
@@ -2315,7 +2305,6 @@ if ( $Help -eq $true ) {
                 #$slug = $locations[0]
                 #$src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
                 #$dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
-                #$TrashcanLocation = "${ColdStorageBackup}\${slug}_${Pair}"
 
             }
         }
@@ -2551,6 +2540,18 @@ if ( $Help -eq $true ) {
             }
         }
         $Quiet = $true
+    }
+    ElseIf ( $Verb -eq "settle" ) {
+        $sLocation, $sDomain, $sRepository, $sPrefix, $Remainder = ( $Words )
+        If ( $sLocation -eq "here" ) {
+            $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
+        }
+        Else {
+            $oFile = Get-FileObject($sLocation)
+        }
+        If ( $oFile -ne $null ) {
+            @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" } | New-ColdStorageRepositoryDirectoryProps -File $oFile -Force:$Force
+        }
     }
     ElseIf ( $Verb -eq "bleep" ) {
         Do-Bleep-Bloop

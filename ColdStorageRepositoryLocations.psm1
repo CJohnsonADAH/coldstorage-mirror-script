@@ -75,6 +75,34 @@ Param ( $Repository )
     }
 }
 
+Function Get-ColdStorageTrashLocation {
+Param ( [Parameter(ValueFromPipeline=$true)] $Repository )
+
+    Begin {
+        $mirrors = ( Get-ColdStorageRepositories )
+        
+    }
+
+    Process {
+        If ( $Repository -ne $null ) {
+            If ( $mirrors.ContainsKey($Repository) ) {
+                $location = $mirrors[$Repository]
+                $slug = $location[0]
+            }
+            Else {
+                Write-Warning "Get-ColdStorageTrashLocation: Requested repository [{0}] does not exist." -f $Repository
+            }
+        }
+        Else {
+            Write-Warning "Get-ColdStorageTrashLocation: no valid repository found (null Repository parameter)"
+        }
+
+        "${ColdStorageBackup}\${slug}_${Repository}"
+    }
+
+    End { }
+}
+
 Function Get-FileRepositoryCandidates {
 Param ( $Key, [switch] $UNC=$false )
 
@@ -89,9 +117,8 @@ Param ( $Key, [switch] $UNC=$false )
 
             $sTestRepo # > stdout
 
-            $sLocalTestRepo = ( $oTestRepo | Get-LocalPathFromUNC ).FullName
-
             If ( -Not ( $UNC ) ) {
+                $sLocalTestRepo = ( $oTestRepo | Get-LocalPathFromUNC ).FullName
                 If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
                     $sLocalTestRepo # > stdout
                 }
@@ -133,8 +160,196 @@ End { }
 
 }
 
+Function Get-ColdStorageRepositoryDirectoryProps {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        $sContainer = $oFile.FullName
+        If ( Test-Path -LiteralPath "${sContainer}\.coldstorage" -PathType Container ) {
+            Get-ChildItem -LiteralPath "${sContainer}\.coldstorage" |% {
+                If ( $_.Name -like "*.json" ) {
+                    $Source = $_
+                    $Source | Get-Content | ConvertFrom-Json |
+                        Add-Member -PassThru -MemberType NoteProperty -Name Location -Value $oFile |
+                        Add-Member -PassThru -MemberType NoteProperty -Name SourceLocation -Value ( $Source.Directory ) |
+                        Add-Member -PassThru -MemberType NoteProperty -Name Source -Value ( $Source )
+                }
+            }
+        }
+    }
+
+    End { }
+}
+
+Function Get-FileRepositoryProps {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        
+        $Parent = $( If ( $oFile.Directory ) { $oFile.Directory } ElseIf ( $oFile.Parent ) { $oFile.Parent } )
+        
+        $Props = ( $Parent | Get-FileRepositoryProps )
+        If ( $Props ) {
+            $Props
+        }
+        Else {
+            ( $oFile | Get-ColdStorageRepositoryDirectoryProps )
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Get-FileRepositoryLocation {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $Props = ( $File | Get-FileRepositoryProps )
+        If ( $Props ) {
+            $Props.Location
+        }
+    }
+
+    End { }
+}
+
+Function Get-FileRepositoryName {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $Props = ( $File | Get-FileRepositoryProps )
+        If ( $Props ) {
+            $Props.Repository
+        }
+    }
+
+    End { }
+}
+
+Function Get-FileRepositoryPrefix {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $Props = ( $File | Get-FileRepositoryProps )
+        If ( $Props ) {
+            $Props.Prefix
+        }
+    }
+
+    End { }
+}
+
+Function New-ColdStorageRepositoryDirectoryProps {
+Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [switch] $Force = $false )
+
+    $Props = ( $File | Get-ColdStorageRepositoryDirectoryProps )
+    If ( $Props -and -Not ( $Force ) ) {
+        Write-Warning "[coldstorage settle] This is already settled as a repository directory."
+        $Props | Write-Warning
+    }
+    Else {
+        $oFile = Get-FileObject($File)
+
+        $Parent = $oFile.FullName
+        $csName = ".coldstorage"
+        $csDir = "${Parent}\${csName}"
+        If ( Test-Path -LiteralPath "${csDir}" -PathType Container ) {
+            $PropsDir = ( Get-Item -Force -LiteralPath "${csDir}" )
+        }
+        Else {
+            $PropsDir = ( New-Item -ItemType Directory -Path "${Parent}" -Name "${csName}" -Verbose )
+        }
+
+        If ( $PropsDir ) {
+            $sPropsDir = $PropsDir.FullName
+            $Table | ConvertTo-Json > "${sPropsDir}\props.json"
+            Get-Content "${sPropsDir}\props.json"
+        }
+        Else {
+            "[coldstorage settle] Could not locate or create a props directory" | Write-Warning
+        }
+    }
+}
+
+Function Test-ColdStorageRepositoryPropsDirectory {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+
+        $result = $false
+        If ( $oFile.Name -eq ".coldstorage" ) {
+            $Props = ( $oFile | Get-FileRepositoryProps )
+            If ( $Props ) {
+
+                If ( $oFile.FullName -eq $Props.SourceLocation.FullName ) {
+                    $result = $true
+                }
+
+            }
+        }
+
+        $result | Write-Output
+    }
+
+    End { }
+}
+
+Function Test-ColdStorageRepositoryPropsFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        
+        $result = $false
+
+        If ( $oFile.Directory ) {
+            If ( $oFile.Directory.Name -eq ".coldstorage" ) {
+                $Props = ( $oFile | Get-FileRepositoryProps )
+                If ( $Props ) {
+
+                    If ( $oFile.FullName -eq $Props.Source.FullName ) {
+                        $result = $true
+                    }
+                }
+            }
+        }
+
+        $result
+
+    }
+
+    End { }
+}
 
 Export-ModuleMember -Function Get-ColdStorageRepositories
 Export-ModuleMember -Function Get-ColdStorageLocation
 Export-ModuleMember -Function Get-ColdStorageZipLocation
+Export-ModuleMember -Function Get-ColdStorageTrashLocation
 Export-ModuleMember -Function Get-FileRepository
+Export-ModuleMember -Function Get-FileRepositoryName
+Export-ModuleMember -Function Get-FileRepositoryPrefix
+Export-ModuleMember -Function Get-FileRepositoryLocation
+Export-ModuleMember -Function Get-FileRepositoryProps
+Export-ModuleMember -Function Get-ColdStorageRepositoryDirectoryProps
+Export-ModuleMember -Function New-ColdStorageRepositoryDirectoryProps
+Export-ModuleMember -Function Test-ColdStorageRepositoryPropsDirectory
+Export-ModuleMember -Function Test-ColdStorageRepositoryPropsFile

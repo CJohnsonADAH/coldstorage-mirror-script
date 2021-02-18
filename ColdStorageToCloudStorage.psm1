@@ -30,15 +30,41 @@ Begin { }
 Process {
 
     $oPackage = ( Get-FileObject -File $Package )
-    $RepositoryPath = ( Get-FileRepository -File $oPackage )
-    If ( $RepositoryPath ) {
-        $oRepository = Get-FileObject -File $RepositoryPath
-        $sRepository = $oRepository.Name
+    $oRepository = ( Get-FileRepositoryProps -File $oPackage )
+    If ( $oRepository ) {
+        $sRepository = $oRepository.Repository
     }
 
-    If ( $sRepository -match '(Processed|Unprocessed)$' ) {
-        $RepositorySlug = $sRepository.ToLower()
-        "er-collections-${RepositorySlug}" | Write-Output
+    Switch ( $sRepository ) {
+        'Processed' {
+            $RepositorySlug = $sRepository.ToLower()
+            "er-collections-${RepositorySlug}" | Write-Output
+        }
+        'Unprocessed' {
+            $RepositorySlug = $sRepository.ToLower()
+            "er-collections-${RepositorySlug}" | Write-Output
+        }
+        'Masters' {
+            $RepositorySlug = $sRepository.ToLower()
+            $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
+
+            If ( $ContainingDirectory | Test-ZippedBagsContainer ) {
+                Push-Location ( $oRepository.Location.FullName )
+                $Prefix = $oRepository.Prefix
+                $RelativePath = ( $oPackage.Name -replace "^${Prefix}","" )
+                Pop-Location
+            }
+            Else {
+                Push-Location ( $oRepository.Location.FullName )
+                $RelativePath = ( $ContainingDirectory.FullName | Resolve-Path -Relative )
+                Pop-Location
+            }
+
+            $DirectorySlug = ( $RelativePath.ToLower() -replace "[^a-z0-9]+","-" )
+            $DirectorySlug = ( $DirectorySlug -replace "(^-+|-+$)","" )
+
+            "da-${RepositorySlug}-${DirectorySlug}" | Write-Output
+        }
     }
 
 }
@@ -66,21 +92,25 @@ Process {
     $oFile = Get-FileObject -File $File
     $sFile = $oFile.FullName
     $Bucket = ($sFile | Get-CloudStorageBucket)
-
-    If ( $sFile ) {
-        If ( Test-Path -LiteralPath $sFile -PathType Container ) {
-            $Files = ( Get-ChildItem -LiteralPath $sFile -Filter "*.zip" )
-        }
-        Else {
-            $Files = @( Get-FileObject -File $sFile )
-        }
+    If ( $Bucket -eq $null ) {
+        Write-Warning ( "Get-CloudStorageListing: could not determine bucket for {0}" -f $sFile )
     }
+    Else{
+    
+        If ( $sFile ) {
+            If ( Test-Path -LiteralPath $sFile -PathType Container ) {
+                $Files = ( Get-ChildItem -LiteralPath $sFile -Filter "*.zip" )
+            }
+            Else {
+                $Files = @( Get-FileObject -File $sFile )
+            }
+        }
 
-    If ( -Not $bucketFiles.ContainsKey($Bucket) ) {
-        $bucketFiles[$Bucket] = @( )
+        If ( -Not $bucketFiles.ContainsKey($Bucket) ) {
+            $bucketFiles[$Bucket] = @( )
+        }
+        $bucketFiles[$Bucket] = $bucketFiles[$Bucket] + $Files
     }
-    $bucketFiles[$Bucket] = $bucketFiles[$Bucket] + $Files
-
 }
 
 End {

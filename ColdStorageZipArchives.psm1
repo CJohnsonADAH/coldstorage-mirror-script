@@ -85,7 +85,7 @@ Process {
     $sFileUNCPath = $oFileUNCPath.FullName
 
     # Slice off the root directory up to the node name of the repository container
-    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepository )
+    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
     $sRepository = $oRepository.FullName
     $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
 
@@ -112,9 +112,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Begin { }
 
 Process {
-    If ( Test-BagItFormattedDirectory -File $File ) {
-        $Repository = ( $File | Get-ZippedBagsContainer )
-        $Prefix = ( Get-ZippedBagNamePrefix -File $File )
+    $oFile = Get-FileObject($File)
+    If ( Test-BagItFormattedDirectory -File $oFile.FullName ) {
+        $Repository = ( $oFile.FullName | Get-ZippedBagsContainer )
+        $Prefix = ( Get-ZippedBagNamePrefix -File $oFile.FullName )
         Get-ChildItem -Path "${Repository}\${Prefix}_z*_md5_*.zip"
     }
 }
@@ -131,8 +132,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ) )
 Begin { }
 
 Process {
-    $File | Get-FileRepository |% {
-        $sRepoDir = $_
+    $File | Get-FileRepositoryLocation |% {
+        $sRepoDir = $_.FullName
         $sZipDir = "${sRepoDir}\ZIP"
         If ( -Not ( Test-Path -LiteralPath $sZipDir ) ) {
             $oZipDir = ( New-Item -ItemType Directory -Path "${sZipDir}" )
@@ -165,7 +166,7 @@ Begin {
 Process {
     $oFile = ( Get-FileObject $File )
     $Parent = ( $File | Get-ItemFileSystemParent | Get-UNCPathResolved )
-    $Repository = ( $File | Get-FileRepository )
+    $Repository = ( $File | Get-FileRepositoryLocation ).FullName
 
     $result = ( ( $Parent -ieq $Repository ) -and ( $oFile.Name -eq "ZIP" ) )
     $result | Write-Output
