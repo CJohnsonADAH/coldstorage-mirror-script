@@ -33,6 +33,7 @@ param (
     [switch] $Force = $false,
     [switch] $FullName = $false,
     [switch] $Unbagged = $false,
+    [switch] $Unzipped = $false,
     [switch] $Report = $false,
     [String] $Output = "-",
     [String[]] $Side = "local,cloud",
@@ -2484,9 +2485,11 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "packages" ) {
 
         If ( $Items ) {
-            $Words | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% {
+            $Words | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose -CheckZipped:$Unzipped |% {
                 If ( -Not ( $Unbagged -and ( $_.CSPackageBagged ) ) ) {
-                    $_
+                    If ( -Not ( $Unzipped -and ( $_.CSPackageZip ) ) ) {
+                        $_
+                    }
                 }
             } |% {
                 $sFullName = $_.FullName
@@ -2494,13 +2497,20 @@ if ( $Help -eq $true ) {
                 If ( $FullName ) { $sTheName = $sFullName } Else { $sTheName = $sRelName }
 
                 If ( $Report ) {
-                    $sBagged = "unbagged"
+                    $sBagged = " (unbagged)"
                     If ( $_.CSPackageBagged ) {
-                        $sBagged = "BAGGED"
+                        $sBagged = " (BAGGED)"
+                    }
+                    $sZipped = ""
+                    If ( $_ | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
+                        $sZipped = " (unzipped)"
+                        If ( $_.CSPackageZip.Count -gt 0 ) {
+                            $sZipped = " (ZIPPED)"
+                        }
                     }
                     $nContents = ( "{0:N0}" -f $_.CSPackageContents )
                     $sFileSize = ( "{0}" -f ( $_.CSPackageFileSize | Format-BytesHumanReadable ) )
-                    ( "${sTheName} (${sBagged}), {0} file{1}, {2}" -f $nContents,$( If ( $nContents -ne 1 ) { "s" } Else { "" } ),$sFileSize )
+                    ( "${sTheName}{0}{1}, {2} file{3}, {4}" -f $sBagged,$sZipped,$nContents,$( If ( $nContents -ne 1 ) { "s" } Else { "" } ),$sFileSize )
                     #$_.CSPackageContents | Write-Verbose
                 }
                 ElseIf ( $FullName ) {
