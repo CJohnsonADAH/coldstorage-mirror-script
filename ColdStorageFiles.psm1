@@ -213,14 +213,21 @@ End {}
 
 }
 
-# WAs/IS: Resolve-UNC-Path-To-Local-If-Local/Get-LocalPathFromUNC
+$global:csaShares = $null
+Function Get-LocalPathShares {
+    If ( $global:csaShares -eq $null ) {
+        $sHost = $env:COMPUTERNAME
+        $global:csaShares = ( Get-WMIObject -ComputerName "${sHost}" -Query "SELECT * FROM Win32_Share" )
+    }
+    $global:csaShares
+}
+
+# WAS/IS: Resolve-UNC-Path-To-Local-If-Local/Get-LocalPathFromUNC
 Function Get-LocalPathFromUNC {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 Begin {
-    $sHost = $env:COMPUTERNAME
-    $aShares = ( Get-WMIObject -ComputerName "${sHost}" -Query "SELECT * FROM Win32_Share" )
-
+    $aShares = Get-LocalPathShares
     $sShareLocalPath = $null
     $sLocalFullName = $null
 }
