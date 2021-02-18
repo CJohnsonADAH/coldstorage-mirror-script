@@ -2541,6 +2541,15 @@ if ( $Help -eq $true ) {
         }
         $Quiet = $true
     }
+    ElseIf ( $Verb -eq "update" ) {
+        $Object, $Words = $Words
+        
+        Switch ( $Object ) {
+            "clamav" { $ClamAV = Get-ClamAV-Path ; & "${ClamAV}\freshclam.exe" }
+            default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
+        }
+
+    }
     ElseIf ( $Verb -eq "settle" ) {
         $sLocation, $sDomain, $sRepository, $sPrefix, $Remainder = ( $Words )
         If ( $sLocation -eq "here" ) {
