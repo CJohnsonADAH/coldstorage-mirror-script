@@ -2521,7 +2521,7 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "repository" ) {
         $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $File = Get-FileObject -File $_
-            "FILE:", $File.FullName, "REPO:", ($File | Get-FileRepository)
+            @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
         }
         $Quiet = $true
     }
