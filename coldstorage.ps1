@@ -35,6 +35,8 @@ param (
     [switch] $Unbagged = $false,
     [switch] $Unzipped = $false,
     [switch] $Report = $false,
+    [switch] $Bork = $false,
+    [switch] $Dependencies = $false,
     [String] $Output = "-",
     [String[]] $Side = "local,cloud",
     #[switch] $Verbose = $false,
@@ -219,30 +221,37 @@ function Rebase-File {
 ## SETTINGS: PATHS, ETC. ####################################################################################
 #############################################################################################################
 
+Function Ping-Dependency {
+Param ( [Parameter(ValueFromPipeline=$true)] $Path, $Name=$null, [string] $Test="--version", [switch] $Bork=$false, [ScriptBlock] $Process={ Param($Line); ( $Line ) } )
+    
+    $ExePath = $Path
+    If ( $Bork ) { $ExePath = ( $Path + "-BORKED" ) }
 
-function Get-ClamAV-Path () {
-    return ( Get-ColdStorageSettings("ClamAV") | ConvertTo-ColdStorageSettingsFilePath )
+    $DepName = $Name
+    If ( $DepName -eq $null ) {
+        $DepName = ( ( $Path -split '\\' ) | Select-Object -Last 1 )
+    }
+
+    $Status = "-"
+    Try { $Output = ( & ${ExePath} ${Test} 2>&1 ); If ( $LastExitCode -gt 0 ) { $Status="CMD-ERR" } Else { $Status = "ok" } }
+    Catch [System.Management.Automation.CommandNotFoundException] { $Status="ERR"; $Output = ( $_.ToString() ) }
+    Catch [System.Management.Automation.RemoteException] { $Status="CMD-EXCEPT"; $Output = ( $_.ToString() ) }
+
+    @{} | Select-Object @{ n='Name'; e={ $DepName } },
+        @{ n='OK'; e={ $Status } },
+        @{ n='Result'; e={ $( Invoke-Command -ScriptBlock:$Process -ArgumentList @( $Output, $null ) ) } },
+        @{ n='Path'; e={ $Path } }
+
 }
 
-function Get-BagIt-Path () {
-    return ( Get-ColdStorageSettings("BagIt") | ConvertTo-ColdStorageSettingsFilePath )
-}
+Function Invoke-TestDependencies {
+Param ( [switch] $Bork=$false )
 
-Function Get-7z-Path () {
-    return ( Get-ColdStorageSettings("7za") | ConvertTo-ColdStorageSettingsFilePath )
-}
+    Get-ExeForPython | Ping-Dependency -Name:"Python" -Bork:$Bork | Write-Output
+    Get-ExeFor7z | Ping-Dependency -Name:"7z" -Test:"i" -Process:{ Param( $Line ); $Line | Where-Object { ( $_.Trim() ).Length -gt 0 } | Select-Object -First 1 } -Bork:$Bork | Write-Output
+    Get-ExeForClamAV | Ping-Dependency -Name:"ClamAV" -Bork:$Bork | Write-Output
+    Get-ExeForAWSCLI | Ping-Dependency -Name:"AWS-CLI" -Bork:$Bork | Write-Output
 
-Function Get-Python-Path () {
-	return ( Get-ColdStorageSettings("Python") | ConvertTo-ColdStorageSettingsFilePath )
-}
-
-Function Get-Python-Path-Exe () {
-	$Exe = "python.exe"
-	$PyPath = Get-Python-Path
-	If ( $PyPath ) {
-		$Exe = "${PyPath}\${Exe}"
-	}
-	( $Exe )
 }
 
 Function ColdStorage-Command-Line {
@@ -270,8 +279,7 @@ End {
 Function Compress-Archive-7z {
 Param ( [switch] $WhatIf=$false, $LiteralPath, $DestinationPath )
 
-    $ZipExePath = Get-7z-Path
-    $ZipExe = "${ZipExePath}\7za.exe"
+    $ZipExe = Get-ExeFor7z
     $add = "a"
     $zip = "-tzip"
     $batch = "-y"
@@ -386,9 +394,9 @@ Function Do-Bag-Directory ($DIRNAME, [switch] $Verbose=$false) {
 
     "PS ${PWD}> bagit.py ." | Write-Verbose
     
-    $BagIt = Get-BagIt-Path
-	$Python = Get-Python-Path-Exe
-    $Output = ( & $( Get-Python-Path-Exe ) "${BagIt}\bagit.py" . 2>&1 )
+    $BagIt = Get-PathToBagIt
+	$Python = Get-ExeForPython
+    $Output = ( & $( Get-ExeForPython ) "${BagIt}\bagit.py" . 2>&1 )
     $NotOK = $LASTEXITCODE
 
     If ( $NotOK -gt 0 ) {
@@ -1837,8 +1845,8 @@ param (
     Process {
         If ( -Not $NoScan ) {
             "ClamAV Scan: ${Path}" | Write-Verbose -InformationAction Continue
-            $ClamAV = Get-ClamAV-Path
-            $Output = ( & "${ClamAV}\clamscan.exe" --stdout --bell --suppress-ok-results --recursive "${Path}" )
+            $ClamAV = Get-ExeForClamAV
+            $Output = ( & "${ClamAV}" --stdout --bell --suppress-ok-results --recursive "${Path}" )
             if ( $LastExitCode -gt 0 ) {
                 $Output | Write-Warning
                 $LastExitCode
@@ -1860,11 +1868,11 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
     $Anchor = $PWD
     chdir $DIRNAME
 
-    $BagIt = Get-BagIt-Path
-	$Python = Get-Python-Path-Exe
+    $BagIt = Get-PathToBagIt
+	$Python = Get-ExeForPython
     If ( $Verbose ) {
         "bagit.py --validate ${DIRNAME}" | Write-Verbose
-        & $( Get-Python-Path-Exe ) "${BagIt}\bagit.py" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
+        & $( Get-ExeForPython ) "${BagIt}\bagit.py" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
         $NotOK = $LastExitCode
 
         if ( $NotOK -gt 0 ) {
@@ -1879,7 +1887,7 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
 
     }
     Else {
-        $Output = ( & $( Get-Python-Path-Exe ) "${BagIt}\bagit.py" --validate . 2>&1 )
+        $Output = ( & $( Get-ExeForPython ) "${BagIt}\bagit.py" --validate . 2>&1 )
         $NotOK = $LastExitCode
         if ( $NotOK -gt 0 ) {
             $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
@@ -2518,6 +2526,13 @@ if ( $Help -eq $true ) {
         Get-ColdStorageSettings -Name $Words
         $Quiet = $true
     }
+    ElseIf ( $Verb -eq "test" ) {
+        
+        If ( $Dependencies ) {
+            Invoke-TestDependencies -Bork:${Bork} | Format-Table
+        }
+
+    }
     ElseIf ( $Verb -eq "repository" ) {
         $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $File = Get-FileObject -File $_
@@ -2545,7 +2560,7 @@ if ( $Help -eq $true ) {
         $Object, $Words = $Words
         
         Switch ( $Object ) {
-            "clamav" { $ClamAV = Get-ClamAV-Path ; & "${ClamAV}\freshclam.exe" }
+            "clamav" { $ClamAV = Get-PathToClamAV ; & "${ClamAV}\freshclam.exe" }
             default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
         }
 

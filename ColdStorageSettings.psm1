@@ -121,9 +121,30 @@ End { }
 ## External Dependency Locations ############################################################################
 #############################################################################################################
 
-Function Get-AWSCLIPath {
-    return ( Get-ColdStorageSettings("AWS") | ConvertTo-ColdStorageSettingsFilePath )
+Function Get-PathToDependency {
+Param ( [String] $Package, $Exe=$null )
+
+    $ExePath = ( Get-ColdStorageSettings($Package) | ConvertTo-ColdStorageSettingsFilePath )
+    If ( $Exe ) {
+        $ExePath = "${ExePath}\${Exe}"
+    }
+
+    ( $ExePath )
+
 }
+
+Function Get-PathToClamAV ( $Exe=$null ) { Get-PathToDependency -Package:ClamAV -Exe:$Exe }
+Function Get-PathToBagIt ( $Exe=$null ) { Get-PathToDependency -Package:BagIt -Exe:$Exe }
+Function Get-PathTo7z ( $Exe=$null ) { Get-PathToDependency -Package:7za -Exe:$Exe }
+Function Get-PathToPython ( $Exe=$null ) { Get-PathToDependency -Package:Python -Exe:$Exe }
+Function Get-PathToAWSCLI ( $Exe=$null ) { Get-PathToDependency -Package:AWS -Exe:$Exe }
+
+Function Get-ExeFor7z { Get-PathTo7z -Exe:"7za.exe" }
+Function Get-ExeForClamAV { Get-PathToClamAV -Exe:"clamscan.exe" }
+Function Get-ExeForPython { Get-PathToPython -Exe:"python.exe" }
+Function Get-ExeForAWSCLI { Get-PathToAWSCLI -Exe:"aws.exe" }
+
+
 Function Get-AWSCLIExe {
     $Exe = "aws.exe"
     $awsPath = Get-AWSCLIPath
@@ -141,5 +162,13 @@ Export-ModuleMEmber -Function Get-ColdStorageSettingsJson
 Export-ModuleMember -Function ConvertTo-ColdStorageSettingsFilePath
 Export-ModuleMember -Function Get-JsonSettings
 
-Export-ModuleMember -Function Get-AWSCLIPath
-Export-ModuleMember -Function Get-AWSCLIExe
+Export-ModuleMember -Function Get-PathToClamAV
+Export-ModuleMember -Function Get-PathToBagIt
+Export-ModuleMember -Function Get-PathTo7z
+Export-ModuleMember -Function Get-PathToPython
+Export-ModuleMember -Function Get-PathToAWSCLI
+
+Export-ModuleMember -Function Get-ExeFor7z
+Export-ModuleMember -Function Get-ExeForClamAV
+Export-ModuleMember -Function Get-ExeForPython
+Export-ModuleMember -Function Get-ExeForAWSCLI

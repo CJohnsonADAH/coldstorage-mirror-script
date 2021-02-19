@@ -119,13 +119,13 @@ End {
         $Files = $bucketFiles[$Bucket]
 
         If ( $Files.Count -gt 1 ) {
-            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-AWSCLIExe ),$Bucket )
-            $jsonReply = $( & $( Get-AWSCLIExe ) s3api list-objects-v2 --bucket "${Bucket}" )
+            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-ExeForAWSCLI ),$Bucket )
+            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" )
         }
         Else {
             $FileName = $Files.Name
-            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f $( Get-AWSCLIExe ),$Bucket,$FileName )
-            $jsonReply = $( & $( Get-AWSCLIExe ) s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" )
+            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f $( Get-ExeForAWSCLI ),$Bucket,$FileName )
+            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" )
         }
     }
 
@@ -228,7 +228,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
                     $sFile = ( '\\?\{0}' -f $sFile )
                 }
 
-                & $( Get-AWSCLIExe ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
+                & $( Get-ExeForAWSCLI ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
             }
             Else {
                 Write-Warning ( "[to cloud] Could not identify bucket: {0}" -f $File )
