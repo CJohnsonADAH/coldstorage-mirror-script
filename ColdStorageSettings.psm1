@@ -14,7 +14,7 @@ Param ( $Command, $File=$null )
 
     $Path
 }
-$gColdStorageCommand = $MyInvocation.MyCommand
+$global:gColdStorageCommand = $MyInvocation.MyCommand
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
@@ -56,7 +56,7 @@ Function Get-TablesMerged {
 }
 
 Function Get-ColdStorageSettingsFiles () {
-    $JsonDir = ( My-Script-Directory -Command $gColdStorageCommand ).FullName
+    $JsonDir = ( My-Script-Directory -Command $global:gColdStorageCommand ).FullName
 
     $paths = "${JsonDir}\settings.json", "${JsonDir}\settings-${env:COMPUTERNAME}.json"
     
