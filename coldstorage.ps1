@@ -69,19 +69,19 @@ Param ( $File=$null )
 }
 
 # External Dependencies - Modules
-Import-Module BitsTransfer
-Import-Module Posh-SSH
+Import-Module -Verbose:$false BitsTransfer
+Import-Module -Verbose:$false Posh-SSH
 
 # Internal Dependencies - Modules
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
-Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
+Import-Module -Verbose:$false -Force:( $Debug -eq $true ) $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
