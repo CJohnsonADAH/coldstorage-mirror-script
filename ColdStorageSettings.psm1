@@ -154,6 +154,57 @@ Function Get-AWSCLIExe {
     ( $Exe )
 }
 
+Function Ping-Dependency {
+Param ( [Parameter(ValueFromPipeline=$true)] $Path, $Name=$null, [string] $Test="--version", [switch] $Bork=$false, [ScriptBlock] $Process={ Param($Line); ( $Line ) } )
+    
+    $ExePath = $Path
+    If ( $Bork ) { $ExePath = ( $Path + "-BORKED" ) }
+
+    $DepName = $Name
+    If ( $DepName -eq $null ) {
+        $DepName = ( ( $Path -split '\\' ) | Select-Object -Last 1 )
+    }
+
+    $Status = "-"
+    Try { $Output = ( & ${ExePath} ${Test} 2>&1 ); If ( $LastExitCode -gt 0 ) { $Status="CMD-ERR" } Else { $Status = "ok" } }
+    Catch [System.Management.Automation.CommandNotFoundException] { $Status="ERR"; $Output = ( $_.ToString() ) }
+    Catch [System.Management.Automation.RemoteException] { $Status="CMD-EXCEPT"; $Output = ( $_.ToString() ) }
+
+    @{} | Select-Object @{ n='Name'; e={ $DepName } },
+        @{ n='OK'; e={ $Status } },
+        @{ n='Result'; e={ $( Invoke-Command -ScriptBlock:$Process -ArgumentList @( $Output, $null ) ) } },
+        @{ n='Path'; e={ $Path } }
+
+}
+
+Function Ping-DependencyModule {
+Param( [Parameter(ValueFromPipeline=$true)] $Module, [switch] $Bork=$false )
+
+    Begin { }
+
+    Process {
+        $moduleName = $Module
+        If ( $Bork ) {
+            $moduleName = "${moduleName}-BORK"
+        }
+
+        $oModule = ( Get-Module -ListAvailable -Name:$moduleName | Add-Member -PassThru -NotePropertyName "OK" -NotePropertyValue "ok" )
+        $oModule = ( $oModule |% { $_ | Add-Member -PassThru -NotePropertyName "Result" -NotePropertyValue ( "{0} ver. {1}" -f $_.Name,$_.Version ) } )
+
+        If ( $oModule ) {
+            $oModule
+        }
+        Else {
+            @{} | Select-Object @{ n='Name'; e={ $moduleName } }, @{ n='OK'; e={ 'ERR' } },
+                @{ n='Result'; e={ "Module not detected; use `Install-Module ${moduleName}` to install ?" } },
+                @{ n='Path'; e={ '-N/A-' } }
+        }
+    }
+
+    End { }
+
+}
+
 Export-ModuleMember -Function Get-ColdStorageSettings
 Export-ModuleMember -Function Get-TablesMerged
 Export-ModuleMember -Function Get-ColdStorageSettingsFiles
@@ -161,6 +212,9 @@ Export-ModuleMember -Function Get-ColdStorageSettingsDefaults
 Export-ModuleMEmber -Function Get-ColdStorageSettingsJson 
 Export-ModuleMember -Function ConvertTo-ColdStorageSettingsFilePath
 Export-ModuleMember -Function Get-JsonSettings
+
+Export-ModuleMember -Function Ping-Dependency
+Export-ModuleMember -Function Ping-DependencyModule
 
 Export-ModuleMember -Function Get-PathToClamAV
 Export-ModuleMember -Function Get-PathToBagIt

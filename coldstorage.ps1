@@ -68,7 +68,11 @@ Param ( $File=$null )
     $Item
 }
 
+# External Dependencies - Modules
 Import-Module BitsTransfer
+Import-Module Posh-SSH
+
+# Internal Dependencies - Modules
 Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
 Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
 Import-Module -Verbose:( $Debug -eq $true ) -Force $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
@@ -221,29 +225,6 @@ function Rebase-File {
 ## SETTINGS: PATHS, ETC. ####################################################################################
 #############################################################################################################
 
-Function Ping-Dependency {
-Param ( [Parameter(ValueFromPipeline=$true)] $Path, $Name=$null, [string] $Test="--version", [switch] $Bork=$false, [ScriptBlock] $Process={ Param($Line); ( $Line ) } )
-    
-    $ExePath = $Path
-    If ( $Bork ) { $ExePath = ( $Path + "-BORKED" ) }
-
-    $DepName = $Name
-    If ( $DepName -eq $null ) {
-        $DepName = ( ( $Path -split '\\' ) | Select-Object -Last 1 )
-    }
-
-    $Status = "-"
-    Try { $Output = ( & ${ExePath} ${Test} 2>&1 ); If ( $LastExitCode -gt 0 ) { $Status="CMD-ERR" } Else { $Status = "ok" } }
-    Catch [System.Management.Automation.CommandNotFoundException] { $Status="ERR"; $Output = ( $_.ToString() ) }
-    Catch [System.Management.Automation.RemoteException] { $Status="CMD-EXCEPT"; $Output = ( $_.ToString() ) }
-
-    @{} | Select-Object @{ n='Name'; e={ $DepName } },
-        @{ n='OK'; e={ $Status } },
-        @{ n='Result'; e={ $( Invoke-Command -ScriptBlock:$Process -ArgumentList @( $Output, $null ) ) } },
-        @{ n='Path'; e={ $Path } }
-
-}
-
 Function Invoke-TestDependencies {
 Param ( [switch] $Bork=$false )
 
@@ -251,6 +232,8 @@ Param ( [switch] $Bork=$false )
     Get-ExeFor7z | Ping-Dependency -Name:"7z" -Test:"i" -Process:{ Param( $Line ); $Line | Where-Object { ( $_.Trim() ).Length -gt 0 } | Select-Object -First 1 } -Bork:$Bork | Write-Output
     Get-ExeForClamAV | Ping-Dependency -Name:"ClamAV" -Bork:$Bork | Write-Output
     Get-ExeForAWSCLI | Ping-Dependency -Name:"AWS-CLI" -Bork:$Bork | Write-Output
+
+    "Posh-SSH" | Ping-DependencyModule -Bork:$Bork | Write-Output
 
 }
 
