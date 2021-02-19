@@ -2259,6 +2259,14 @@ function Do-Write-Usage ($cmd) {
     Write-Output "       `t`tfor detailed documentation"
 }
 
+Function Invoke-BatchCommandEpilog {
+Param ( $Start, $End )
+
+    ( "Completed: {0}" -f $End ) | Write-Output
+    ( New-Timespan -Start:$Start -End:$End ) | Write-Output
+
+}
+
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 
 If ( $Verbose ) {
@@ -2408,7 +2416,6 @@ if ( $Help -eq $true ) {
     }
     ElseIf ( $Verb -eq "bucket" ) {
         $Words | Get-CloudStorageBucket
-        $Quiet = $true
     }
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Words = $Words
@@ -2524,7 +2531,6 @@ if ( $Help -eq $true ) {
     }
     ElseIf ( $Verb -eq "settings" ) {
         Get-ColdStorageSettings -Name $Words
-        $Quiet = $true
     }
     ElseIf ( $Verb -eq "test" ) {
         
@@ -2538,14 +2544,12 @@ if ( $Help -eq $true ) {
             $File = Get-FileObject -File $_
             @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
         }
-        $Quiet = $true
     }
     ElseIf ( $Verb -eq "zipname" ) {
         $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $File = Get-FileObject -File $_
             "FILE:", $File.FullName, "PREFIX:", ($File | Get-ZippedBagNamePrefix )
         }
-        $Quiet = $true
     }
     ElseIf ( $Verb -eq "ripe" ) {
         $Words | ColdStorage-Command-Line -Default ( Get-ChildItem ) | ForEach {
@@ -2554,7 +2558,6 @@ if ( $Help -eq $true ) {
                 $ripe
             }
         }
-        $Quiet = $true
     }
     ElseIf ( $Verb -eq "update" ) {
         $Object, $Words = $Words
@@ -2583,17 +2586,15 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "echo" ) {
         "VERB:", $Verb
         "WORDS:", $Words
-        $Quiet = $true
     }
     Else {
         Do-Write-Usage -cmd $MyInvocation.MyCommand
-        $Quiet = $true
     }
 
-    $tN = date
 
-    if ( -not $Quiet ) {
-        Write-Output "Completed: ${tN}"
-        Write-Output ( $tN - $t0 )
+    if ( $Batch -and ( -Not $Quiet ) ) {
+        $tN = ( Get-Date )
+        
+        Invoke-BatchCommandEpilog -Start:$t0 -End:$tN
     }
 }
