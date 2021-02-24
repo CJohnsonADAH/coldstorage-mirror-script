@@ -2130,7 +2130,7 @@ if ( $Help -eq $true ) {
                 } }
         }
         Else {
-            ( $Words |% { Get-ColdStorageLocation -Repository $_ } ) | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% { If ( $FullName ) { $_.FullName } Else { $_ } }
+            ( $Words | Get-ColdStorageLocation -ShowWarnings ) | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% { If ( $FullName ) { $_.FullName } Else { $_ } }
         }
         
     }

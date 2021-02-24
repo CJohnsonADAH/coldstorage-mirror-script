@@ -53,16 +53,35 @@ Function Get-ColdStorageRepositories () {
 }
 
 Function Get-ColdStorageLocation {
-Param ( $Repository )
+Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $ShowWarnings=$false )
 
-    $aRepo = $mirrors[$Repository]
+    Process {
+        If ( $Repository ) {
+            If ( $mirrors.ContainsKey($Repository) ) {
+                $aRepo = $mirrors[$Repository]
 
-    If ( ( $aRepo[1] -Like "${ColdStorageER}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageDA}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageData}\*" ) ) {
-        $aRepo[1]
+                If ( ( $aRepo[1] -Like "${ColdStorageER}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageDA}\*" ) -Or ( $aRepo[1] -Like "${ColdStorageData}\*" ) ) {
+                    $aRepo[1]
+                }
+                Else {
+                    $aRepo[2]
+                }
+            }
+            Else {
+                $Mesg = ( "No such Repository: {0}" -f $Repository )
+                If ( Test-Path -LiteralPath $Repository ) {
+                    $FileType = $( If ( Test-Path -LiteralPath $Repository -PathType Container ) { "FOLDER" } Else { "FILE" } ) 
+                    $Mesg = ( "{0} <-- THIS IS A {1} NAME, did you mean to use: -Items {2}` ?" -f $Mesg, $FileType, $Repository)
+                }
+
+                ( $Mesg ) | Write-Warning
+            }
+        }
+        Else {
+            ( "Repository name is empty." ) | Write-Warning
+        }
     }
-    Else {
-        $aRepo[2]
-    }
+
 }
 
 Function Get-ColdStorageZipLocation {
