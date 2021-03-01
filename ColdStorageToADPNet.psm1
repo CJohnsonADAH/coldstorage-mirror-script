@@ -325,19 +325,19 @@ Process {
 
             }
             Else {
-                Write-Error "[drop:$sFile]: Requires LOCKSS manifest.html file. Use: & coldstorage manifest -Items '${sFile}'"
+                Write-Warning "[drop:$sFile]: Requires LOCKSS manifest.html file. Use: & coldstorage manifest -Items '${sFile}'"
             }
 
         }
         Else {
 
-            Write-Error "[drop:$sFile]: Requires bagit formatting. Use: & coldstorage bag -Items '${sFile}'"
+            Write-Warning "[drop:$sFile]: Requires bagit formatting. Use: & coldstorage bag -Items '${sFile}'"
 
         }
     }
     Else {
 
-        Write-Error "[drop:$sFile]: SFTP connection failed."
+        Write-Warning "[drop:$sFile]: SFTP connection failed."
         Write-Error $session
 
     }
