@@ -505,7 +505,13 @@ Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
 
         $indexHtmlPath = "${UNC}\index.html"
 
-        if ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
+        If ( Test-Path -LiteralPath "${indexHtmlPath}" ) {
+            If ( $Force) {
+                Remove-Item -Force -LiteralPath "${indexHtmlPath}"
+            }
+        }
+
+        If ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
             $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Get-UNCPathResolved -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC -RelativeHref:${RelativeHref}
 
             $NL = [Environment]::NewLine
@@ -516,8 +522,9 @@ Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
             $htmlOut = ( "<!DOCTYPE html>${NL}<html>${NL}<head>${NL}<title>{0}</title>${NL}</head>${NL}<body>${NL}<h1>{0}</h1>${NL}{1}${NL}</body>${NL}</html>${NL}" -f $htmlTitle, ( $htmlUL -Join "${NL}" ) )
 
             $htmlOut | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
-        } else {
-            Write-Error "index.html already exists in ${Directory}!"
+        }
+        Else {
+            Write-Warning "index.html already exists in ${Directory}. To force index.html to be regenerated, use -Force flag."
         }
     }
 }

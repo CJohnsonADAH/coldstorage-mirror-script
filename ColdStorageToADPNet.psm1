@@ -143,7 +143,7 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
         $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
         $oManifest = ( $UNC | Get-LOCKSSManifest )
         If ( ( $oManifest ) -and ( -Not $Force ) ) {
-            Write-Error ( "[manifest:${Directory}] manifest.html already exists for this AU ({0} bytes, created {1})" -f $oManifest.Length, $oManifest.CreationTime )
+            Write-Warning ( "[manifest:${Directory}] manifest.html already exists for this AU ({0} bytes, created {1}). Use -Force flag to force it to be regenerated." -f $oManifest.Length, $oManifest.CreationTime )
         }
         Else {
 
