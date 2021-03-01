@@ -34,6 +34,7 @@ param (
     [switch] $FullName = $false,
     [switch] $Unbagged = $false,
     [switch] $Unzipped = $false,
+    [switch] $Zipped = $false,
     [switch] $Report = $false,
     [switch] $Dependencies = $false,
     [String] $Output = "-",
@@ -2101,7 +2102,8 @@ if ( $Help -eq $true ) {
     ElseIf ( $Verb -eq "packages" ) {
 
         If ( $Items ) {
-            $Words | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose -CheckZipped:$Unzipped |% {
+            $Subsequent = $false
+            $Words | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose -CheckZipped:( $Unzipped -or $Zipped ) |% {
                 If ( -Not ( $Unbagged -and ( $_.CSPackageBagged ) ) ) {
                     If ( -Not ( $Unzipped -and ( $_.CSPackageZip ) ) ) {
                         $_
@@ -2112,21 +2114,38 @@ if ( $Help -eq $true ) {
                 $sRelName = ( $_.FullName | Resolve-Path -Relative )
                 If ( $FullName ) { $sTheName = $sFullName } Else { $sTheName = $sRelName }
 
+                $sBaggedFlag = $( If ( $_.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
+                $sZippedFlag = $null
+                If ( $_ | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
+                    $sZippedFlag = $( If ( $_.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
+                    $sZippedFile = $( If ( $_.CSPackageZip.Count -gt 0 ) { $_.CSPackageZip[0].Name } Else { "" } )
+                }
+                $nContents = ( "{0:N0}" -f $_.CSPackageContents )
+                $sContents = ( "{0} file{1}" -f $nContents, $( If ( $nContents -ne 1 ) { "s" } Else { "" } ))
+                $sFileSize = ( "{0:N0}" -f $_.CSPackageFileSize )
+                $sFileSizeReadable = ( "{0}" -f ( $_.CSPackageFileSize | Format-BytesHumanReadable ) )
+                
                 If ( $Report ) {
-                    $sBagged = " (unbagged)"
-                    If ( $_.CSPackageBagged ) {
-                        $sBagged = " (BAGGED)"
-                    }
-                    $sZipped = ""
-                    If ( $_ | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
-                        $sZipped = " (unzipped)"
-                        If ( $_.CSPackageZip.Count -gt 0 ) {
-                            $sZipped = " (ZIPPED)"
+                        If ( "CSV" -ieq $Output ) {
+
+                            @{} `
+                            | Select-Object @{ n="Name"; e={ $sTheName } },
+                                @{ n="Bagged"; e={ $sBaggedFlag } },
+                                @{ n="Zipped"; e={ $sZippedFile } },
+                                @{ n="Contents"; e={ $sContents } },
+                                @{ n="Bytes"; e={ $sFileSize } },
+                                @{ n="Size"; e={ $sFileSizeReadable  } } `
+                            | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } )
+
+
                         }
-                    }
-                    $nContents = ( "{0:N0}" -f $_.CSPackageContents )
-                    $sFileSize = ( "{0}" -f ( $_.CSPackageFileSize | Format-BytesHumanReadable ) )
-                    ( "${sTheName}{0}{1}, {2} file{3}, {4}" -f $sBagged,$sZipped,$nContents,$( If ( $nContents -ne 1 ) { "s" } Else { "" } ),$sFileSize )
+                        Else {
+                         
+                            $sBagged = ( " ({0})" -f $sBaggedFlag )
+                            $sZipped = $( If ( $sZippedFlag -ne $null ) { ( " ({0})" -f $sZippedFlag ) } Else { "" } )
+
+                            ( "{0}{1}{2}, {3}, {4}" -f $sTheName,$sBagged,$sZipped,$sContents,$sFileSizeReadable )
+                        }
                     #$_.CSPackageContents | Write-Verbose
                 }
                 ElseIf ( $FullName ) {
@@ -2134,7 +2153,10 @@ if ( $Help -eq $true ) {
                 }
                 Else {
                     $_
-                } }
+                }
+                
+                $Subsequent = $true
+            }
         }
         Else {
             ( $Words | Get-ColdStorageLocation -ShowWarnings ) | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% { If ( $FullName ) { $_.FullName } Else { $_ } }
