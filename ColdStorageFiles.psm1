@@ -227,6 +227,7 @@ Function Get-LocalPathFromUNC {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 Begin {
+    $sHost = $env:COMPUTERNAME
     $aShares = Get-LocalPathShares
     $sShareLocalPath = $null
     $sLocalFullName = $null
