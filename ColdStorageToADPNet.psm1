@@ -150,8 +150,10 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
             $NL = [Environment]::NewLine
 
             $htmlStartLink = ( '<a href="{0}">{1}</a>' -f $( $Path | Get-ADPNetStartURL ), $Title )
-            
-            $htmlLOCKSSBadge = '<img src="LOCKSS-small.gif" alt="LOCKSS" width="108" height="108" />'
+            $imgSrcBaseHref = ( "{0}/{1}" -f ( Get-ColdStorageSettings -Name "Drop-Server-URL" ), "assets/images" )
+            $imgSrc = ( "{0}/{1}" -f $imgSrcBaseHref,"lockss-small.png" )
+
+            $htmlLOCKSSBadge = ( '<img src="{0}" alt="LOCKSS" width="108" height="108" />' -f $imgSrc )
             $htmlLOCKSSPermission = 'LOCKSS system has permission to collect, preserve, and serve this Archival Unit.'
             
             $htmlBody = ( (
