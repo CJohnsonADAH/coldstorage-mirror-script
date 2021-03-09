@@ -244,10 +244,10 @@ Process {
         # This is on a local drive, we're all good
     }
     ElseIf ( $File.Root ) {
+
         $UNCRoot = $File.Root.FullName
         $sShareLocalPath = $null
         $sLocalFullName = $null
-
         $aShares | ForEach {
             $sSharePath = $_.Name
             If ( $UNCRoot -eq "\\${sHost}\${sSharePath}" ) {
