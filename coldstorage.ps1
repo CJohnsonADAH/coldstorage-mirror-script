@@ -94,6 +94,7 @@ Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Scr
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToADPNet.psm1" )
 
 $global:gCSScriptName = $MyInvocation.MyCommand
+$global:gCSScriptPath = $MyInvocation.MyCommand.Definition
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
@@ -1864,6 +1865,127 @@ Function Do-CloudUploadsAbort {
     }
 }
 
+Function Write-ColdStoragePackagesReport {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    [switch] $Report=$false,
+    [string] $Output="",
+    [switch] $FullName=$false,
+    $Timestamp,
+    $Context
+
+)
+
+    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ) }
+
+    Process {
+        $oContext = ( Get-FileObject $Context )
+        Push-Location $oContext.FullName
+        $sFullName = $Package.FullName
+        $sRelName = ( Resolve-Path -Relative -LiteralPath $Package.FullName )
+        $sTheName = $( If ( $FullName ) { $sFullName } Else { $sRelName } )
+        Pop-Location
+
+        $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )
+        $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
+        $sZippedFlag = $null
+        If ( $Package | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
+            $sZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
+            $nZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { 1 } Else { 0 } )
+            $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
+        }
+        $nContents = ( $Package.CSPackageContents )
+        $sContents = ( "{0:N0} file{1}" -f $nContents, $( If ( $nContents -ne 1 ) { "s" } Else { "" } ))
+        $nFileSize = ( $Package.CSPackageFileSize )
+        $sFileSize = ( "{0:N0}" -f $Package.CSPackageFileSize )
+        $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
+                
+        If ( $Report ) {
+            If ( "CSV" -ieq $Output ) {
+
+                @{} `
+                | Select-Object @{ n="Date"; e={ $sDate } },
+                                @{ n="Name"; e={ $sTheName } },
+                                @{ n="Bag"; e={ $sBaggedFlag } },
+                                @{ n="Bagged"; e={ $nBaggedFlag } },
+                                @{ n="ZipFile"; e={ $sZippedFile } },
+                                @{ n="Zipped"; e={ $nZippedFlag } },
+                                @{ n="Files"; e={ $nContents } },
+                                @{ n="Contents"; e={ $sContents } },
+                                @{ n="Bytes"; e={ $nFileSize } },
+                                @{ n="Size"; e={ $sFileSizeReadable  } },
+                                @{ n="Context"; e={ $oContext.FullName } } `
+                | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } )
+
+
+            }
+            Else {
+                         
+                $sBagged = ( " ({0})" -f $sBaggedFlag )
+                $sZipped = $( If ( $sZippedFlag -ne $null ) { ( " ({0})" -f $sZippedFlag ) } Else { "" } )
+
+                ( "{0}{1}{2}, {3}, {4}" -f $sTheName,$sBagged,$sZipped,$sContents,$sFileSizeReadable )
+            
+            }
+        }
+        ElseIf ( $FullName ) {
+            $_.FullName
+        }
+        Else {
+            $_
+        }
+        $Subsequent = $true
+    }
+
+    End { }
+}
+
+Function Select-ColdStoragePackagesToReport {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    [switch] $Unbagged,
+    [switch] $Unzipped
+)
+
+    Begin { }
+
+    Process {
+        If ( -Not ( $Unbagged -and ( $Package.CSPackageBagged ) ) ) {
+            If ( -Not ( $Unzipped -and ( $Package.CSPackageZip ) ) ) {
+                $_
+            }
+        }
+    }
+
+    End { }
+}
+
+Function Invoke-ColdStoragePackagesReport {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Location,
+    [switch] $Recurse,
+    [switch] $ShowWarnings,
+    [switch] $Unbagged,
+    [switch] $Unzipped,
+    [switch] $Zipped,
+    [switch] $FullName,
+    [switch] $Report,
+    [string] $Output
+)
+
+    Begin { $CurDate = ( Get-Date ) }
+
+    Process {
+        $CheckZipped = ( $Unzipped -or $Zipped )
+        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped |
+            Select-ColdStoragePackagesToReport -Unbagged:$Unbagged -Unzipped:$Unzipped |
+            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -FullName:$FullName -Context:$Location -Timestamp:$CurDate
+    }
+
+    End { }
+
+}
+
 function Do-Write-Usage ($cmd) {
     $mirrors = ( Get-ColdStorageRepositories )
 
@@ -2120,66 +2242,15 @@ Else {
     }
     ElseIf ( $Verb -eq "packages" ) {
 
-        If ( $Items ) {
-            $Subsequent = $false
-            $Words | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose -CheckZipped:( $Unzipped -or $Zipped ) |% {
-                If ( -Not ( $Unbagged -and ( $_.CSPackageBagged ) ) ) {
-                    If ( -Not ( $Unzipped -and ( $_.CSPackageZip ) ) ) {
-                        $_
-                    }
-                }
-            } |% {
-                $sFullName = $_.FullName
-                $sRelName = ( $_.FullName | Resolve-Path -Relative )
-                If ( $FullName ) { $sTheName = $sFullName } Else { $sTheName = $sRelName }
-
-                $sBaggedFlag = $( If ( $_.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
-                $sZippedFlag = $null
-                If ( $_ | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
-                    $sZippedFlag = $( If ( $_.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
-                    $sZippedFile = $( If ( $_.CSPackageZip.Count -gt 0 ) { $_.CSPackageZip[0].Name } Else { "" } )
-                }
-                $nContents = ( "{0:N0}" -f $_.CSPackageContents )
-                $sContents = ( "{0} file{1}" -f $nContents, $( If ( $nContents -ne 1 ) { "s" } Else { "" } ))
-                $sFileSize = ( "{0:N0}" -f $_.CSPackageFileSize )
-                $sFileSizeReadable = ( "{0}" -f ( $_.CSPackageFileSize | Format-BytesHumanReadable ) )
-                
-                If ( $Report ) {
-                        If ( "CSV" -ieq $Output ) {
-
-                            @{} `
-                            | Select-Object @{ n="Name"; e={ $sTheName } },
-                                @{ n="Bagged"; e={ $sBaggedFlag } },
-                                @{ n="Zipped"; e={ $sZippedFile } },
-                                @{ n="Contents"; e={ $sContents } },
-                                @{ n="Bytes"; e={ $sFileSize } },
-                                @{ n="Size"; e={ $sFileSizeReadable  } } `
-                            | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } )
-
-
-                        }
-                        Else {
-                         
-                            $sBagged = ( " ({0})" -f $sBaggedFlag )
-                            $sZipped = $( If ( $sZippedFlag -ne $null ) { ( " ({0})" -f $sZippedFlag ) } Else { "" } )
-
-                            ( "{0}{1}{2}, {3}, {4}" -f $sTheName,$sBagged,$sZipped,$sContents,$sFileSizeReadable )
-                        }
-                    #$_.CSPackageContents | Write-Verbose
-                }
-                ElseIf ( $FullName ) {
-                    $_.FullName
-                }
-                Else {
-                    $_
-                }
-                
-                $Subsequent = $true
-            }
-        }
-        Else {
-            ( $Words | Get-ColdStorageLocation -ShowWarnings ) | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$Verbose |% { If ( $FullName ) { $_.FullName } Else { $_ } }
-        }
+        $Locations = $( If ($Items) { $Words } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
+        $Locations | Invoke-ColdStoragePackagesReport -Recurse:( $Recurse -or ( -Not $Items )) `
+            -ShowWarnings:$Verbose `
+            -Unbagged:$Unbagged `
+            -Unzipped:$Unzipped `
+            -Zipped:$Zipped `
+            -FullName:$FullName `
+            -Report:$Report `
+            -Output:$Output
         
     }
     ElseIf ( $Verb -eq "settings" ) {
