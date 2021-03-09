@@ -501,7 +501,12 @@ Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
         $Path = ( $Directory )
     }
 
-    if ( Test-Path -LiteralPath "${Path}" ) {
+    If ( ( -Not $Force ) -And ( Test-MirrorMatchedItem -File "${Path}" -Reflection ) ) {
+        $originalLocation = ( "${Path}" | Get-MirrorMatchedItem -Original )
+        Write-Warning "[Add-IndexHTML] This is a mirror-image location. Setting Location to: ${originalLocation}."
+        Add-IndexHTML -Directory $originalLocation -RelativeHref:$RelativeHref -Force:$Force
+    }
+    ElseIf ( Test-Path -LiteralPath "${Path}" ) {
         $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
 
         $indexHtmlPath = "${UNC}\index.html"
@@ -1909,11 +1914,11 @@ if ( $Help -eq $true ) {
                 If ( $File ) {
                     $oRepository = ( Get-FileRepositoryLocation -File $File )
                     $sRepository = $oRepository.FullName
-                    $RepositorySlug = ( Get-FileRepositoryName -File $sRepository )
+                    $RepositorySlug = ( Get-FileRepositoryName -File $File )
                     $TrashcanLocation = ( $RepositorySlug | Get-ColdStorageTrashLocation )
 
-                    $Src = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Original )
-                    $Dest = ( $File | Get-Mirror-Matched-Item -Pair $RepositorySlug -Reflection )
+                    $Src = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
+                    $Dest = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
 
                     Write-Debug ( "REPOSITORY: {0}" -f $sRepository )
                     Write-Debug ( "SLUG: {0}" -f $RepositorySlug )
@@ -1921,11 +1926,16 @@ if ( $Help -eq $true ) {
                     Write-Debug ( "TRASHCAN: {0}" -f $TrashcanLocation )
                     Write-Verbose ( "DIFF LEVEL: {0}" -f $DiffLevel )
 
-                    if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
-                        mkdir "${TrashcanLocation}"
-                    }
+                    If ( -Not $WhatIf ) {
+                        if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
+                            mkdir "${TrashcanLocation}"
+                        }
 
-                    Do-Mirror -From "${Src}" -To "${Dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel -Batch:$Batch
+                        Do-Mirror -From "${Src}" -To "${Dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel -Batch:$Batch
+                    }
+                    Else {
+                        Write-Host "(WhatIf) Do-Mirror -From '${Src}' -To '${Dest}' -Trashcan '${TrashcanLocation}' -DiffLevel $DiffLevel -Batch $Batch"
+                    }
 
                 }
 
