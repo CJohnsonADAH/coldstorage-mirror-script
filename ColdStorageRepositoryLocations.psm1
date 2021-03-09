@@ -15,6 +15,11 @@ Param ( $Command, $File=$null )
     $Path
 }
 
+$global:gRepoLocsModuleCmd = $MyInvocation.MyCommand
+
+Import-Module -Verbose:$false  $( My-Script-Directory -Command $global:gRepoLocsModuleCmd -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false  $( My-Script-Directory -Command $global:gRepoLocsModuleCmd -File "ColdStorageFiles.psm1" )
+
 #############################################################################################################
 ## DATA #####################################################################################################
 #############################################################################################################
@@ -26,14 +31,15 @@ $ColdStorageER = "\\ADAHColdStorage\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\Digitization"
 $ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
 
-$mirrors = @{
-    Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageDataER}\Processed" )
-    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageDataER}\Unprocessed" )
-    Working_ER=( "ER", "${ColdStorageDataER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking" )
-    Masters=( "DA", "${ColdStorageDataDA}\Masters", "\\ADAHFS3\Data\DigitalMasters" )
-    Access=( "DA", "${ColdStorageDataDA}\Access", "\\ADAHFS3\Data\DigitalAccess" )
-    Working_DA=( "DA", "${ColdStorageDataDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking" )
+$global:gColdStorageMirrors = @{
+    Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageDataER}\Processed", "${ColdStorageDataER}\Processed" )
+    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageDataER}\Unprocessed", "${ColdStorageDataER}\Unprocessed" )
+    Working_ER=( "ER", "${ColdStorageDataER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking", "${ColdStorageDataER}\Working-Mirror" )
+    Masters=( "DA", "${ColdStorageDataDA}\Masters", "\\ADAHFS3\Data\DigitalMasters", "${ColdStorageDataDA}\Masters" )
+    Access=( "DA", "${ColdStorageDataDA}\Access", "\\ADAHFS3\Data\DigitalAccess", "${ColdStorageDataDA}\Access" )
+    Working_DA=( "DA", "${ColdStorageDataDA}\Working-Mirror", "\\ADAHFS3\Data\DigitalWorking", "${ColdStorageDataDA}\Working-Mirror" )
 }
+$mirrors = $global:gColdStorageMirrors
 $RepositoryAliases = @{
     Processed=( "${ColdStorageER}\Processed", "${ColdStorageDataER}\Processed" )
     Working_ER=( "${ColdStorageER}\Working-Mirror", "${ColdStorageDataER}\Working-Mirror" )
@@ -48,8 +54,46 @@ $RepositoryAliases = @{
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
-Function Get-ColdStorageRepositories () {
-    $mirrors
+Function Get-ColdStorageRepositories {
+Param ( $Groups=@(), $Repository=$null, [switch] $Tag=$false )
+
+    Begin { }
+
+    Process {
+        $out = $global:gColdStorageMirrors
+
+        If ( $Groups.Count -ge 1 ) {
+        # Filter according to groups
+            $filteredOut = @{}
+            $out.Keys |% { $Key = $_; $row = $out[$Key]; If ( $Groups -ieq $row[0] ) { Write-Debug ( "FILTERED IN: {0}" -f $Key ); $filteredOut[$Key] = $row } Else { Write-Debug ( "FILTERED OUT: {0}" -f $Key ) } }
+            $out = $filteredOut
+        }
+
+        If ( $Tag ) {
+            $filteredOut = @{}
+            $out.Keys |% {
+                $Key = $_;
+                $row = $out[$Key];
+                $filteredOut[$Key] = (
+                    @{} | Select-Object @{ n='Collection'; e={ $row[0] }},
+                    @{ n='Locations'; e={
+                        @{} | Select-Object @{ n='Reflection'; e={ $row[1] }},
+                        @{ n='Original'; e={ $row[2] }},
+                        @{ n='ColdStorage'; e={ $row[3] }}
+                    }}
+                )
+            }
+            $out = $filteredOut
+        }
+
+        If ( $Repository ) {
+            $out = ( $out[$Repository] )
+        }
+
+        ( $out ) | Write-Output
+    }
+
+    End { }
 }
 
 Function Get-ColdStorageLocation {
@@ -359,6 +403,174 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
     End { }
 }
 
+#############################################################################################################
+## PUBLIC FUNCTIONS: MIRRORED LOCATIONS #####################################################################
+#############################################################################################################
+
+Function Get-MirrorMatchedItem {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair, [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Self=$false, [switch] $All=$false, $Repositories=$null )
+
+Begin { $mirrors = ( Get-ColdStorageRepositories -Tag ) }
+
+Process {
+    
+    If ( $Original ) { $Range = "Original" }
+    ElseIf ( $Reflection ) { $Range = "Reflection" }
+    ElseIf ( $ColdStorage ) { $Range = "ColdStorage" }
+    Else { $Range = ( "Original", "Reflection" ) }
+
+    If ( $Pair -eq $null ) {
+        $Pair = ( Get-FileRepositoryName -File:$File )
+        If ( $Pair.Length -gt 0 ) {
+            Write-Debug ( "Adopted implicit Repository from item: {0}" -f ${Pair} )
+        }
+        Else  {
+            Write-Warning ( "Cannot determine a Repository from item: {0}" -f $File.FullName )
+        }
+    }
+
+    # get self if $File is a directory, parent if it is a leaf node
+    $oDir = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
+
+    If ( $Repositories.Count -eq 0 -and ( $Pair -ne $null ) ) {
+
+        If ( $mirrors.ContainsKey($Pair) ) {
+            $Locations = $mirrors[$Pair].Locations
+            
+            Write-Debug ( "LOCATIONS:" )
+            Write-Debug ( $Locations )
+
+            $Matchable = @{}
+            
+            $Locations | Get-Member -MemberType NoteProperty |% {
+                $PropName = $_.Name
+                Write-Debug $PropName
+                $Locations.${PropName} = ( $Locations.${PropName} | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC |% { $_.FullName } )
+            }
+
+            # Convert this into a list.
+            $Matchable = ( $Locations | Get-Member -MemberType NoteProperty |% { $PropName=$_.Name; $Locations.$PropName } )
+            
+            "MATCHABLE:" | Write-Debug
+            $Matchable |% { Write-Debug $_ }
+
+        }
+        Else {
+            Write-Warning ( "[Get-MirrorMatchedItem] Requested repository pair ({0}) does not exist." -f $Pair )
+        }
+    }
+    ElseIf ( $Pair -eq $null ) {
+        Write-Warning ( "[Get-MirrorMatchedItem] No valid Repository found for item ({0})." -f $File )
+    }
+
+    # Do any of the path locations in $Matchable match $oDir.FullName ?
+    $Matched = ( $Matchable -ieq $oDir.FullName )
+    
+    Write-Debug ( "oDir.FullName = '{0}'" -f $oDir.FullName )
+    
+    If ( $Matched ) {
+        Write-Debug ( "MATCHED:" )
+        $Matched |% { Write-Debug $_ }
+        Write-Debug ( "RANGE:" )
+        $Range |% { Write-Debug $_ }
+
+        $Range |% {
+            $Key = $_
+            
+            $MatchedUp = ( $Locations.$Key -ieq $oDir.FullName )
+            If ( $All -or ( $MatchedUp -eq $Self ) ) {
+                $Locations.$Key
+            }
+        }
+        #($Repositories -ine $oDir.FullName)
+    }
+    ElseIf ( $oDir ) {
+        
+        $Child = ( $oDir.RelativePath -join "\" )
+        $Parent = $oDir.Parent
+        $sParent = $Parent.FullName
+
+        If ( $Parent ) {
+            $Parents = ( $sParent | Get-MirrorMatchedItem -Pair $Pair -Repositories $Repositories -Original:$Original -Reflection:$Reflection -ColdStorage:$ColdStorage -Self:$Self -All:$All )
+            If ( $Parents.Count -gt 0 ) {
+                $Parents |% {
+                    If ( $_.Length -gt 0 ) {
+                        $oParent = ( Get-Item -Force -LiteralPath $_ )
+                        $sParent = $oParent.FullName
+
+                        $PossiblePath = (( ( @($sParent) + $oDir.RelativePath ) -ne $null ) -ne "" )
+                        $sPossiblePath = ( $PossiblePath -join "\" )
+
+                        # Attempt to adjust around BagIt formatting:
+                        # if known file is IN a bag, test for an alter OUTSIDE the bag
+                        # if known file is OUTSIDE a bag, test for an alter IN a bag
+                        # only use this to change the return value IF the alternative path exists
+                        If ( -Not ( Test-Path -LiteralPath "${sPossiblePath}" ) ) {
+                            $Leaf = ( $PossiblePath | Select-Object -Last 1 )
+                            $Branch = ( $PossiblePath | Select-Object -SkipLast 1 )
+
+                            $AlternativePath = ( @($Branch) + @("data") + @($Leaf) )
+                            $sAlternativePath = ( $AlternativePath -join "\" )
+                            If ( Test-Path -LiteralPath "${sAlternativePath}" ) {
+                                $sPossiblePath = $sAlternativePath
+                            }
+                            ElseIf ( ( $Branch[-1] -eq "data" ) -Or ( $Leaf -eq "data" ) ) {
+                                If ( Test-BagItFormattedDirectory -File $oDir.Parent ) {
+                                    $LeafFileName = ( $oDir.RelativePath | Select-Object -Skip 1 )
+                                    $AlternativePath = ( @($sParent) + @($LeafFileName) )
+                                    $sAlternativePath = ( $AlternativePath -join "\" )
+                                    If ( Test-Path -LiteralPath "${sAlternativePath}" ) {
+                                        $sPossiblePath = $sAlternativePath
+                                    }
+                                }
+                            }
+                        }
+                        $sPossiblePath
+                    }
+                }
+            }
+        }
+        Else {
+
+            $oDir.FullName
+
+        }
+        
+    }
+
+}
+
+End { }
+
+}
+
+Function Test-MirrorMatchedItem {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair, [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false )
+
+    Begin { }
+
+    Process {
+        # Is it mirrored at all?
+        $images = ( $File | Get-MirrorMatchedItem -Pair:$Pair -All )
+
+        If ( $images.Count -gt 1 ) {
+
+            # If it is mirrored, then is it (a) the Original? (b) the Reflection? (c) the ColdStorage copy?
+            $self = ( $File | Get-MirrorMatchedItem -Pair:$Pair -Self:$true )
+            $alter = ( $File | Get-MirrorMatchedItem -Original:$Original -Reflection:$Reflection -ColdStorage:$ColdStorage -Pair:$Pair -All )
+
+            # If $self is in the $alter set at least once, then we have a match.
+            ( ( @($alter) -ieq $self ).Count -gt 0 )
+
+        }
+        Else {
+            $false
+        }
+    }
+
+    End { }
+}
+
 Export-ModuleMember -Function Get-ColdStorageRepositories
 Export-ModuleMember -Function Get-ColdStorageLocation
 Export-ModuleMember -Function Get-ColdStorageZipLocation
@@ -372,3 +584,5 @@ Export-ModuleMember -Function Get-ColdStorageRepositoryDirectoryProps
 Export-ModuleMember -Function New-ColdStorageRepositoryDirectoryProps
 Export-ModuleMember -Function Test-ColdStorageRepositoryPropsDirectory
 Export-ModuleMember -Function Test-ColdStorageRepositoryPropsFile
+Export-ModuleMember -Function Get-MirrorMatchedItem
+Export-ModuleMember -Function Test-MirrorMatchedItem
