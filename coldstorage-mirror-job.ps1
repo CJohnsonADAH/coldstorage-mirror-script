@@ -1,4 +1,4 @@
-﻿Param( [switch] $Batch=$false, [switch] $WhatIf=$false, $Repository="" )
+﻿Param( [switch] $Batch=$false, [switch] $WhatIf=$false, [switch] $SizesOnly, [switch] $Diff, $Repository="" )
 
 If ( $Repository.Length -gt 0 ) {
     $RepositorySlug = ( "-${Repository}" -replace "[^0-9A-Za-z_]+","-" )
@@ -9,7 +9,7 @@ Else {
 
 $ScriptPath = ( Split-Path -Parent $PSCommandPath )
 $ScriptParent = ( Split-Path -Parent $ScriptPath )
-
+$ColdStorageScript = "${ScriptPath}\coldstorage.ps1"
 $bin="${ScriptParent}"
 
 $LogFile = "${HOME}\Desktop\coldstorage-mirror${RepositorySlug}-log.txt"
@@ -23,19 +23,19 @@ If ( $Batch ) {
 
 If ( $Batch ) {
     If ( $WhatIf ) {
-        Write-Host "${bin}\coldstorage-mirror-script\coldstorage.ps1" mirror ${Repository} -Batch >> "${ShareLogFile}"
+        Write-Host "${ColdStorageScript}" mirror ${Repository} -Batch -Diff:$Diff -SizesOnly:$SizesOnly >> "${ShareLogFile}"
     }
     Else {
-        & "${bin}\coldstorage-mirror-script\coldstorage.ps1" mirror ${Repository} -Batch >> "${ShareLogFile}"
+        & "${ColdStorageScript}" mirror ${Repository} -Batch -Diff:$Diff -SizesOnly:$SizesOnly >> "${ShareLogFile}"
     }
     Copy-Item "${ShareLogFile}" "${LogFile}"
 }
 Else {
     If ( $WhatIf ) {
-        Write-Host "${bin}\coldstorage-mirror-script\coldstorage.ps1" mirror ${Repository}
+        Write-Host "${ColdStorageScript}" mirror ${Repository} -Diff:$Diff -SizesOnly:$SizesOnly 
     }
     Else {
-        & "${bin}\coldstorage-mirror-script\coldstorage.ps1" mirror ${Repository}
+        & "${ColdStorageScript}" mirror ${Repository} -Diff:$Diff -SizesOnly:$SizesOnly 
     }
 }
 
