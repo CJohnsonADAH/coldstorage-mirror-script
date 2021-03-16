@@ -274,6 +274,90 @@ Process {
 End { }
 }
 
+Function Get-ItemPackage {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
+
+    Begin { }
+
+    Process {
+        If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
+            Continue
+        }
+
+        $bBagged = ( Test-BagItFormattedDirectory -File $File )
+        $aZipped = $false
+        $aContents = @( )
+        $aWarnings = @( )
+        If ( $File | Test-ColdStorageRepositoryPropsDirectory ) {
+            $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $File.FullName )
+        }
+        ElseIf ( Test-ZippedBag -LiteralPath $File.FullName ) {
+            $aWarnings += @( "SKIPPED -- ZIPPED BAG: {0}" -f $File.FullName )
+        }
+        ElseIf ( Test-ERInstanceDirectory -File $File ) {
+            $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
+            If ( $bBagged -and $CheckZipped ) {
+                $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+            }
+        }
+        ElseIf ( Test-IndexedDirectory -File $File ) {
+            $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
+        }
+        ElseIf ( Test-BaggedCopyOfLooseFile -File $File -DiffLevel 1 ) {
+            $aWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $File.FullName )
+        }
+        ElseIf ( Test-BaggedIndexedDirectory -File $File ) {
+            $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
+            If ( $bBagged -and $CheckZipped ) {
+                $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+            }
+        }
+        ElseIf ( Test-BagItFormattedDirectory -File $File ) {
+            $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
+            If ( $bBagged -and $CheckZipped ) {
+                $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+            }
+        }
+        ElseIf ( Test-LooseFile -File $File ) {
+            $oBaggedCopy = ( Get-BaggedCopyOfLooseFile -File $File )
+            $bBagged = $( If ( $oBaggedCopy ) { $true } Else { $false } )
+            If ( $bBagged -and $CheckZipped ) {
+                $aZipped = ( $oBaggedCopy | Get-ZippedBagOfUnzippedBag )
+            }
+            $aContents = @( $File )
+        }
+        ElseIf ( $Recurse -and ( Test-Path -LiteralPath $File.FullName -PathType Container ) ) {
+            ( "RECURSE INTO DIRECTORY: {0}" -f $File.FullName ) | Write-Verbose
+            $aContents = @( )
+            Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
+        }
+        Else {
+            $aContents = @( )
+            $aWarnings += @( "SKIPPED -- MISC: {0}" -f $File.FullName )
+        }
+
+        If ( $ShowWarnings ) {
+            $aWarnings | Write-Warning
+        }
+
+        If ( $aContents.Count -gt 0 ) {
+            $Package = $File
+            $mContents = ( $aContents | Measure-Object -Sum Length )
+            #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
+                
+            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged
+            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count
+            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum
+            If ( $aZipped -ne $false ) {
+                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped
+            }
+            $Package | Write-Output
+        }
+    }
+
+    End { }
+}
+
 Function Get-ChildItemPackages {
 
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
@@ -289,83 +373,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         }
         Else {
 
-        Get-ChildItem -LiteralPath $oFile.FullName |% {
-
-            If ( ( $_.Name -eq "." ) -or ( $_.Name -eq ".." ) ) {
-                Continue
-            }
-
-            $bBagged = ( Test-BagItFormattedDirectory -File $_ )
-            $aZipped = $false
-            $aContents = @( )
-            $aWarnings = @( )
-            If ( $_ | Test-ColdStorageRepositoryPropsDirectory ) {
-                $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $_.FullName )
-            }
-            ElseIf ( Test-ZippedBag -LiteralPath $_.FullName ) {
-                $aWarnings += @( "SKIPPED -- ZIPPED BAG: {0}" -f $_.FullName )
-            }
-            ElseIf ( Test-ERInstanceDirectory -File $_ ) {
-                $aContents = @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName )
-                If ( $bBagged -and $CheckZipped ) {
-                    $aZipped = ( $_ | Get-ZippedBagOfUnzippedBag )
-                }
-            }
-            ElseIf ( Test-IndexedDirectory -File $_ ) {
-                $aContents = @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName )
-            }
-            ElseIf ( Test-BaggedCopyOfLooseFile -File $_ -DiffLevel 1 ) {
-                $aWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $_.FullName )
-            }
-            ElseIf ( Test-BaggedIndexedDirectory -File $_ ) {
-                $aContents = ( @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName ) )
-                If ( $bBagged -and $CheckZipped ) {
-                    $aZipped = ( $_ | Get-ZippedBagOfUnzippedBag )
-                }
-            }
-            ElseIf ( Test-BagItFormattedDirectory -File $_ ) {
-                $aContents = ( @( $_ ) + @( Get-ChildItem -Force -Recurse -LiteralPath $_.FullName ) )
-                If ( $bBagged -and $CheckZipped ) {
-                    $aZipped = ( $_ | Get-ZippedBagOfUnzippedBag )
-                }
-            }
-            ElseIf ( Test-LooseFile -File $_ ) {
-                $oBaggedCopy = ( Get-BaggedCopyOfLooseFile -File $_ )
-                $bBagged = $( If ( $oBaggedCopy ) { $true } Else { $false } )
-                If ( $bBagged -and $CheckZipped ) {
-                    $aZipped = ( $oBaggedCopy | Get-ZippedBagOfUnzippedBag )
-                }
-                $aContents = @( $_ )
-            }
-            ElseIf ( $Recurse -and ( Test-Path -LiteralPath $_.FullName -PathType Container ) ) {
-                ( "RECURSE INTO DIRECTORY: {0}" -f $_.FullName ) | Write-Verbose
-                $aContents = @( )
-                Get-ChildItemPackages -File $_.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
-            }
-            Else {
-                $aContents = @( )
-                $aWarnings += @( "SKIPPED -- MISC: {0}" -f $_.FullName )
-            }
-
-            If ( $ShowWarnings ) {
-                $aWarnings | Write-Warning
-            }
-
-            If ( $aContents.Count -gt 0 ) {
-                $Package = $_
-                $mContents = ( $aContents | Measure-Object -Sum Length )
-                #$mContents = ( $aContents |% { $_ | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $_ | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
-                
-                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged
-                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count
-                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum
-                If ( $aZipped -ne $false ) {
-                    Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped
-                }
-                $Package | Write-Output
-            }
-
-        }
+            Get-ChildItem -LiteralPath $oFile.FullName | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
 
         }
 
@@ -445,4 +453,5 @@ Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
 Export-ModuleMember -Function Test-ERInstanceDirectory
 Export-ModuleMember -Function Select-ERInstanceDirectories
 Export-ModuleMember -Function Get-ERInstanceData
+Export-ModuleMember -Function Get-ItemPackage
 Export-ModuleMember -Function Get-ChildItemPackages
