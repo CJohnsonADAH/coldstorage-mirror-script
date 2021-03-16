@@ -262,8 +262,96 @@ Process {
 
 }
 
-####
+Function Write-ADPNetAUReport {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
+    Begin { }
+
+    Process {
+        $sAUTitle = ( $File | Get-ADPNetAUTitle )
+        $sInstitution = ( Get-ColdStorageSettings -Name "Institution" )
+
+        $sPluginJar = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Jar" )
+        $oPackage = ( $File | Get-ItemPackage -Recurse:$Recurse -ShowWarnings:$ShowWarnings )
+
+        $nBytes = $oPackage.CSPackageFileSize
+        $nFiles = $oPackage.CSPackageContents
+        $sFileSizeReadable = ( "{0}" -f ( $nBytes | Format-BytesHumanReadable ) )
+
+        $sFileSizeBytes = ( "{0:N0} byte{1}" -f $nBytes,$( If ( $nBytes -ne 1 ) { "s" } Else { "" } ) )
+        $sFileSizeFiles = ( "{0:N0} file{1}" -f $nFiles,$( If ( $nFiles -ne 1 ) { "s" } Else { "" } ) )
+        $sFileSize = ( "{0} ({1}, {2})" -f $sFileSizeReadable,$sFileSizeBytes,$sFileSizeFiles )
+
+        $sFromPeer = ( Get-ColdStorageSettings -Name "ADPNet-Node" )
+        $sToPeer = $null # FIXME: stub this for the moment
+
+        $Book = ( $File | Get-ADPNetStartUrl -Parameterize )
+        $pluginParams = ( $sPluginJar | Get-ADPNetPlugins | Get-ADPNetPluginDetails -Interpolate:$Book )
+
+        $sAUStartURL = ( $pluginParams["au_start_url"] |% { $_ } )
+        $sAUManifest = ( $pluginParams['au_manifest'] |% { $_ } )
+
+        $hashAU = @{
+            'Ingest Title'=( "{0}: {1}" -f $sInstitution,$sAUTitle );
+            'File Size'=( $sFileSize );
+            'Plugin JAR'=( $sPluginJar );
+            'Plugin ID'=( $pluginParams["plugin_identifier"] |% { $_ } );
+            'Plugin Name'=( $pluginParams["plugin_name"] |% { $_ } );
+            'Plugin Version'=( $pluginParams["plugin_version"] |% { $_ } );
+            'au_name'=( $pluginParams["au_name"] |% { $_ } );
+            'au_start_url'=( $pluginParams["au_start_url"] |% { $_ } );
+        }
+        If ( $sAUStartURL ) {
+            $hashAU['Start URL']=( $sAUStartURL )
+        }
+        If ( $sAUManifest ) {
+            $hashAU['Manifest URL']=( $sAUManifest )
+        }
+
+        $pluginParams["plugin_config_props"] |% {
+            $sName = ( "{0}" -f $_.displayName )
+            $sKey = ( "{0}" -f $_.key )
+            If ( $Book.ContainsKey($sKey) ) {
+                $hashAU[$sName] = ( '{0}="{1}"' -f $sKey,$Book[$sKey] )
+
+                If ( -Not ( $hashAU.ContainsKey("parameters") ) ) {
+                    $hashAU["parameters"] = @()
+                }
+                $OrderedPair = @( $sKey, $Book[$sKey] )
+                $hashAU["parameters"] += , $OrderedPair
+
+            }
+        }
+
+        If ( $sFromPeer ) {
+            $hashAU['From Peer']=( $sFromPeer )
+        }
+        If ( $sToPeer) {
+            $hashAU['To Peer']=( $sToPeer )
+        }
+        $jsonPacket = ( $hashAU | ConvertTo-Json -Compress )
+
+        "INGEST INFORMATION AND PARAMETERS:"
+        "----------------------------------"
+        $hashAU.Keys |% {
+            If ( -Not ( $_ -match "(.*)_(.*)" ) ) {
+                If ( $hashAU[$_] -is [String] ) {
+                    ("{0}: `t{1}" -f $_.ToUpper(), $hashAU[$_])
+                }
+            }
+        }
+        ""
+        ( "JSON PACKET: {0}" -f $jsonPacket )
+
+    }
+
+    End { }
+
+}
+
+#############################################################################################################
+## PUBLIC FUNCTIONS: TRANSFER LOCKSS ARCHIVAL UNTIS (AUs) TO DROP SERVER VIA SFTP ###########################
+#############################################################################################################
 
 Function Add-ADPNetAUToDropServerStagingDirectory {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
@@ -443,6 +531,201 @@ Process {
 End { }
 }
 
+
+Function Get-LockssBoxAuthority {
+
+    $address = ( Get-ColdStorageSettings -Name "Lockss-Box-SFTP" )
+    
+    ( $address -split "@",2 ) | Write-Output
+
+}
+
+Function Get-LockssBoxHost {
+
+    ( Get-LockssBoxAuthority )[1]
+
+}
+
+Function Get-LockssBoxUser {
+
+    ( Get-LockssBoxAuthority )[0]
+
+}
+
+Function Get-ColdStoragePasswordFile {
+Param ( [string] $SFTPIdentity )
+
+    $md5 = New-Object -TypeName System.Security.Cryptography.MD5CryptoServiceProvider
+    $utf8 = New-Object -TypeName System.Text.UTF8Encoding
+    $hash = [System.BitConverter]::ToString($md5.ComputeHash($utf8.GetBytes($SFTPIdentity)))
+
+    $IdParts = ( $SFTPIdentity -split "@",2 )
+    
+    $FileName = "${hash}.txt"
+    $Txt = $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "${FileName}" )
+    If ( Test-Path -LiteralPath $Txt ) {
+        Get-Item -LiteralPath $Txt -Force
+    }
+    Else {
+        Write-Warning ( "NO SUCH FILE: {0}" -f $Txt )
+        $Credential = ( Get-Credential -Message ( "Credentials to connect to {0}" -f $SFTPIdentity ) -UserName ( $IdParts[0] ) )
+        $Credential.Password | ConvertFrom-SecureString > $Txt
+        Get-Item -LiteralPath $Txt -Force
+    }
+
+}
+
+Function Get-LockssBoxPassword {
+Param ( [string] $SFTPIdentity="" )
+    
+    $IdParts = Get-LockssBoxAuthority
+    If ( $SFTPIdentity.Length -eq 0 ) {
+        $SFTPIdentity = ( ( $IdParts ) -join "@" )
+    }
+
+    $File = Get-ColdStoragePasswordFile -SFTPIdentity:$SFTPIdentity
+    If ( $File ) {
+        $Txt = ( Get-Content -LiteralPath $File.FullName )
+        $SecurePassword = ( $Txt | ConvertTo-SecureString -ErrorAction SilentlyContinue )
+        If ( $SecurePassword -eq $null ) {
+            $Credential = ( Get-Credential -Message ( "Credentials to connect to {0}" -f $SFTPIdentity ) -UserName ( $IdParts[0] ) )
+            $Credential.Password | ConvertFrom-SecureString > $File.FullName
+            $Credential.Password
+        }
+        Else {
+            $SecurePassword
+        }
+    }
+
+}
+Function New-LockssBoxSession {
+
+    $User = Get-LockssBoxUser
+    $Pass = Get-LockssBoxPassword
+    If ( $Pass -eq $null ) {
+        
+    }
+    ElseIf ( $Pass.GetType() -eq [String] ) {
+        $PWord = ConvertTo-SecureString -String ( $Pass ) -AsPlainText -Force
+    }
+    Else {
+        $PWord = $Pass
+    }
+    $Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $User, $PWord
+
+    New-SFTPSession -ComputerName ( Get-LockssBoxHost ) -Credential ( $Credential )
+}
+
+Function Sync-ADPNetPluginsPackage {
+
+    Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $Session )
+
+    Begin { }
+
+    Process {
+        $sLocalFullName = $LocalFolder.FullName
+        $sRemotePathURI = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Package" )
+        $uriRemotePath = [uri] $sRemotePathURI
+        $sRemoteHost = $uriRemotePath.Host
+        $sRemotePath = $uriRemotePath.AbsolutePath
+
+        If ( $session.Connected ) {
+            Write-Verbose ( "{0} {1} {2} {3}" -f "Get-SFTPItem",'-SFTPSession:$SftpSession',"-Path:${sRemotePath}","-Destination:${sLocalFullName}" )
+            Get-SFTPItem -SFTPSession:$Session -Path:${sRemotePath} -Destination:${sLocalFullName} -Verbose
+        }
+        Else {
+            Write-Warning "[Sync-ADPNetPluginsPackage] Connection failure: SFTP session not connected."
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Get-ADPNetPlugins {
+Param( [Parameter(ValueFromPipeline=$true)] $URL )
+
+    Begin {
+        $Location = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Cache" | ConvertTo-ColdStorageSettingsFilePath )
+        $oLocation = ( Get-Item -LiteralPath $Location -Force )
+        $aJarList = Get-ChildItem -LiteralPath $oLocation.FullName -Recurse
+    }
+
+    Process {
+        $aJarList |% {
+            $Accepted = ( $_.Name -like '*.jar' )
+
+            If ( $URL -ne $null ) {
+                If ( ( $URL -eq "." ) -or ( $URL -eq "default" ) -or ( $URL -eq '$_' ) ) {
+                    $URL = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Jar" )
+                }
+
+                $u = [uri] $URL
+                $sJarPath = ( $u.AbsolutePath | ConvertTo-ColdStorageSettingsFilePath )
+                $sJarFileName = ( ( $sJarPath -split "\\" ) | Select-Object -Last 1 )
+
+                $Accepted = ( $Accepted -and ( $_.Name -eq $sJarFileName ) )
+            }
+ 
+            If ( $Accepted ) {
+                $_
+            }
+        }
+    }
+
+    End { }
+
+}
+
+Function Get-ADPNetPluginDetails {
+Param( [Parameter(ValueFromPipeline=$true)] $Plugin, $Interpolate=$null )
+
+    Begin { }
+
+    Process {
+        $Plugin | Expand-ADPNetPlugin | Get-LockssPluginXML -ReturnObject | ConvertTo-LockssPluginProperties -Interpolate:$Interpolate
+    }
+
+    End { }
+
+}
+
+Function Expand-ADPNetPlugin {
+Param( [Parameter(ValueFromPipeline=$true)] $JAR )
+
+    Begin { $Location = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Cache" | ConvertTo-ColdStorageSettingsFilePath ) }
+
+    Process {
+        $sDestination = ( "{0}\{1}" -f ( Get-Item -LiteralPath $Location -Force).FullName,"Expanded" )
+
+        If ( -Not ( Test-Path -LiteralPath $sDestination ) ) {
+            $Destination = ( New-Item -Path $sDestination -ItemType Directory -Verbose )
+        }
+        Else {
+            $Destination = ( Get-Item -Force -LiteralPath $sDestination )
+        }
+
+        $oJAR = Get-FileObject($JAR)
+        $OutputName = ( $oJAR.Name -replace "[^A-Za-z0-9]+","-" )
+        $sZip = ( "{0}\{1}" -f $Destination.FullName,$OutputName )
+
+        # Copy the jar
+        Get-ChildItem -LiteralPath $Destination.FullName |% { If ( $_.Name -like '*.zip' ) { If ( $_.Name -ne $OutputName ) { Remove-Item $_.FullName -Verbose } } }
+
+        If ( -Not ( Test-Path -LiteralPath $sZip ) ) {
+            Copy-Item -LiteralPath $oJAR.FullName -Destination $sZip -Verbose
+        
+            # Pour out the jar into the workspace
+            Expand-Archive -LiteralPath $sZip -DestinationPath $Destination.FullName
+        }
+        Get-ChildItem -LiteralPath $Destination.FullName -Recurse
+    }
+
+    End { }
+
+}
+
 Export-ModuleMember -Function Get-DropServerAuthority
 Export-ModuleMember -Function Get-DropServerHost
 Export-ModuleMember -Function Get-DropServerUser
@@ -456,8 +739,21 @@ Export-ModuleMember -Function Sync-DropServerAU
 Export-ModuleMember -Function Get-ADPNetFileLocalPath
 
 Export-ModuleMember -Function Get-ADPNetAUTitle
+Export-ModuleMember -Function Write-ADPNetAUReport
+Export-ModuleMember -Function Get-ADPNetADPNet
 Export-ModuleMember -Function Get-ADPNetStartDir
 Export-ModuleMember -Function Get-ADPNetStartURL
 Export-ModuleMember -Function Get-LOCKSSManifestPath
 Export-ModuleMember -Function Get-LOCKSSManifest
 Export-ModuleMember -Function Add-LOCKSSManifestHTML
+
+Export-ModuleMember -Function Get-ColdStoragePasswordFile
+Export-ModuleMember -Function Get-LockssBoxAuthority
+Export-ModuleMember -Function Get-LockssBoxHost
+Export-ModuleMember -Function Get-LockssBoxUser
+Export-ModuleMember -Function Get-LockssBoxPassword
+Export-ModuleMember -Function New-LockssBoxSession
+Export-ModuleMember -Function Get-ADPNetPlugins
+Export-ModuleMember -Function Get-ADPNetPluginDetails
+Export-ModuleMember -Function Sync-ADPNetPluginsPackage 
+Export-ModuleMember -Function Expand-ADPNetPlugin

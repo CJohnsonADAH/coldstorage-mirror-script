@@ -40,6 +40,7 @@ param (
     [switch] $Dependencies = $false,
     [String] $Output = "-",
     [String[]] $Side = "local,cloud",
+    [String[]] $Name = @(),
     [String] $LogLevel=0,
     [switch] $Dev = $false,
     [switch] $Bork = $false,
@@ -92,9 +93,14 @@ Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Scr
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToADPNet.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir  -File "LockssPluginProperties.psm1" )
 
 $global:gCSScriptName = $MyInvocation.MyCommand
 $global:gCSScriptPath = $MyInvocation.MyCommand.Definition
+
+If ( $global:gScriptContextName -eq $null ) {
+    $global:gScriptContextName = $global:gCSScriptName
+}
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
@@ -2028,6 +2034,10 @@ Else {
     $t0 = date
     $sCommandWithVerb = "${sCommandWithVerb} ${Verb}"
     
+    If ( $Verb.Length -gt 0 ) {
+        $global:gScriptContextName = $sCommandWithVerb
+    }
+
     If ( $Verb -eq "mirror" ) {
         $N = ( $Words.Count )
 
@@ -2288,6 +2298,45 @@ Else {
         
         Switch ( $Object ) {
             "clamav" { $ClamAV = Get-PathToClamAV ; & "${ClamAV}\freshclam.exe" }
+            "plugins" {
+                Write-Verbose "* Opening SSH session to LOCKSS box."
+                $SFTP = New-LockssBoxSession 
+                $Location = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Cache" | ConvertTo-ColdStorageSettingsFilePath )
+
+                Write-Verbose "* Transferring copies from LOCKSS box to ${Location}"
+                $oLocation = ( Get-Item -LiteralPath $Location -Force )
+                Get-ChildItem -LiteralPath $oLocation.FullName |% { Remove-Item -LiteralPath ( $_.FullName ) -Recurse  }
+                $oLocation | Sync-ADPNetPluginsPackage -Session:$SFTP
+
+                Write-Verbose "* Closing SSH session to LOCKSS box."
+                Remove-SFTPSession $SFTP >$null
+            }
+            default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
+        }
+
+    }
+    ElseIf ( $Verb -eq "detail" ) {
+        $Object, $Words = $Words
+
+        Switch ( $Object ) {
+            "plugins" {
+                $deets = ( $Words | Get-ADPNetPlugins | Get-ADPNetPluginDetails )
+                If ( $Name.Count -gt 0 ) {
+                    $aName = ( $Name |% { $_ -split "," } )
+                    $aName |% { $deets[$_] }
+                }
+                Else {
+                    $deets
+                }
+            }
+            default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
+        }
+    }
+    ElseIf ( $Verb -eq "list" ) {
+        $Object, $Words = $Words
+
+        Switch ( $Object ) {
+            "plugins" { $Words | Get-ADPNetPlugins }
             default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
         }
 

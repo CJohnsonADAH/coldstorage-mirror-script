@@ -6,7 +6,12 @@
     "AWS": "//ADAHColdStorage/Share/Binaries/AWS-CLI",
 	"Institution": "Alabama Department of Archives and History",
 	"Drop-Server-SFTP": "adah@drop.adpn.org",
-	"Drop-Server-URL": "http://drop.adpn.org/drop-server/adah/drop_au_content_in_here",
+	"Drop-Server-URL": "http://drop.adpn.org/drop-server/adah/drop_au_content_in_here/",
+    "ADPNet-Node": "ADAH",
+    "ADPNet-Plugin-Jar": "http://configuration.adpn.org/overhead/takeover/plugins/AuburnDirectoryPlugin.jar",
+    "ADPNet-Plugin-Package": "sftp://adpnadah.alabama.gov/cache0/adpnet-plugins/",
+    "ADPNet-Plugin-Cache": "//ADAHColdStorage/Share/ADPNet-Plugins",
+    "Lockss-Box-SFTP": "adahcoldstorage@adpnadah.alabama.gov",
 	"AU-Titles": {
 		"Digitization-Masters": {
 			"./Q_numbers/Master/Q*": "Q-Numbers Masters: {0}//[^A-Za-z0-9]+/-/",
