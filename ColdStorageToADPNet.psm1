@@ -22,6 +22,7 @@ Import-Module -Verbose:$false Posh-SSH
 Import-Module -Verbose:$false  $( My-Script-Directory -Command $global:gADPNetModuleCmd  -File "ColdStorageSettings.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageRepositoryLocations.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageZipArchives.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "LockssPluginProperties.psm1" )
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS: CREDENTIALS TO CONNECT TO DROP SERVER ##################################################
@@ -81,13 +82,18 @@ End { }
 }
 
 Function Get-ADPNetStartURL {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Parameterize=$false )
 
-Begin { $hrefPrefix = Get-ColdStorageSettings -Name "Drop-Server-URL" }
+Begin { $hrefPrefix = ( "{0}/" -f ( Get-ColdStorageSettings -Name "Drop-Server-URL" ).TrimEnd("/") ) }
 
 Process {
     $hrefPath = ( $File | Get-ADPNetStartDir )
-    ( "{0}/{1}/" -f $hrefPrefix, $hrefPath ) | Write-Output
+    If ( $Parameterize ) {
+        @{ base_url=$hrefPrefix; directory=$hrefPath }
+    }
+    Else {
+        ( "{0}{1}/" -f $hrefPrefix, $hrefPath )
+    }
 }
 
 End { }
@@ -128,6 +134,18 @@ Process {
 End { }
 }
 
+Function Get-LOCKSSManifestBadgeImage {
+Param( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        ( "{0}/{1}" -f ( Get-ColdStorageSettings -Name "Drop-Server-URL" ).TrimEnd("/"), "assets/images" )
+    }
+
+    End { }
+}
+
 Function Add-LOCKSSManifestHTML {
 Param( $Directory, [string] $Title, [switch] $Force=$false )
 
@@ -150,7 +168,7 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
             $NL = [Environment]::NewLine
 
             $htmlStartLink = ( '<a href="{0}">{1}</a>' -f $( $Path | Get-ADPNetStartURL ), $Title )
-            $imgSrcBaseHref = ( "{0}/{1}" -f ( Get-ColdStorageSettings -Name "Drop-Server-URL" ), "assets/images" )
+            $imgSrcBaseHref = ( $Path | Get-LOCKSSManifestBadgeImage )
             $imgSrc = ( "{0}/{1}" -f $imgSrcBaseHref,"lockss-small.png" )
 
             $htmlLOCKSSBadge = ( '<img src="{0}" alt="LOCKSS" width="108" height="108" />' -f $imgSrc )
@@ -186,8 +204,6 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
         }
     }
 }
-
-
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS: PACKAGES INTO LOCKSS ARCHIVAL UNITS (AUs) ##############################################
