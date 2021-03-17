@@ -26,7 +26,7 @@ Param ( $File )
 
     $result = $false # innocent until proven guilty
 
-    $oFile = Get-FileObject -File $File   
+    $oFile = Get-FileObject -File $File
 
     $BagDir = $oFile.FullName
     if ( Test-Path -LiteralPath $BagDir -PathType Container ) {

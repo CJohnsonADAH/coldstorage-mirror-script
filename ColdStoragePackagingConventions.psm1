@@ -14,8 +14,12 @@ Param ( $Command, $File=$null )
 
     $Path
 }
-Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageFiles.psm1" )
-Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageRepositoryLocations.psm1" )
+
+$global:gPackagingConventionsCmd = $MyInvocation.MyCommand
+
+Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageFiles.psm1" )
+Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
+Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageRepositoryLocations.psm1" )
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
@@ -280,6 +284,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
     Begin { }
 
     Process {
+        $File = Get-FileObject($File)
+
         If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
             Continue
         }

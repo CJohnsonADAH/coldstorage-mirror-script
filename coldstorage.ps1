@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0309
+@version 2021.0316
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -37,6 +37,7 @@ param (
     [switch] $Unzipped = $false,
     [switch] $Zipped = $false,
     [switch] $Report = $false,
+    [switch] $ReportOnly = $false,
     [switch] $Dependencies = $false,
     [String] $Output = "-",
     [String[]] $Side = "local,cloud",
@@ -57,7 +58,7 @@ $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 
 # coldstorage
 #
-# Last-Modified: 28 December 2020
+# Last-Modified: 16 March 2021
 
 Function ColdStorage-Script-Dir {
 Param ( $File=$null )
@@ -93,7 +94,7 @@ Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Scr
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToADPNet.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir  -File "LockssPluginProperties.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "LockssPluginProperties.psm1" )
 
 $global:gCSScriptName = $MyInvocation.MyCommand
 $global:gCSScriptPath = $MyInvocation.MyCommand.Definition
@@ -1871,6 +1872,51 @@ Function Do-CloudUploadsAbort {
     }
 }
 
+Function Invoke-ColdStorageTo {
+Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly )
+
+    $Destinations = ("cloud", "drop", "adpnet")
+
+    If ( -Not $Items ) {
+        Write-Warning ( "[${global:gScriptContextName}:${Destination}] Not yet implemented for repositories. Try: & coldstorage to ${Destination} -Items [File1] [File2] [...]" )
+    }
+    ElseIf ( $Destination -eq "cloud" ) {
+        If ( $Diff ) {
+            $Anchor = $PWD
+            $Candidates = ( $What | Get-Item -Force | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
+            $Candidates | Write-Verbose
+            $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
+        }
+        Else {
+            $What | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
+        }
+    }
+    ElseIf ( $Destination -eq "drop" ) {
+        $What | Add-ADPNetAUToDropServerStagingDirectory -WhatIf:${WhatIf}
+
+        If ( $Report ) {
+            $AU = ( $What | Get-ADPNetAUTable )
+            $AU | Write-ADPNetAUReport
+            $AU | Write-ADPNetAUUrlRetrievalTest
+        }
+    }
+    ElseIf ( $Destination -eq "adpnet" ) {
+
+        If ( -Not $ReportOnly ) {
+            $What | Add-ADPNetAUToDropServerStagingDirectory -WhatIf:${WhatIf}
+        }
+        
+        $AU = ( $What | Get-ADPNetAUTable )
+        $AU | Write-ADPNetAUReport
+        $AU | Write-ADPNetAUUrlRetrievalTest
+
+    }
+    Else {
+        Write-Warning ( "[${global:gScriptContextName}:${Destination}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
+    }
+}
+
+
 Function Write-ColdStoragePackagesReport {
 Param (
     [Parameter(ValueFromPipeline=$true)] $Package,
@@ -2183,29 +2229,9 @@ Else {
     }
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Words = $Words
-        $Destinations = ("cloud", "drop")
-
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        If ( -Not $Items ) {
-            Write-Warning ( "[${Verb}:${Object}] Not yet implemented for repositories. Try: & coldstorage to ${Object} -Items [File1] [File2] [...]" )
-        }
-        ElseIf ( $Object -eq "cloud" ) {
-            If ( $Diff ) {
-                $Anchor = $PWD
-                $Candidates = ( $Words | Get-Item -Force | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
-                $Candidates | Write-Verbose
-                $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
-            }
-            Else {
-                $Words | Add-PackageToCloudStorageBucket
-            }
-        }
-        ElseIf ( $Object -eq "drop" ) {
-            $Words | Add-ADPNetAUToDropServerStagingDirectory
-        }
-        Else {
-            Write-Warning ( "[${Verb}:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
-        }
+
+        Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -WhatIf:$WhatIf
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $bUnmatched = ( $Verb -ieq "vs" )

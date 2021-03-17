@@ -15,7 +15,11 @@ Param ( $Command, $File=$null )
     $Path
 }
 
-Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageRepositoryLocations.psm1" )
+$global:gZipArchivesModuleCmd = $MyInvocation.MyCommand
+
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageRepositoryLocations.psm1" )
 
 ######################################################################################################
 ## ZIP ###############################################################################################

@@ -19,7 +19,10 @@ $global:gADPNetModuleCmd = $MyInvocation.MyCommand
 
 Import-Module -Verbose:$false Posh-SSH
 
-Import-Module -Verbose:$false  $( My-Script-Directory -Command $global:gADPNetModuleCmd  -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageStats.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStoragePackagingConventions.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageRepositoryLocations.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "ColdStorageZipArchives.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gADPNetModuleCmd -File "LockssPluginProperties.psm1" )
@@ -262,86 +265,73 @@ Process {
 
 }
 
-Function Write-ADPNetAUReport {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Function Get-ADPNetAUUrlFromObject {
+Param ( [Parameter(ValueFromPipeline=$true)] $Packet, $Property="au_start_url", $Parameters=@{}, $Context="object" )
 
-    Begin { }
+    Begin { $cmdContext = $MyInvocation.MyCommand }
 
     Process {
-        $sAUTitle = ( $File | Get-ADPNetAUTitle )
-        $sInstitution = ( Get-ColdStorageSettings -Name "Institution" )
+        ( "[${cmdContext}] URL parsed from {0}, key='{1}'" -f $Context, $Property ) | Write-Debug
+        
+        $uri = [uri] ( $Packet.$Property )
+        $uri | Add-Member -MemberType NoteProperty -Name "PacketSource" -Value $Property
+        $uri | Add-Member -MemberType NoteProperty -Name "PluginSource" -Value $Parameters[$Property]
 
-        $sPluginJar = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Jar" )
-        $oPackage = ( $File | Get-ItemPackage -Recurse:$Recurse -ShowWarnings:$ShowWarnings )
+        $uri | Write-Output
+    }
 
-        $nBytes = $oPackage.CSPackageFileSize
-        $nFiles = $oPackage.CSPackageContents
-        $sFileSizeReadable = ( "{0}" -f ( $nBytes | Format-BytesHumanReadable ) )
+    End {
+    }
 
-        $sFileSizeBytes = ( "{0:N0} byte{1}" -f $nBytes,$( If ( $nBytes -ne 1 ) { "s" } Else { "" } ) )
-        $sFileSizeFiles = ( "{0:N0} file{1}" -f $nFiles,$( If ( $nFiles -ne 1 ) { "s" } Else { "" } ) )
-        $sFileSize = ( "{0} ({1}, {2})" -f $sFileSizeReadable,$sFileSizeBytes,$sFileSizeFiles )
+}
 
-        $sFromPeer = ( Get-ColdStorageSettings -Name "ADPNet-Node" )
-        $sToPeer = $null # FIXME: stub this for the moment
 
-        $Book = ( $File | Get-ADPNetStartUrl -Parameterize )
-        $pluginParams = ( $sPluginJar | Get-ADPNetPlugins | Get-ADPNetPluginDetails -Interpolate:$Book )
+Function Get-ADPNetAUUrl {
+Param ( [Parameter(ValueFromPipeline=$true)] $Block, $Key="au_start_url" )
 
-        $sAUStartURL = ( $pluginParams["au_start_url"] |% { $_ } )
-        $sAUManifest = ( $pluginParams['au_manifest'] |% { $_ } )
+    Begin { $cmdContext = $MyInvocation.MyCommand }
 
-        $hashAU = @{
-            'Ingest Title'=( "{0}: {1}" -f $sInstitution,$sAUTitle );
-            'File Size'=( $sFileSize );
-            'Plugin JAR'=( $sPluginJar );
-            'Plugin ID'=( $pluginParams["plugin_identifier"] |% { $_ } );
-            'Plugin Name'=( $pluginParams["plugin_name"] |% { $_ } );
-            'Plugin Version'=( $pluginParams["plugin_version"] |% { $_ } );
-            'au_name'=( $pluginParams["au_name"] |% { $_ } );
-            'au_start_url'=( $pluginParams["au_start_url"] |% { $_ } );
+    Process {
+
+        $Out = @()
+        $Packet = $null
+        $PacketContext = $null
+
+        If ( $Block -is [uri] ) {
+            $Out += @( $Block )
         }
-        If ( $sAUStartURL ) {
-            $hashAU['Start URL']=( $sAUStartURL )
+        ElseIf ( $Block -is [string] ) {
+            $Packet = $null
+            Try {
+                $Packet = ( $Block | ConvertFrom-ADPNetJsonPacket )
+                $PacketContext = "JSON"
+            }
+            Catch {
+                Write-Debug ( "[${cmdContext}] JSON parsing failed; fallback to simple [uri] cast on '{0}'" -f $Block )
+                $Out += ( [uri] $Block )
+            }
         }
-        If ( $sAUManifest ) {
-            $hashAU['Manifest URL']=( $sAUManifest )
+        ElseIf ( $Block -is [Hashtable] ) {
+            $Packet = [PSCustomObject] $Block
+            $PacketContext = "hashtable"
+        }
+        Else {
+            Write-Warning ( "[${cmdContext}] Could not determine URI from {0} input." -f $Block.GetType().Name )
         }
 
-        $pluginParams["plugin_config_props"] |% {
-            $sName = ( "{0}" -f $_.displayName )
-            $sKey = ( "{0}" -f $_.key )
-            If ( $Book.ContainsKey($sKey) ) {
-                $hashAU[$sName] = ( '{0}="{1}"' -f $sKey,$Book[$sKey] )
+        If ( $Packet ) {
+            $sPluginJar = $Packet."Plugin JAR"
+            If ( $sPluginJar ) {
+                $pluginParams = ( $sPluginJar | Get-ADPNetPlugins | Get-ADPNetPluginDetails )
+            }
 
-                If ( -Not ( $hashAU.ContainsKey("parameters") ) ) {
-                    $hashAU["parameters"] = @()
-                }
-                $OrderedPair = @( $sKey, $Book[$sKey] )
-                $hashAU["parameters"] += , $OrderedPair
-
+            $Packet | Get-Member -MemberType NoteProperty |% { If ( $_.Name -like $Key ) { $_.Name } } |% {
+                $Out += @( $Packet | Get-ADPNetAUUrlFromObject -Property:$_ -Parameters:$pluginParams -Context:$PacketContext )
             }
         }
 
-        If ( $sFromPeer ) {
-            $hashAU['From Peer']=( $sFromPeer )
-        }
-        If ( $sToPeer) {
-            $hashAU['To Peer']=( $sToPeer )
-        }
-        $jsonPacket = ( $hashAU | ConvertTo-Json -Compress )
 
-        "INGEST INFORMATION AND PARAMETERS:"
-        "----------------------------------"
-        $hashAU.Keys |% {
-            If ( -Not ( $_ -match "(.*)_(.*)" ) ) {
-                If ( $hashAU[$_] -is [String] ) {
-                    ("{0}: `t{1}" -f $_.ToUpper(), $hashAU[$_])
-                }
-            }
-        }
-        ""
-        ( "JSON PACKET: {0}" -f $jsonPacket )
+        $Out | Write-Output
 
     }
 
@@ -349,12 +339,289 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 }
 
+Function Get-ADPNetAUTable {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        If ( $File -is [Hashtable] ) {
+            $File
+        }
+        Else {
+            $sAUTitle = ( $File | Get-ADPNetAUTitle )
+            $sInstitution = ( Get-ColdStorageSettings -Name "Institution" )
+
+            $sPluginJar = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Jar" )
+            $oPackage = ( $File | Get-ItemPackage -Recurse -ShowWarnings:$ShowWarnings )
+
+            $nBytes = $oPackage.CSPackageFileSize
+            $nFiles = $oPackage.CSPackageContents
+            $sFileSizeReadable = ( "{0}" -f ( $nBytes | Format-BytesHumanReadable ) )
+
+            $sFileSizeBytes = ( "{0:N0} byte{1}" -f $nBytes,$( If ( $nBytes -ne 1 ) { "s" } Else { "" } ) )
+            $sFileSizeFiles = ( "{0:N0} file{1}" -f $nFiles,$( If ( $nFiles -ne 1 ) { "s" } Else { "" } ) )
+            $sFileSize = ( "{0} ({1}, {2})" -f $sFileSizeReadable,$sFileSizeBytes,$sFileSizeFiles )
+
+            $sFromPeer = ( Get-ColdStorageSettings -Name "ADPNet-Node" )
+            $sToPeer = $null # FIXME: stub this for the moment
+
+            $Book = ( $File | Get-ADPNetStartUrl -Parameterize )
+            $pluginParams = ( $sPluginJar | Get-ADPNetPlugins | Get-ADPNetPluginDetails -Interpolate:$Book )
+
+            $sAUStartURL = ( $pluginParams["au_start_url"] |% { $_ } )
+            $sAUManifest = ( $pluginParams['au_manifest'] |% { $_ } )
+
+            $hashAU = @{
+                'Ingest Title'=( "{0}: {1}" -f $sInstitution,$sAUTitle );
+                'File Size'=( $sFileSize );
+                'Plugin JAR'=( $sPluginJar );
+                'Plugin ID'=( $pluginParams["plugin_identifier"] |% { $_ } );
+                'Plugin Name'=( $pluginParams["plugin_name"] |% { $_ } );
+                'Plugin Version'=( $pluginParams["plugin_version"] |% { $_ } );
+                'au_name'=( $pluginParams["au_name"] |% { $_ } );
+                'au_start_url'=( $pluginParams["au_start_url"] |% { $_ } );
+            }
+            If ( $sAUStartURL ) {
+                $hashAU['Start URL']=( $sAUStartURL )
+            }
+            If ( $sAUManifest ) {
+                $hashAU['Manifest URL']=( $sAUManifest )
+            }
+
+            $pluginParams["plugin_config_props"] |% {
+                $sName = ( "{0}" -f $_.displayName )
+                $sKey = ( "{0}" -f $_.key )
+                If ( $Book.ContainsKey($sKey) ) {
+                    $hashAU[$sName] = ( '{0}="{1}"' -f $sKey,$Book[$sKey] )
+
+                    If ( -Not ( $hashAU.ContainsKey("parameters") ) ) {
+                        $hashAU["parameters"] = @()
+                    }
+                    $OrderedPair = @( $sKey, $Book[$sKey] )
+                    $hashAU["parameters"] += , $OrderedPair
+
+                }
+            }
+
+            If ( $sFromPeer ) {
+                $hashAU['From Peer']=( $sFromPeer )
+            }
+            If ( $sToPeer) {
+                $hashAU['To Peer']=( $sToPeer )
+            }
+
+            $hashAU
+        }
+    }
+
+    End { }
+
+}
+
+Function Write-ADPNetAUReportKeyValuePair {
+Param ( [Parameter(ValueFromPipeline=$true)] $Key, $Table=$null, $Value=$null )
+
+    Begin { }
+    
+    Process {
+        $Value = $( If ( $Table -eq $null ) { $Value } ElseIf ( $Table.ContainsKey($Key) ) { $Table[$Key] } )
+        If ( ( -Not ( $Key -match "(.*)_(.*)" ) ) -And ( $Value -is [String] ) ) {
+            ("{0,-15} `t{1}" -f ( $Key.ToUpper() + ':' ), $Value)
+        }
+    }
+
+    End { }
+
+}
+
+Function Write-ADPNetAUReport {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [string] $Output="Text" )
+
+    Begin { }
+
+    Process {
+        $hashAU = ( $File | Get-ADPNetAUTable )
+        $jsonPacket = ($hashAU | ConvertTo-Json -Compress)
+
+        If ( $Output -eq "JSON" ) {
+            ( "{0}" -f $jsonPacket )
+        }
+        Else {
+            $group0 = @( 'Ingest Title', 'File Size', 'From Peer', 'To Peer' )
+            $group1 = @( 'Plugin JAR', 'Plugin ID', 'Plugin Name', 'Plugin Version' )
+            $group2 = @( 'Start URL', 'Manifest URL' )
+            $group3 = $( $hashAU.Keys |% { If ( -Not ( ($group0+$group1+$group2+$group3) -ieq $_ ) ) { $_ } } )
+            $group4 = @( 'JSON Packet' )
+            "INGEST INFORMATION AND PARAMETERS:"
+            "----------------------------------"
+            $group0 | Write-ADPNetAUReportKeyValuePair -Table:$hashAU
+            $group1 | Write-ADPNetAUReportKeyValuePair -Table:$hashAU
+            $group2 | Write-ADPNetAUReportKeyValuePair -Table:$hashAU
+            $group3 | Write-ADPNetAUReportKeyValuePair -Table:$hashAU
+            ""
+            $group4 | Write-ADPNetAUReportKeyValuePair -Value:$jsonPacket
+            ""
+        }
+    }
+
+    End { }
+
+}
+
+Function ConvertFrom-ADPNetJsonPacket {
+Param ( [Parameter(ValueFromPipeline=$true)] $Block )
+
+    Begin { $cmdContext = $MyInvocation.MyCommand }
+
+    Process {
+        $JSON = ( $Block -replace '^JSON\s*PACKET:\s*(\{)','$1' )
+        
+        ( $JSON | ConvertFrom-Json )
+    }
+
+    End { }
+}
+
+Function Invoke-ADPNetAUUrlRetrievalTest {
+Param ( [Parameter(ValueFromPipeline=$true)] $URI )
+
+    Begin {
+        $cmdContext = $MyInvocation.MyCommand
+
+        $dropTunnel = ( Get-ColdStorageSettings -Name "Drop-Server-Tunnel" )
+        $tunnelSession = $null
+        If ( $dropTunnel ) {
+
+            $LocalPoint, $RemotePoint = ( $dropTunnel -split "[|]" )
+            $MediumPoint, $RemotePoint = ( $RemotePoint -split "[,]" )
+            $LocalPointHost, $LocalPointPort = ( $LocalPoint.Trim() -split "[:]" )
+            $MediumUser, $MediumHost = ( $MediumPoint.Trim() -split "[@]" )
+            $RemotePointHost, $RemotePointPort = ( $RemotePoint.Trim() -split "[:]" )
+            
+            $sshCredential = ( Get-Credential -UserName:$MediumUser -Message "Open tunnel to ${RemotePoint} via ${MediumPoint}. SSH credentials for ${MediumPoint}:" )
+            If ( $sshCredential ) {
+                Write-Debug "Establishing SSH connection to ${MediumUser}@${MediumHost}"
+                $tunnelSession = ( New-SSHSession -ComputerName:$MediumHost -Credential:$sshCredential )
+                If ( $tunnelSession.Connected ) {
+                    Write-Debug "Opening SSH tunnel to ${RemotePointHost}:${RemotePointPort}"
+                    New-SSHLocalPortForward -SessionId:( $tunnelSession.SessionId ) -BoundHost:$LocalPointHost -BoundPort:$LocalPointPort -RemoteAddress:$RemotePointHost -RemotePort:$RemotePointPort
+                }
+            }
+
+        }
+
+    }
+
+    Process {
+        Write-Debug ( "[$cmdContext] Retrieve URI: {0}" -f $URI )
+
+        $Proxy = ( Get-ColdStorageSettings -Name "Drop-Server-Proxy" )
+        Try {
+            $HttpResponse = ( Invoke-WebRequest -UseBasicParsing -Uri:$URI -Proxy:$Proxy ) # N.B.: $Proxy may be $null
+        }
+        Catch {
+            $HttpErrorMessage = [PSCustomObject] @{ "StatusDescription"=( $_.Exception.Message ); "StatusCode"=( 0 ) }
+            If ($_.FullyQualifiedErrorId -like "WebCmdletWebResponseException*") {
+                $HttpResponse = ( $_.Exception.Response )
+
+                # HTTP Response will be $null if the connection was not made or failed in some way;
+                # filled if it returned an HTTP error response
+            }
+        }
+
+        $HttpRequest = (@{} | Select-Object @{ n="URI"; e={ $URI }}, @{ n="Proxy"; e={ $Proxy }})
+        If ( $HttpResponse ) {
+            $HttpResponse | Add-Member -MemberType NoteProperty -Name Request -Value $HttpRequest    
+            $HttpResponse
+        }
+        Else {
+            $HttpErrorMessage | Add-Member -MemberType NoteProperty -Name Request -Value $HttpRequest    
+            $HttpErrorMessage
+        }
+
+    }
+
+    End {
+
+        If ( $tunnelSession ) {
+            If ( $tunnelSession.Connected ) {
+                Write-Debug ( "Closing ssh session # {0}" -f $tunnelSession.sessionId )
+                $tunnelSession.Disconnect()
+            }
+        }
+
+    }
+
+}
+
+Function Write-ADPNetAUUrlRetrievalTest {
+Param ( [Parameter(ValueFromPipeline=$true)] $Block, $Key="*_url", [switch] $ShowWarnings=$false, [switch] $ShowErrors=$false, [switch] $ReturnObject=$false, [switch] $NoHeader=$false )
+
+    Begin {
+        $context = $MyInvocation.MyCommand
+
+        If ( ( -Not $ReturnObject ) -And ( -Not $NoHeader ) ) {
+            "URL RETRIEVAL TESTS:"
+            "--------------------"
+        }
+    }
+
+    Process {
+
+        $Response = ( $Block | Get-ADPNetAUUrl -Key:$Key | Invoke-ADPNetAUUrlRetrievalTest )
+
+        $Code = $Response.StatusCode.ToInt32([CultureInfo]::InvariantCulture)
+
+        $UrlKey = $Response.Request.URI.PacketSource
+        $FullUrl = $Response.Request.URI.ToString()
+        $UrlTemplate = $Response.Request.URI.PluginSource
+
+        $SideMessage = $null
+        $SideStream = $null
+        If ( $Code -ge 200 -and $Code -lt 300 ) {
+            $OK = $true
+        }
+        ElseIf ( $Code -ge 300 -and $Code -lt 400 ) {
+            $OK = $true
+            $SideMessage = ( "[{0}] HTTP redirection response {1} from {2} <{3}>: '{4}'" -f $context, $Code, $UrlKey, $FullUrl, $Response.StatusDescription )
+            $SideStream = $( If ( $ShowWarnings ) { "Write-Warning" } )
+        }
+        ElseIf ( $Code -ge 400 ) {
+            $OK = $false
+            $SideMessage = ( "[{0}] HTTP failure response {1} from {2} <{3}>: '{4}'" -f $context, $Code, $UrlKey, $FullUrl, $Response.StatusDescription )
+            $SideStream = $( If ( $ShowErrors ) { "Write-Error" } ElseIf ( $ShowWarnings ) { "Write-Warning" } )
+        }
+        ElseIf ( $Code -eq 0 ) {
+            $OK = $false
+            $SideMessage = ( "[{0}] HTTP request failure from {1} <{2}>: '{3}'" -f $context, $UrlKey, $FullUrl, $Response.StatusDescription )
+            $SideStream = $( If ( $ShowErrors ) { "Write-Error" } ElseIf ( $ShowWarnings ) { "Write-Warning" } )
+        }
+        
+        If ( $SideMessage -and $SideStream ) {
+            $SideMessage | & $SideStream
+        }
+
+        $Obj = ( [PSCustomObject] @{ "Code"=$Code; "Description"=$Response.StatusDescription; "Parameter"=$UrlKey; "Url"=$FullUrl; "UrlTemplate"=$UrlTemplate } )
+
+        If ( $ReturnObject ) {
+            $Obj
+        }
+        Else {
+            ( $Obj | Get-Member -MemberType NoteProperty |% { $Prop = $_.Name ; $Obj.$Prop } ) -join " `t"
+        }
+
+    }
+
+    End { }
+}
+
 #############################################################################################################
 ## PUBLIC FUNCTIONS: TRANSFER LOCKSS ARCHIVAL UNTIS (AUs) TO DROP SERVER VIA SFTP ###########################
 #############################################################################################################
 
 Function Add-ADPNetAUToDropServerStagingDirectory {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
 
     Begin { }
 
@@ -371,11 +638,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
                 $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
             }
 
-            Add-LOCKSSManifestHTML -Directory $File -Title $sTitle -Force:$Force
+            Add-LOCKSSManifestHTML -Directory $File -Title $sTitle -Force:$Force -WhatIf:$WhatIf
 
         }
 
-        ( $Location | Set-DropServerFolder )
+        ( $Location | Set-DropServerFolder -WhatIf:$WhatIf )
 
     }
 
@@ -393,7 +660,7 @@ Function New-DropServerSession {
 }
 
 Function Set-DropServerFolder {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
 
 Begin {
     $session = ( New-DropServerSession )
@@ -422,11 +689,11 @@ Process {
 
                 If ( Test-SFTPPath -SFTPSession:$session -Path:$RemoteDestination ) { # Already uploaded; sync.
                     Write-Verbose "[drop:$sFile] already exists; sync with local copy."
-                    $oFile | Sync-DropServerAU -SFTPSession:$session -RemoteRepository:$RemoteRoot
+                    $oFile | Sync-DropServerAU -SFTPSession:$session -RemoteRepository:$RemoteRoot -WhatIf:$WhatIf
                 }
                 Else {
                     Write-Verbose "[drop:$sFile] not yet staged; add local copy"
-                    $oFile | Add-DropServerAU -SFTPSession:$session -RemoteRepository:$RemoteRoot
+                    $oFile | Add-DropServerAU -SFTPSession:$session -RemoteRepository:$RemoteRoot -WhatIf:$WhatIf
                 }
 
             }
@@ -459,14 +726,19 @@ End {
 }
 
 Function Add-DropServerAU {
-    Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository )
+    Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository, [switch] $WhatIf=$false )
 
     Begin { }
 
     Process {
         $sLocalFullName = $LocalFolder.FullName
         $sRemotePath = ( $LocalFolder | Get-ADPNetStartDir )
-        Set-SFTPFolder -SessionId:($SFTPSession.SessionId) -LocalFolder:$sLocalFullName -RemotePath:$sRemotePath
+        If ( -Not $WhatIf ) {
+            Set-SFTPFolder -SessionId:($SFTPSession.SessionId) -LocalFolder:$sLocalFullName -RemotePath:$sRemotePath
+        }
+        Else {
+            ( "WhatIf: {0} -SessionId:{1} -LocalFolder:{2} -RemotePath:{3}" -f "Set-SFTPFolder",$SFTPSession.SessionId,$sLocalFullName,$sRemotePath )
+        }
     }
 
     End { }
@@ -474,7 +746,7 @@ Function Add-DropServerAU {
 }
 
 Function Sync-DropServerAU {
-Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository )
+Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository, [switch] $WhatIf )
 
 Begin { }
 
@@ -488,23 +760,67 @@ Process {
 
     }
 
+    $aChecklist = @{}
+    Get-ChildItem -Recurse -LiteralPath $LocalFolder.FullName |% {
+        $RemoteFile = ( $_ | Get-ADPNetFileRemotePath -Session:$session -LocalBase:$LocalFolder -RemoteBase:$RemoteBase )
+        $aChecklist[$_.FullName] = $RemoteFile
+    }
+
     Get-SFTPChildItem -SessionId $session.SessionId -Recursive -Path $RemoteDestination |% {
         $RemoteFile = $_
         $LocalFile = ( $_ | Get-ADPNetFileLocalPath -Session:$session -LocalBase:$LocalFolder -RemoteBase:$RemoteBase )
-        $RemoteAttr = Get-SFTPPathAttribute -SessionId $session.SessionId -Path $RemoteFile.FullName
+        $aChecklist[$LocalFile] = $RemoteFile
+    }
+
+    $aChecklist.Keys |% {
+        $LocalFile = Get-FileObject($_)
+        $RemoteFile = $aChecklist[$_]
+        If ( $RemoteFile -is [string] ) {
+            $RemoteFileName = $RemoteFile
+        }
+        Else {
+            $RemoteFileName = $RemoteFile.FullName
+        }
+        
+        $RemoteAttr = Get-SFTPPathAttribute -SessionId $session.SessionId -Path $RemoteFileName -ErrorAction SilentlyContinue
+        Write-Debug ( "COMPARE: {0} <-> `t{1}" -f $LocalFile, $RemoteFileName )
             
-        $LocalLength = $LocalFile.Length
-        $RemoteLength = $RemoteAttr.Size
-            
-        $WrittenLater = ( $LocalFile.LastWriteTime -gt $RemoteAttr.LastWriteTime )
-        $SizesDiffer = ( $LocalFile.Length -ne $RemoteAttr.Size )
-        If ( $RemoteAttr.IsRegularFile ) {
+        $LocalLength = $( If ( $LocalFile ) { $LocalFile.Length } Else { $null } )
+        $LocalLastWrite = $( If ( $LocalFile ) { $LocalFile.LastWriteTime } Else { $null } )
+        $LocalIsRegular = $( If ( $LocalFile ) { Test-Path -LiteralPath $LocalFile.FullName -PathType Leaf } Else { $null } )
+
+        $RemoteLength = $( If ( $RemoteAttr ) { $RemoteAttr.Size } Else { 0 } )
+        $RemoteLastWrite = $( If ( $RemoteAttr ) { $RemoteAttr.LastWriteTime } Else { $null } )
+        $RemoteIsRegular = $( If ( $RemoteAttr ) { $RemoteAttr.IsRegularFile } Else { $null } )
+
+        $WrittenLater = ( $LocalLastWrite -gt $RemoteLastWrite )
+        $SizesDiffer = ( $LocalLength -ne $RemoteLength )
+
+        If ( $LocalIsRegular -or $RemoteIsRegular ) {
             If ( $WrittenLater -or $SizesDiffer ) {
-                $FileName = $LocalFile.Name
-                Write-Warning "${FileName} differs. Local copy: ${LocalLength}; Remote: ${RemoteLength}"
-                $RemotePath = ( $RemoteFile.FullName -split "/" )
+                $RemotePath = ( $RemoteFileName -split "/" )
                 $RemoteParent = ( $RemotePath[0..($RemotePath.Count-2)] ) -join "/"
-                Set-SFTPItem -SFTPSession:$session -Path:($LocalFile.FullName) -Destination:($RemoteParent) -Force -Verbose
+
+                $FileName = $( If ($LocalFile) { $LocalFile.Name } Else { $RemotePath[-1] } )
+                
+                ( "${FileName} differs. Local copy: {0:N0} B ({1}); Remote: {2:N0} B ({3})" -f ($LocalLength, $LocalLastWrite, $RemoteLength, $RemoteLastWrite)) | Write-Warning
+
+                If ( $LocalIsRegular ) {
+                    If ( -Not $WhatIf ) {
+                        Set-SFTPItem -SFTPSession:$session -Path:($LocalFile.FullName) -Destination:($RemoteParent) -Force -Verbose
+                    }
+                    Else {
+                        ( 'WhatIf: {0} -SFTPSession:$session -Path:{1} -Destination:{2} -Force -Verbose' -f "Set-SFTPItem",($LocalFile.FullName),($RemoteParent) )
+                    }
+                }
+                ElseIf ( $RemoteIsRegular ) {
+                    If ( -Not $WhatIf ) {
+                        Remove-SFTPItem -SFTPSession:$session -Path:$RemoteFileName -Force -Verbose
+                    }
+                    Else {
+                        ( 'WhatIf: {0} -SFTPSession:$session -Path:{1} -Force -Verbose' -f "Remove-SFTPItem",$RemoteFileName )
+                    }
+                }
             }
         }
     }
@@ -512,6 +828,23 @@ Process {
 }
 
 End { }
+}
+
+Function Get-ADPNetFileRemotePath {
+Param ( [Parameter(ValueFromPipeline=$true)] $LocalFile, $Session, $LocalBase, $RemoteBase )
+
+    Begin { }
+
+    Process {
+        $reLocalBase = [Regex]::Escape($LocalBase.FullName + '\')
+        $localRelative = ( $LocalFile.FullName -replace "^${reLocalBase}","" ) -replace '[\\]','/'
+        $RemotizedFileName = ( $RemoteBase.FullName + "/${localRelative}" )
+
+        $RemotizedFileName
+    }
+
+    End { }
+
 }
 
 Function Get-ADPNetFileLocalPath {
@@ -524,7 +857,10 @@ Process {
     $remoteRelative = ( $RemoteFile.FullName -replace "^${reRemoteBase}/","" ) -replace "[/]","\"
     $LocalizedFileName = ( $LocalBase.FullName + "\${remoteRelative}" )
     If ( Test-Path -LiteralPath $LocalizedFileName ) {
-        Get-Item -Force -LiteralPath $LocalizedFileName | Write-Output
+        ( Get-Item -Force -LiteralPath $LocalizedFileName ).FullName | Write-Output
+    }
+    Else {
+        $LocalizedFileName | Write-Output
     }
 }
 
@@ -736,10 +1072,16 @@ Export-ModuleMember -Function New-DropServerSession
 Export-ModuleMember -Function Set-DropServerFolder
 Export-ModuleMember -Function Add-DropServerAU
 Export-ModuleMember -Function Sync-DropServerAU
+Export-ModuleMember -Function Get-ADPNetFileRemotePath
 Export-ModuleMember -Function Get-ADPNetFileLocalPath
 
 Export-ModuleMember -Function Get-ADPNetAUTitle
+Export-ModuleMember -Function Get-ADPNetAUTable
 Export-ModuleMember -Function Write-ADPNetAUReport
+Export-ModuleMember -Function Get-ADPNetAUUrl
+Export-ModuleMember -Function Invoke-ADPNetAUUrlRetrievalTest 
+Export-ModuleMember -Function Write-ADPNetAUUrlRetrievalTest
+
 Export-ModuleMember -Function Get-ADPNetADPNet
 Export-ModuleMember -Function Get-ADPNetStartDir
 Export-ModuleMember -Function Get-ADPNetStartURL
