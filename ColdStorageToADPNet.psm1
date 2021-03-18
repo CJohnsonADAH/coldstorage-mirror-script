@@ -483,6 +483,33 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Block )
     End { }
 }
 
+Function Get-SSHCredentials {
+Param ( [Parameter(ValueFromPipeline=$true)] $Identity )
+
+    Begin { }
+
+    Process {
+        $aKeys = @()
+        $oKeyFiles = ( Get-ColdStorageSettings -Name "SSH-ID" )
+        $oKeyFiles | Get-Member -MemberType NoteProperty -Name $Identity |% {
+            $PropName = $_.Name
+            $aKeys += @( $oKeyFiles.$PropName | ConvertTo-ColdStorageSettingsFilePath )
+        }
+        $aUserHost = ( $Identity -split "[@]",2 )
+
+        $sUser = $aUserHost[0]
+        
+        $oCredentials = [PSCustomObject] @{}
+        $sUser |% { $oCredentials | Add-Member -MemberType NoteProperty -Name "User" -Value $_ }
+        $aKeys |% { $oCredentials | Add-Member -MemberType NoteProperty -Name "Key" -Value $_ }
+        
+        $oCredentials
+    }
+
+    End { }
+
+}
+
 Function Invoke-ADPNetAUUrlRetrievalTest {
 Param ( [Parameter(ValueFromPipeline=$true)] $URI )
 
@@ -495,16 +522,30 @@ Param ( [Parameter(ValueFromPipeline=$true)] $URI )
 
             $LocalPoint, $RemotePoint = ( $dropTunnel -split "[|]" )
             $MediumPoint, $RemotePoint = ( $RemotePoint -split "[,]" )
-            $LocalPointHost, $LocalPointPort = ( $LocalPoint.Trim() -split "[:]" )
-            $MediumUser, $MediumHost = ( $MediumPoint.Trim() -split "[@]" )
-            $RemotePointHost, $RemotePointPort = ( $RemotePoint.Trim() -split "[:]" )
             
-            $sshCredential = ( Get-Credential -UserName:$MediumUser -Message "Open tunnel to ${RemotePoint} via ${MediumPoint}. SSH credentials for ${MediumPoint}:" )
+            $LocalPoint = $LocalPoint.Trim()
+            $MediumPoint = $MediumPoint.Trim()
+            $RemotePoint = $RemotePoint.Trim()
+
+            $LocalPointHost, $LocalPointPort = ( $LocalPoint -split "[:]" )
+            $MediumUser, $MediumHost = ( $MediumPoint -split "[@]" )
+            $RemotePointHost, $RemotePointPort = ( $RemotePoint -split "[:]" )
+            
+            $oCreds = ( $MediumPoint | Get-SSHCredentials )
+            $sCredentialPrompt = ( "Open tunnel to {0} via {1}. SSH credentials for {2}:" -f $RemotePoint,$MediumPoint,$( If ( $oCreds.Key ) { $oCreds.Key } Else { $MediumPoint } ) )
+            $sshCredential = ( Get-Credential -UserName:($oCreds.User) -Message $sCredentialPrompt )
             If ( $sshCredential ) {
                 Write-Debug "Establishing SSH connection to ${MediumUser}@${MediumHost}"
-                $tunnelSession = ( New-SSHSession -ComputerName:$MediumHost -Credential:$sshCredential )
+                If ( $oCreds.Key ) {
+                    $tunnelSession = ( New-SSHSession -ComputerName:$MediumHost -Credential:$sshCredential -KeyFile:($oCreds.Key) )
+                }
+                Else {
+                    $tunnelSession = ( New-SSHSession -ComputerName:$MediumHost -Credential:$sshCredential )
+                }
+
                 If ( $tunnelSession.Connected ) {
                     Write-Debug "Opening SSH tunnel to ${RemotePointHost}:${RemotePointPort}"
+                    $aKeyFiles = ( Get-ColdStorageSettings -Name "SSH-ID" )
                     New-SSHLocalPortForward -SessionId:( $tunnelSession.SessionId ) -BoundHost:$LocalPointHost -BoundPort:$LocalPointPort -RemoteAddress:$RemotePointHost -RemotePort:$RemotePointPort
                 }
             }
@@ -1066,6 +1107,8 @@ Export-ModuleMember -Function Get-DropServerAuthority
 Export-ModuleMember -Function Get-DropServerHost
 Export-ModuleMember -Function Get-DropServerUser
 Export-ModuleMember -Function Get-DropServerPassword
+
+Export-ModuleMember -Function Get-SSHCredentials
 
 Export-ModuleMember -Function Add-ADPNetAUToDropServerStagingDirectory
 Export-ModuleMember -Function New-DropServerSession

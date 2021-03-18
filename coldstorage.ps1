@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0316
+@version 2021.0318
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -58,7 +58,7 @@ $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 
 # coldstorage
 #
-# Last-Modified: 16 March 2021
+# Last-Modified: 18 March 2021
 
 Function ColdStorage-Script-Dir {
 Param ( $File=$null )
