@@ -489,15 +489,18 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Identity )
     Begin { }
 
     Process {
+        $sUser = ( $Identity | Get-DropServerHostElements ).User
         $aKeys = @()
         $oKeyFiles = ( Get-ColdStorageSettings -Name "SSH-ID" )
-        $oKeyFiles | Get-Member -MemberType NoteProperty -Name $Identity |% {
-            $PropName = $_.Name
-            $aKeys += @( $oKeyFiles.$PropName | ConvertTo-ColdStorageSettingsFilePath )
-        }
-        $aUserHost = ( $Identity -split "[@]",2 )
 
-        $sUser = $aUserHost[0]
+        If ( $oKeyFiles ) {
+            $oKeyFiles | Get-Member -MemberType NoteProperty -Name $Identity |% {
+                $PropName = $_.Name
+                $aKeys += @( $oKeyFiles.$PropName | ConvertTo-ColdStorageSettingsFilePath )
+            }
+            $aUserHost = ( $Identity -split "[@]",2 )
+            $sUser = $aUserHost[0]
+        }
         
         $oCredentials = [PSCustomObject] @{}
         $sUser |% { $oCredentials | Add-Member -MemberType NoteProperty -Name "User" -Value $_ }
@@ -510,46 +513,187 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Identity )
 
 }
 
+Function Get-ArrayReversed {
+Param ( $List )
+
+    $Copy = $List
+    [Array]::Reverse( $Copy )
+    $Copy
+
+}
+
+Function Get-DropServerHostElements {
+Param ( [Parameter(ValueFromPipeline=$true)] $Authority )
+
+    Begin { }
+
+    Process {
+        $sHost, $sUser = Get-ArrayReversed( $Authority -split "[@]", 2 )
+        $sHost, $sPort = ( $sHost -split "[:]",2 )
+        $sUser, $sPass = ( $sUser -split "[:]",2 )
+
+        $Elements = New-Object -TypeName PSCustomObject
+        $sHost |% { If ( $_ ) { $Elements | Add-Member -MemberType NoteProperty -Name "Host" -Value $_ } }
+        $sPort |% { If ( $_ ) { $Elements | Add-Member -MemberType NoteProperty -Name "Port" -Value $_ } }
+        $sUser |% { If ( $_ ) { $Elements | Add-Member -MemberType NoteProperty -Name "User" -Value $_ } }
+        $sPass |% { If ( $_ ) { $Elements | Add-Member -MemberType NoteProperty -Name "Password" -Value $_ } }
+
+        $Elements
+    }
+
+    End { }
+}
+
+Function Get-DropServerHostString {
+Param ( [Parameter(ValueFromPipeline=$true)] $Elements )
+
+    Begin { }
+
+    Process {
+        $sTemplate = ( "{0}" -f $Elements.Host )
+        If ( $Elements.Port ) {
+            $sTemplate = ( "{0}:{1}" -f $sTemplate,$Elements.Port )
+        }
+        If ( $Elements.User ) {
+            $sTemplate = ( "{0}@{1}" -f $Elements.User,$sTemplate )
+        }
+        $sTemplate
+    }
+
+    End { }
+}
+
+Function Get-DropServerTunnel {
+Param ( [Parameter(ValueFromPipeline=$true)] $URI )
+
+    Begin { }
+
+    Process {
+        Get-ColdStorageSettings -Name "Drop-Server-Tunnel" |% {
+            If ( $_ ) {
+                $LocalPoint, $RemotePoint = ( $_ -split "[|]",2 )
+                $MediumPoint, $RemotePoint = ( $RemotePoint -split "[,]",2 )
+            
+                If ( $LocalPoint ) { $LocalPoint = $LocalPoint.Trim() }
+                If ( $MediumPoint ) { $MediumPoint = $MediumPoint.Trim() }
+                If ( $RemotePoint ) { $RemotePoint = $RemotePoint.Trim() }
+
+                $aHosts = @{
+                    "Local"=( $LocalPoint | Get-DropServerHostElements );
+                    "Medium"=( $MediumPoint | Get-DropServerHostElements );
+                    "Remote"=( $RemotePoint | Get-DropServerHostElements )
+                }
+
+                $Triad = New-Object -TypeName PSCustomObject
+                $aHosts.Keys |% { If ( $aHosts[$_] ) { $Triad | Add-Member -MemberType NoteProperty -Name $_ -Value $aHosts[$_] } }
+
+                $Triad
+            }
+        }
+    }
+
+    End { }
+}
+
+Function New-DropServerTunnel {
+Param ( [Parameter(ValueFromPipeline=$true)] $Tunnel )
+
+    Begin { }
+
+    Process {
+        $oTunnel = $null
+        If ( ( $Tunnel -is [string] ) -or ( $Tunnel -is [uri] ) ) {
+            $oTunnel = ( $Tunnel | Get-DropServerTunnel )
+        }
+        ElseIf ( $Tunnel | Get-Member -MemberType NoteProperty -Name "Medium" ) {
+            $oTunnel = $Tunnel
+        }
+        Else {
+            Write-Error "[${context}] Could not determine tunnel definition from parameter:"
+            Write-Error $Tunnel
+        }
+
+        If ( $oTunnel ) {
+            
+            $sId = ( $oTunnel.Medium | Get-DropServerHostString )
+            $sRemote = ( $oTunnel.Remote | Get-DropServerHostString )
+            $oCreds = ( $oTunnel.Medium | Get-DropServerHostString | Get-SSHCredentials )
+
+            $sCredentialPrompt = ( "Open tunnel to {0} via {1}. SSH credentials for {2}:" -f $sRemote,$sId,$( If ( $oCreds.Key ) { $oCreds.Key } Else { $sID } ) )
+            $sshCredential = ( Get-Credential -UserName:($oCreds.User) -Message $sCredentialPrompt )
+
+            If ( $sshCredential ) {
+                Write-Debug "Establishing SSH connection to ${sId}"
+                If ( $oTunnel.Medium.Port ) {
+
+                    If ( $oCreds.Key ) {
+                        $tunnelSession = ( New-SSHSession -ComputerName:$oTunnel.Medium.Host -Port:($oTunnel.Medium.Port) -Credential:$sshCredential -KeyFile:($oCreds.Key) )
+                    }
+                    Else {
+                        $tunnelSession = ( New-SSHSession -ComputerName:$oTunnel.Medium.Host -Port:($oTunnel.Medium.Port) -Credential:$sshCredential )
+                    }
+
+                }
+                Else {
+
+                    If ( $oCreds.Key ) {
+                        $tunnelSession = ( New-SSHSession -ComputerName:$oTunnel.Medium.Host -Credential:$sshCredential -KeyFile:($oCreds.Key) )
+                    }
+                    Else {
+                        $tunnelSession = ( New-SSHSession -ComputerName:$oTunnel.Medium.Host -Credential:$sshCredential )
+                    }
+
+                }
+
+
+                If ( $tunnelSession.Connected ) {
+                    Write-Debug "Opening SSH tunnel to ${sRemote}"
+                    $aKeyFiles = ( Get-ColdStorageSettings -Name "SSH-ID" )
+                    New-SSHLocalPortForward -SessionId:( $tunnelSession.SessionId ) -BoundHost:$oTunnel.Local.Host -BoundPort:$oTunnel.Local.Port -RemoteAddress:$oTunnel.Remote.Host -RemotePort:$oTunnel.Remote.Port
+                }
+
+                $tunnelSession
+            }
+        }
+    }
+
+    End { }
+}
+
+
+Function Get-DropServerHTTPProxy {
+Param ( [Parameter(ValueFromPipeline=$true)] $URI )
+
+    Begin { }
+
+    Process {
+        $Proxy = ( Get-ColdStorageSettings -Name "Drop-Server-Proxy" )
+        If ( -Not $Proxy ) {
+            # Try to get an implicit proxy address from the Drop-Server-Tunnel setting
+            $dropTunnel = ( $URI | Get-DropServerTunnel )
+            If ( $dropTunnel ) {
+                $asURLParts = @( "http:", "", ( $dropTunnel.Local | Get-DropServerHostString ), "" )
+                $Proxy = ( $asURLParts -join "/" )
+            }
+        }
+        $Proxy
+    }
+
+    End { }
+
+}
+
 Function Invoke-ADPNetAUUrlRetrievalTest {
 Param ( [Parameter(ValueFromPipeline=$true)] $URI )
 
     Begin {
         $cmdContext = $MyInvocation.MyCommand
 
-        $dropTunnel = ( Get-ColdStorageSettings -Name "Drop-Server-Tunnel" )
+        $dropTunnel = ( $URI | Get-DropServerTunnel )
         $tunnelSession = $null
+
         If ( $dropTunnel ) {
-
-            $LocalPoint, $RemotePoint = ( $dropTunnel -split "[|]" )
-            $MediumPoint, $RemotePoint = ( $RemotePoint -split "[,]" )
-            
-            $LocalPoint = $LocalPoint.Trim()
-            $MediumPoint = $MediumPoint.Trim()
-            $RemotePoint = $RemotePoint.Trim()
-
-            $LocalPointHost, $LocalPointPort = ( $LocalPoint -split "[:]" )
-            $MediumUser, $MediumHost = ( $MediumPoint -split "[@]" )
-            $RemotePointHost, $RemotePointPort = ( $RemotePoint -split "[:]" )
-            
-            $oCreds = ( $MediumPoint | Get-SSHCredentials )
-            $sCredentialPrompt = ( "Open tunnel to {0} via {1}. SSH credentials for {2}:" -f $RemotePoint,$MediumPoint,$( If ( $oCreds.Key ) { $oCreds.Key } Else { $MediumPoint } ) )
-            $sshCredential = ( Get-Credential -UserName:($oCreds.User) -Message $sCredentialPrompt )
-            If ( $sshCredential ) {
-                Write-Debug "Establishing SSH connection to ${MediumUser}@${MediumHost}"
-                If ( $oCreds.Key ) {
-                    $tunnelSession = ( New-SSHSession -ComputerName:$MediumHost -Credential:$sshCredential -KeyFile:($oCreds.Key) )
-                }
-                Else {
-                    $tunnelSession = ( New-SSHSession -ComputerName:$MediumHost -Credential:$sshCredential )
-                }
-
-                If ( $tunnelSession.Connected ) {
-                    Write-Debug "Opening SSH tunnel to ${RemotePointHost}:${RemotePointPort}"
-                    $aKeyFiles = ( Get-ColdStorageSettings -Name "SSH-ID" )
-                    New-SSHLocalPortForward -SessionId:( $tunnelSession.SessionId ) -BoundHost:$LocalPointHost -BoundPort:$LocalPointPort -RemoteAddress:$RemotePointHost -RemotePort:$RemotePointPort
-                }
-            }
-
+            $tunnelSession = ( $dropTunnel | New-DropServerTunnel )
         }
 
     }
@@ -557,7 +701,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $URI )
     Process {
         Write-Debug ( "[$cmdContext] Retrieve URI: {0}" -f $URI )
 
-        $Proxy = ( Get-ColdStorageSettings -Name "Drop-Server-Proxy" )
+        $Proxy = ( Get-DropServerHTTPProxy )
         Try {
             $HttpResponse = ( Invoke-WebRequest -UseBasicParsing -Uri:$URI -Proxy:$Proxy ) # N.B.: $Proxy may be $null
         }
@@ -589,6 +733,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $URI )
             If ( $tunnelSession.Connected ) {
                 Write-Debug ( "Closing ssh session # {0}" -f $tunnelSession.sessionId )
                 $tunnelSession.Disconnect()
+                Remove-SSHSession $tunnelSession
             }
         }
 
@@ -1124,6 +1269,11 @@ Export-ModuleMember -Function Write-ADPNetAUReport
 Export-ModuleMember -Function Get-ADPNetAUUrl
 Export-ModuleMember -Function Invoke-ADPNetAUUrlRetrievalTest 
 Export-ModuleMember -Function Write-ADPNetAUUrlRetrievalTest
+
+Export-ModuleMember -Function Get-DropServerHostElements
+Export-ModuleMember -Function Get-DropServerHostString
+Export-ModuleMember -Function Get-DropServerTunnel
+Export-ModuleMember -Function Get-DropServerHTTPProxy
 
 Export-ModuleMember -Function Get-ADPNetADPNet
 Export-ModuleMember -Function Get-ADPNetStartDir
