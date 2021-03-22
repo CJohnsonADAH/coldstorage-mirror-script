@@ -1940,11 +1940,14 @@ Param (
 
         $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )
         $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
-        $sZippedFlag = $null
         If ( $Package | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
             $sZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
             $nZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { 1 } Else { 0 } )
             $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
+        }
+        Else {
+            $sZippedFlag = $null
+            $sZippedFile = $null
         }
         $nContents = ( $Package.CSPackageContents )
         $sContents = ( "{0:N0} file{1}" -f $nContents, $( If ( $nContents -ne 1 ) { "s" } Else { "" } ))
