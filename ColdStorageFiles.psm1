@@ -4,7 +4,7 @@ Module for utility functions dealing with the local or network-shared file syste
 
 .DESCRIPTION
 
-@version 2021.0127
+@version 2021.0324
 #>
 
 Function Get-FileObject ( $File ) {
@@ -305,6 +305,74 @@ End { If ( $File.Count -gt 0 ) { $File | Get-ItemFileSystemLocation -File:$null 
 
 }
 
+
+Function Get-ItemFileSystemSearchPath {
+Param ( [Parameter(ValueFromPipeline=$true)] $Piped, $File=$null, [ValidateSet('Highest', 'Nearest', '')] [string] $Order=$null, $Depth=0 )
+
+    Begin { }
+
+    Process {
+        If ( $Depth -lt 9999) { # Sanity check
+            $Dir = ( $Piped | Get-ItemFileSystemLocation )
+
+            If ( $Order -ne "Highest" ) { $Dir }
+            If ( $Dir.Parent ) {
+                $Dir.Parent | Get-ItemFileSystemSearchPath -File:$null -Depth:($Depth+1) -Order:$Order
+            }
+            If ( $Order -eq "Highest" ) { $Dir }
+        }
+    }
+
+    End { If ( $File.Count -gt 0 ) { $File | Get-ItemFileSystemSearchPath -File:$null -Depth:($Depth+1) -Order:$Order } }
+}
+
+Function Get-ItemFileSystemSearchFor {
+Param ( [Parameter(ValueFromPipeline=$True)] $Piped, $Name=$null, [switch] $Wildcard=$false, [switch] $Regex=$false, [switch] $All=$false )
+
+    Begin { $KeepOn = $true }
+
+    Process {
+        If ( $KeepOn ) {
+            $Location = Get-FileObject($Piped)
+            $TestPath = ( $Location.FullName | Join-Path -ChildPath $Name )
+            If ( Test-Path -LiteralPath $TestPath ) {
+                Get-Item -Force -LiteralPath $TestPath
+                $KeepOn = $All
+            }
+            If ( $Wildcard ) {
+                If ( Test-Path -Path $TestPath ) {
+                    Get-Item -Force -Path $TestPath
+                    $KeepOn = $All
+                }
+            }
+            If ( $Regex ) {
+                Get-ChildItem -LiteralPath $Location.FullName |% {
+                    If ( $_.Name -match $Name ) {
+                        $_
+                        $KeepOn = $All
+                    }
+                }
+            }
+
+        }
+    }
+
+    End { }
+}
+
+Function Get-ItemPropertiesDirectoryLocation {
+Param ( [Parameter(ValueFromPipeline=$True)] $Piped, $Name=$null, [ValidateSet('Highest', 'Nearest', '')] [string] $Order=$null, [switch] $Wildcard=$false, [switch] $Regex=$false, [switch] $All=$false )
+
+    Begin { }
+
+    Process {
+        $Piped | Get-ItemFileSystemSearchPath -Order:$Order | Get-ItemFileSystemSearchFor -Name:$Name -Wildcard:$Wildcard -Regex:$Regex -All:$All
+    }
+
+    End { }
+
+}
+
 Export-ModuleMember -Function Get-FileObject
 Export-ModuleMember -Function Get-FileLiteralPath
 Export-ModuleMember -Function Test-HiddenOrSystemFile
@@ -315,3 +383,6 @@ Export-ModuleMember -Function Get-UNCPathResolved
 Export-ModuleMember -Function Get-LocalPathFromUNC
 Export-ModuleMember -Function Get-ItemFileSystemLocation
 Export-ModuleMember -Function Get-ItemFileSystemParent
+Export-ModuleMember -Function Get-ItemFileSystemSearchPath
+Export-ModuleMember -Function Get-ItemFileSystemSearchFor
+Export-ModuleMember -Function Get-ItemPropertiesDirectoryLocation

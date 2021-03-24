@@ -129,24 +129,54 @@ End { }
 }
 
 # WAS/IS: Get-Zipped-Bag-Location/Get-ZippedBagsContainer
+Function New-ZippedBagsContainer {
+Param ( [Parameter(ValueFromPipeline=$true)] $Location, [switch] $All=$false )
+
+    Begin { $KeepOn=$true }
+
+    Process {
+        $oZipDir = $null
+        If ( $KeepOn ) {
+            $sZipDir = ( $Location.FullName | Join-Path -ChildPath "ZIP" )
+            $oZipDir = ( New-Item -ItemType Directory -Path "${sZipDir}" )
+            $oZipDir ; $KeepOn = ( $All -Or ( -Not $oZipDir ) )
+        }
+    }
+
+    End { }
+
+}
+
 Function Get-ZippedBagsContainer {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ) )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ), [switch] $NoCreate=$false, [switch] $All=$false )
 
 Begin { }
 
 Process {
-    $File | Get-FileRepositoryLocation |% {
-        $sRepoDir = $_.FullName
-        $sZipDir = "${sRepoDir}\ZIP"
-        If ( -Not ( Test-Path -LiteralPath $sZipDir ) ) {
-            $oZipDir = ( New-Item -ItemType Directory -Path "${sZipDir}" )
+    # OPTION 1. Look for the nearest .coldzip location for this repository.
+    $Locations = ( $File | Get-ItemPropertiesDirectoryLocation -Name ".coldstorage" -Order Nearest -All:$All )
+
+    # OPTION 2. Look in the big collective pool for this repository.
+    $Locations = ( [array] $Locations + ( $File | Get-FileRepositoryLocation ) )
+
+    $KeepOn = $true
+    $oZipDir = $null
+    $Locations |% {
+        $Loc = $_
+        If ( $KeepOn ) {
+            $oZipDir = ( Get-ChildItem "ZIP" -LiteralPath $Loc.FullName )
+            $oZipDir
+            $KeepOn = ( $All -Or ( -Not $oZipDir ) )
         }
-        Else {
-            $oZipDir = ( Get-Item -Force -LiteralPath "${sZipDir}" )
-        }
-        $oZipDir
     }
+
+    If ( -Not $oZipDir ) {
+        If ( -Not $NoCreate ) {
+            ( $Locations | New-ZippedBagContainer )
+        }
+    }
+
 }
 
 End {
@@ -184,5 +214,6 @@ Export-ModuleMember -Function Test-ZippedBagIntegrity
 Export-ModuleMember -Function Get-ZippedBagProfessedMD5
 Export-ModuleMember -Function Get-ZippedBagNamePrefix
 Export-ModuleMember -Function Get-ZippedBagOfUnzippedBag
+Export-ModuleMember -Function New-ZippedBagsContainer
 Export-ModuleMember -Function Get-ZippedBagsContainer
 Export-ModuleMember -Function Test-ZippedBagsContainer
