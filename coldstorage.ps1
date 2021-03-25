@@ -2209,7 +2209,7 @@ Else {
             }
         }
     }
-    ElseIf ( $Verb -eq "index" ) {
+    ElseIf ( ("index", "bundle") -ieq $Verb ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
         $Words | ForEach {
             Add-IndexHTML -Directory $_ -RelativeHref -Force:$Force
