@@ -65,7 +65,7 @@ Param ( [switch] $NoClobber=$false, [switch] $ReturnObject=$false )
 }
 
 Function Get-ColdStorageSettingsFiles () {
-    $JsonDir = ( My-Script-Directory -Command $global:gColdStorageCommand ).FullName
+    $JsonDir = ( My-Script-Directory -Command $global:gColdStorageSettingsModuleCmd  ).FullName
 
     $paths = "${JsonDir}\settings.json", "${JsonDir}\settings-${env:COMPUTERNAME}.json"
     
