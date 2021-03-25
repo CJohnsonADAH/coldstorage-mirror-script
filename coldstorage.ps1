@@ -515,6 +515,15 @@ Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
         $originalLocation = ( "${Path}" | Get-MirrorMatchedItem -Original )
         Write-Warning "[Add-IndexHTML] This is a mirror-image location. Setting Location to: ${originalLocation}."
         Add-IndexHTML -Directory $originalLocation -RelativeHref:$RelativeHref -Force:$Force
+
+        $originalIndexHTML = ( Get-Item -Force -LiteralPath ( $originalLocation | Join-Path -ChildPath "index.html" ) )
+        If ( $originalIndexHTML ) {
+            If ( Test-Path -LiteralPath "${Path}" -PathType Container ) {
+                Write-Warning "[Add-IndexHTML] Copying HTML from ${originalIndexHTML} to ${Path}."
+                Copy-Item -Force:$Force -LiteralPath $originalIndexHTML -Destination "${Path}"
+            }
+        }
+
     }
     ElseIf ( Test-Path -LiteralPath "${Path}" ) {
         $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
