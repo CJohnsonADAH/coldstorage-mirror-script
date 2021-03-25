@@ -279,12 +279,13 @@ End { }
 }
 
 Function Get-ItemPackage {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $Ascend=$false, $AscendTop=$null, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
 
     Begin { }
 
     Process {
         $File = Get-FileObject($File)
+        Write-Debug ( "Entered Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
 
         If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
             Continue
@@ -337,6 +338,18 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             $aContents = @( )
             Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
         }
+        ElseIf ( $Ascend ) {
+            $aWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )
+            $Parent = ( $File | Get-ItemFileSystemParent )
+
+            If ( $Parent ) {                
+                $Top = $( If ( $AscendTop ) { $AscendTop } Else { $File | Get-FileRepositoryLocation } )
+                ( "ASCEND UP TO DIRECTORY: {0} -> {1} | {2}" -f $File.FullName,$Parent.FullName,$Top.FullName ) | Write-Verbose
+                If ( $Parent.FullName -ne $Top.FullName ) {
+                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
+                }
+            }
+        }
         Else {
             $aContents = @( )
             $aWarnings += @( "SKIPPED -- MISC: {0}" -f $File.FullName )
@@ -359,6 +372,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             }
             $Package | Write-Output
         }
+
+        Write-Debug ( "Exited Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
+
     }
 
     End { }

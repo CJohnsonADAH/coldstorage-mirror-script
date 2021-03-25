@@ -14,7 +14,9 @@ Param ( $Command, $File=$null )
 
     $Path
 }
-$global:gColdStorageCommand = $MyInvocation.MyCommand
+$global:gColdStorageSettingsModuleCmd = $MyInvocation.MyCommand
+
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gColdStorageSettingsModuleCmd -File "ColdStorageFiles.psm1" )
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
@@ -34,24 +36,31 @@ End { }
 
 
 Function Get-TablesMerged {
+Param ( [switch] $NoClobber=$false, [switch] $ReturnObject=$false )
 
     $Output = @{ }
     ForEach ( $Table in ( $Input + $Args ) ) {
         
         If ( $Table -is [Hashtable] ) {
             ForEach ( $Key in $Table.Keys ) {
-                $Output.$Key = $Table.$Key
+                If ( -Not ( $NoClobber -and $Output.ContainsKey($Key) ) ) {
+                    $Output[$Key] = $Table.$Key
+                }
             }
         }
         ElseIf ( $Table -is [Object] ) {
             $Table.PSObject.Properties | ForEach {
-                $Output."$($_.Name)" = $( $_.Value )
+                If ( -Not ( $NoClobber -and $Output.ContainsKey($_.Name) ) ) {
+                    $Output[$_.Name] = $( $_.Value )
+                }
             }
         }
 
 
     }
-    $Output
+
+
+    If ( $ReturnObject ) { [PSCustomObject] $Output } Else { $Output }
 
 }
 
@@ -115,6 +124,52 @@ Process {
 
 End { }
 
+}
+
+#############################################################################################################
+## Props Directories and JSON Files #########################################################################
+#############################################################################################################
+
+Function Get-ItemColdStoragePropsCascade {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [ValidateSet('Highest', 'Nearest', '')] [string] $Order=$null )
+
+    Begin { }
+
+    Process {
+        $File | Get-ItemPropertiesDirectoryLocation -Name ".coldstorage" -Order:$Order -All |% {
+            Get-ChildItem "*.json" -LiteralPath $_.FullName |% {
+                $Source = $_
+                $Source | Get-Content | ConvertFrom-Json |
+                    Add-Member -PassThru -MemberType NoteProperty -Name Location -Value $oFile |
+                    Add-Member -PassThru -MemberType NoteProperty -Name SourceLocation -Value ( $Source.Directory ) |
+                    Add-Member -PassThru -MemberType NoteProperty -Name Source -Value ( $Source )
+            }
+        }
+    }
+
+    End { }
+
+}
+
+Function Get-ItemColdStorageProps {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [ValidateSet('Highest', 'Nearest', '')] [string] $Order=$null, [switch] $Cascade=$false )
+
+    Begin { }
+
+    Process {
+
+        $aCascade = ( $File | Get-ItemColdStoragePropsCascade -Order:$Order )
+
+        If ( $Cascade ) {
+            $aCascade | Get-TablesMerged -NoClobber
+        }
+        Else {
+            $aCascade | Select-Object -First 1
+        }
+
+    }
+
+    End { }
 }
 
 #############################################################################################################
@@ -212,6 +267,7 @@ Export-ModuleMember -Function Get-ColdStorageSettingsDefaults
 Export-ModuleMEmber -Function Get-ColdStorageSettingsJson 
 Export-ModuleMember -Function ConvertTo-ColdStorageSettingsFilePath
 Export-ModuleMember -Function Get-JsonSettings
+Export-ModuleMember -Function Get-ItemColdStorageProps
 
 Export-ModuleMember -Function Ping-Dependency
 Export-ModuleMember -Function Ping-DependencyModule

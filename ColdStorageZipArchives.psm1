@@ -118,9 +118,10 @@ Begin { }
 Process {
     $oFile = Get-FileObject($File)
     If ( Test-BagItFormattedDirectory -File $oFile.FullName ) {
-        $Repository = ( $oFile.FullName | Get-ZippedBagsContainer )
+        $Containers = ( $oFile.FullName | Get-ZippedBagsContainer -All )
         $Prefix = ( Get-ZippedBagNamePrefix -File $oFile.FullName )
-        Get-ChildItem -Path "${Repository}\${Prefix}_z*_md5_*.zip"
+        $SearchPaths = ( $Containers.FullName | Join-Path -ChildPath "${Prefix}_z*_md5_*.zip" )
+        $SearchPaths |% { Get-ChildItem -Path $_ }
     }
 }
 

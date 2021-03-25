@@ -34,37 +34,46 @@ Process {
     If ( $oRepository ) {
         $sRepository = $oRepository.Repository
     }
-
-    Switch ( $sRepository ) {
-        'Processed' {
-            $RepositorySlug = $sRepository.ToLower()
-            "er-collections-${RepositorySlug}" | Write-Output
-        }
-        'Unprocessed' {
-            $RepositorySlug = $sRepository.ToLower()
-            "er-collections-${RepositorySlug}" | Write-Output
-        }
-        'Masters' {
-            $RepositorySlug = $sRepository.ToLower()
-            $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
-
-            If ( $ContainingDirectory | Test-ZippedBagsContainer ) {
-                Push-Location ( $oRepository.Location.FullName )
-                $Prefix = $oRepository.Prefix
-                $RelativePath = ( $oPackage.Name -replace "^${Prefix}","" )
-                Pop-Location
+    $Props = ( $oPackage | Get-ItemColdStorageProps -Order Nearest -Cascade )
+    
+    If ( $Props.ContainsKey("Bucket") ) {
+        $packageName = ( $oPackage.Name )
+        $packageSlug = ( ( $packageName.ToLower() ) -replace "[^A-Za-z0-9\-]+","-" )
+        ( $Props["Bucket"] -f $packageName,$packageSlug ) | Write-Output
+    }
+    Else {
+        Switch ( $sRepository ) {
+            'Processed' {
+                $RepositorySlug = $sRepository.ToLower()
+                "er-collections-${RepositorySlug}" | Write-Output
             }
-            Else {
-                Push-Location ( $oRepository.Location.FullName )
-                $RelativePath = ( $ContainingDirectory.FullName | Resolve-Path -Relative )
-                Pop-Location
+            'Unprocessed' {
+                $RepositorySlug = $sRepository.ToLower()
+                "er-collections-${RepositorySlug}" | Write-Output
             }
+            'Masters' {
+                $RepositorySlug = $sRepository.ToLower()
+                $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
 
-            $DirectorySlug = ( $RelativePath.ToLower() -replace "[^a-z0-9]+","-" )
-            $DirectorySlug = ( $DirectorySlug -replace "(^-+|-+$)","" )
+                If ( $ContainingDirectory | Test-ZippedBagsContainer ) {
+                    Push-Location ( $oRepository.Location.FullName )
+                    $Prefix = $oRepository.Prefix
+                    $RelativePath = ( $oPackage.Name -replace "^${Prefix}","" )
+                    Pop-Location
+                }
+                Else {
+                    Push-Location ( $oRepository.Location.FullName )
+                    $RelativePath = ( $ContainingDirectory.FullName | Resolve-Path -Relative )
+                    Pop-Location
+                }
 
-            "da-${RepositorySlug}-${DirectorySlug}" | Write-Output
+                $DirectorySlug = ( $RelativePath.ToLower() -replace "[^a-z0-9]+","-" )
+                $DirectorySlug = ( $DirectorySlug -replace "(^-+|-+$)","" )
+
+                "da-${RepositorySlug}-${DirectorySlug}" | Write-Output
+            }
         }
+
     }
 
 }

@@ -649,7 +649,7 @@ Process {
             If ( Test-ZippedBagsContainer -File $Path ) {
                 $result = $true        
             }
-            ElseIf ( $oFile | Test-ColdStorageRepositoryPropsDirectory ) {
+            ElseIf ( $oFile | Test-ColdStoragePropsDirectory ) {
                 $result = $true
             }
             ElseIf ( -Not $MirrorBaggedCopies ) {
@@ -1811,12 +1811,12 @@ Process {
                 $sZipPrefix = ( Get-ZippedBagNamePrefix -File $oFile )
 
                 $sZipName = "${sZipPrefix}_z${ts}"
-                $sArchive = "${sRepository}\${sZipName}.zip"
+                $sArchive = ( $sRepository | Join-Path -ChildPath "${sZipName}.zip" )
 
-                Write-Progress -Id 101 -Activity "Processing ${sArchiveFile}" -Status "Compressing archive" -PercentComplete 25
+                Write-Progress -Id 101 -Activity "Processing ${sArchive}" -Status "Compressing archive" -PercentComplete 25
                 Compress-Archive-7z -WhatIf:$WhatIf -LiteralPath ${sFile} -DestinationPath ${sArchive}
 
-                Write-Progress -Id 101 -Activity "Processing ${sArchiveFile}" -Status "Computing MD5 checksum" -PercentComplete 50
+                Write-Progress -Id 101 -Activity "Processing ${sArchive}" -Status "Computing MD5 checksum" -PercentComplete 50
                 If ( -Not $WhatIf ) {
                     $md5 = $( Get-FileHash -LiteralPath "${sArchive}" -Algorithm MD5 ).Hash.ToLower()
                 }
@@ -1828,10 +1828,10 @@ Process {
                     $stream.Position = 0
                     $md5 = $( Get-FileHash -InputStream $stream ).Hash.ToLower()
                 }
-                Write-Progress -Id 101 -Activity "Processing ${sArchiveFile}" -Status "Computing MD5 checksum" -PercentComplete 100 -Complete
+                Write-Progress -Id 101 -Activity "Processing ${sArchive}" -Status "Computing MD5 checksum" -PercentComplete 100 -Complete
 
                 $sZipHashedName = "${sZipName}_md5_${md5}"
-                $sArchiveHashed = "${sRepository}\${sZipHashedName}.zip"
+                $sArchiveHashed = ( $sRepository | Join-Path -ChildPath "${sZipHashedName}.zip" )
 
                 If ( -Not $WhatIf ) {
                     Move-Item -WhatIf:$WhatIf -LiteralPath $sArchive -Destination $sArchiveHashed
@@ -2296,9 +2296,16 @@ Else {
         Get-ColdStorageSettings -Name $Words
     }
     ElseIf ( $Verb -eq "test" ) {
-        
-        If ( $Dependencies ) {
+        $Object,$Words = $Words
+
+        If ( ( "dependencies" -eq $Object ) -Or $Dependencies ) {
             Invoke-TestDependencies -Bork:${Bork} | Format-Table
+        }
+        ElseIf ( "zip" -eq $Object ) {
+            $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
+                $File = Get-FileObject -File $_
+                [PSCustomObject] @{ "File"=($File.FullName); "Prefix"=($File | Get-ZippedBagNamePrefix ); "Container"=($File | Get-ZippedBagsContainer).FullName }
+            }
         }
 
     }
@@ -2311,7 +2318,7 @@ Else {
     ElseIf ( $Verb -eq "zipname" ) {
         $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $File = Get-FileObject -File $_
-            "FILE:", $File.FullName, "PREFIX:", ($File | Get-ZippedBagNamePrefix )
+            [PSCustomObject] @{ "File"=($File.FullName); "Prefix"=($File | Get-ZippedBagNamePrefix ); "Container"=($File | Get-ZippedBagsContainer).FullName }
         }
     }
     ElseIf ( $Verb -eq "ripe" ) {

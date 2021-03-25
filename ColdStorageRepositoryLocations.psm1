@@ -348,6 +348,26 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [switch] $Force = $f
     }
 }
 
+Function Test-ColdStoragePropsDirectory {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $NoPackageTest=$false, [switch] $ShowWarnings=$false )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+
+        $result = $false
+        If ( $oFile.Name -eq ".coldstorage" ) {
+            $Packed = $( If ( $NoPackageTest ) { $null } Else { $oFile | Get-ItemPackage -Ascend -ShowWarnings:$ShowWarnings } )
+            $result = ( -Not $Packed )
+        }
+
+        $result | Write-Output
+    }
+
+    End { }
+}
+
 Function Test-ColdStorageRepositoryPropsDirectory {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
@@ -582,6 +602,7 @@ Export-ModuleMember -Function Get-FileRepositoryLocation
 Export-ModuleMember -Function Get-FileRepositoryProps
 Export-ModuleMember -Function Get-ColdStorageRepositoryDirectoryProps
 Export-ModuleMember -Function New-ColdStorageRepositoryDirectoryProps
+Export-ModuleMember -Function Test-ColdStoragePropsDirectory
 Export-ModuleMember -Function Test-ColdStorageRepositoryPropsDirectory
 Export-ModuleMember -Function Test-ColdStorageRepositoryPropsFile
 Export-ModuleMember -Function Get-MirrorMatchedItem
