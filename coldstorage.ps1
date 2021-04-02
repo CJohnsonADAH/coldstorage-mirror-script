@@ -528,7 +528,7 @@ Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
     ElseIf ( Test-Path -LiteralPath "${Path}" ) {
         $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
 
-        $indexHtmlPath = "${UNC}\index.html"
+        $indexHtmlPath = ( "${UNC}" | Join-Path -ChildPath "index.html" )
 
         If ( Test-Path -LiteralPath "${indexHtmlPath}" ) {
             If ( $Force) {
