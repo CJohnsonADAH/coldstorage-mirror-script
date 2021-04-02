@@ -2152,8 +2152,21 @@ Else {
     }
     ElseIf ( $Verb -eq "check" ) {
         $N = ( $Words.Count )
-
-        Invoke-ColdStorageRepositoryCheck -Pairs $Words
+        If ( $Items ) {
+            $Words |% {
+                $File = Get-FileObject($_)
+                If ( $File ) {
+                    $Pair = ($_ | Get-FileRepositoryName)
+                    Invoke-ColdStorageDirectoryCheck -Pair:$Pair -From:$File.FullName -To:$File.FullName -Batch:$Batch
+                }
+                Else {
+                    ( "Item Not Found: {0}" -f $_ ) | Write-Warning
+                }
+            }
+        }
+        Else {
+            Invoke-ColdStorageRepositoryCheck -Pairs $Words
+        }
     }
     ElseIf ( $Verb -eq "validate" ) {
         $N = ( $Words.Count )
@@ -2326,10 +2339,30 @@ Else {
 
     }
     ElseIf ( $Verb -eq "repository" ) {
-        $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
+        If ( $Items -Or ( -Not $Repository ) ) {
+            $aItems = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )            
+        }
+        Else {
+            $aItems = @( )
+            $Words | ForEach {
+                $Term = $_
+                If ( Test-Path -LiteralPath $Term ) {
+                    $aItems += , $Term
+                }
+                Else {
+                    $repo = Get-ColdStorageRepositories -Repository:$Term -Tag
+                    If ( $repo.Locations ) {
+                        $aItems += , $repo.Locations.ColdStorage
+                    }
+                }
+            }
+        }
+
+        $aItems | ForEach {
             $File = Get-FileObject -File $_
             @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
         }
+
     }
     ElseIf ( $Verb -eq "zipname" ) {
         $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
