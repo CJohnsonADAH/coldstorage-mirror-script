@@ -84,6 +84,22 @@ End { }
 
 }
 
+Function Get-ADPNetReportFileName {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        $sRemotePath = ( $oFile | Get-ADPNetStartDir )
+
+        ( "{0}.au.txt" -f $sRemotePath ) | Write-Output
+    }
+
+    End { }
+
+}
+
 Function Get-ADPNetStartURL {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Parameterize=$false )
 
@@ -463,6 +479,30 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [string] $Output="Text" )
             $group4 | Write-ADPNetAUReportKeyValuePair -Value:$jsonPacket
             ""
         }
+    }
+
+    End { }
+
+}
+
+Function Add-ADPNetAUReport {
+Param ( [Parameter(ValueFromPipeline=$true)] $AU, $LocalFolder, $WhatIf )
+
+    Begin { }
+
+    Process {
+        $TempFile = New-TemporaryFile
+
+        $AU | Write-ADPNetAUReport | Out-File -LiteralPath $TempFile.FullName -Encoding utf8
+        $AU | Write-ADPNetAUUrlRetrievalTest | Out-File -LiteralPath $TempFile.FullName -Append -Encoding utf8
+
+        # Upload output to SFTP repository with an appropriate file name, to be pulled down on the preservation node.
+        $TempFile | Set-DropServerAUReport -LocalFolder:$LocalFolder -WhatIf:$WhatIf
+
+        # Tee output also to standard output for user reference, possible redirection
+        Get-Content -LiteralPath $TempFile.FullName | Write-Output
+
+        Remove-Item $TempFile
     }
 
     End { }
@@ -911,6 +951,84 @@ End {
 
 }
 
+Function Set-DropServerAUReport {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $LocalFolder, [switch] $WhatIf=$false )
+
+    Begin { $session = ( New-DropServerSession ) }
+
+    Process {
+
+        $oFile = ( Get-FileObject -File $File )
+        $sFile = $oFile.FullName
+
+        $oFolder = ( Get-FileObject -File $LocalFolder )
+        $sFolder = $oFolder.FullName
+
+        If ( $session ) {
+
+            $RemoteRoot = "/drop_au_content_in_here"
+            Set-SFTPLocation -SessionId $session.SessionId -Path "${RemoteRoot}"
+
+            $RemoteDestination = ( $oFolder | Get-ADPNetReportFileName )
+            If ( $Force -Or ( -Not ( Test-SFTPPath -SFTPSession:$session -Path:$RemoteDestination ) ) ) {
+                Write-Verbose "[adpnet:$RemoteDestination] not yet staged; add local copy"
+                $oFile | Add-DropServerAUReport -LocalFolder:$LocalFolder -SFTPSession:$session -WhatIf:$WhatIf
+            }
+            Else {
+                # Already uploaded; throw a warning
+                Write-Warning "[adpnet:$RemoteDestination] already exists; use -Force to overwrite"
+            }
+        }
+        Else {
+
+            Write-Warning "[adpnet:$sFolder]: SFTP connection failed -- could not upload AU report."
+            Write-Error $session
+
+        }
+
+            
+    }
+
+    End {
+        If ( $session ) {
+            $removed = ( Remove-SFTPSession -SessionId $session.SessionId )
+        }
+    }
+
+}
+
+Function Add-DropServerAUReport {
+    Param ( [Parameter(ValueFromPipeline=$true)] $ReportFile, $LocalFolder, $SFTPSession, $RemoteRepository=$null, [switch] $WhatIf=$false )
+
+    Begin {
+    
+        If ( $RemoteRepository -eq $null ) {
+            $RemoteRepository = Get-SFTPLocation -SFTPSession:$SFTPSession
+        }
+
+    }
+
+    Process {
+        $oLocalFolder = Get-FileObject($LocalFolder)
+        $sLocalFullName = $oLocalFolder.FullName
+        $sRemotePath = ("{0}/{1}" -f $RemoteRepository,( $oLocalFolder | Get-ADPNetReportFileName ))
+
+        $oReportFile = Get-FileObject($ReportFile)
+        $sReportFile = $oReportFile.FullName
+
+        If ( -Not $WhatIf ) {
+            $Item = ( New-SFTPItem -SFTPSession:$SFTPSession -Path:$sRemotePath -ItemType:File )
+            $Content = ( Set-SFTPContent -SFTPSession:$SFTPSession -Path:($Item.FullName) -Value:( Get-Content -Raw -LiteralPath $sReportFile ) )
+        }
+        Else {
+            ( "WhatIf: {0} -SFTPSession:{1} -Path:{2} -Destination:{3}" -f "Set-SFTPItem",$SFTPSession,$sLocalFullName,$sRemotePath )
+        }
+    }
+
+    End { }
+
+}
+
 Function Add-DropServerAU {
     Param ( [Parameter(ValueFromPipeline=$true)] $LocalFolder, $SFTPSession, $RemoteRepository, [switch] $WhatIf=$false )
 
@@ -1292,3 +1410,7 @@ Export-ModuleMember -Function Get-ADPNetPlugins
 Export-ModuleMember -Function Get-ADPNetPluginDetails
 Export-ModuleMember -Function Sync-ADPNetPluginsPackage 
 Export-ModuleMember -Function Expand-ADPNetPlugin
+
+Export-ModuleMember -Function Add-ADPNetAUReport
+Export-ModuleMember -Function Get-ADPNetReportFileName
+Export-ModuleMember -Function Set-DropServerAUReport

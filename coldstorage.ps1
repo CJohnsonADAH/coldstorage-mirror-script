@@ -1916,8 +1916,7 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
         }
         
         $AU = ( $What | Get-ADPNetAUTable )
-        $AU | Write-ADPNetAUReport
-        $AU | Write-ADPNetAUUrlRetrievalTest
+        $AU | Add-ADPNetAUReport -LocalFolder:$What
 
     }
     Else {
