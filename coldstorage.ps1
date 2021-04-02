@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0324
+@version 2021.0401
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -2185,6 +2185,14 @@ Else {
         $N = ( $Words.Count )
         If ( $Items ) {
             $Words | Get-Item -Force |% { Write-Verbose ( "CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Rebag
+        }
+    }
+    ElseIf ( $Verb -eq "unbag" ) {
+        If ( $Items ) {
+            $Words | Get-Item -Force | Undo-CSBagPackage
+        }
+        Else {
+            Write-Warning "[$sVerbWithCommandName] Not currently implemented for repositories. Use -Items [File1] [File2] ..."
         }
     }
     ElseIf ( $Verb -eq "zip" ) {

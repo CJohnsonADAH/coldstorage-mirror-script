@@ -278,6 +278,74 @@ Process {
 End { }
 }
 
+Function Undo-CSBagPackage {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($Package)
+        If ( $oFile ) {
+
+            If ( Test-BagItFormattedDirectory -File $oFile ) {
+                
+                $PayloadDirectory = ( $oFile | Select-BagItPayloadDirectory )
+                If ( Test-BaggedCopyOfLooseFile -File $oFile -DiffLevel 2 ) {
+                    Remove-Item -LiteralPath $oFile.FullName -Recurse -Force
+                }
+                Else {
+                    $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
+                    $sDate = ($Dates[0])
+                    $OldManifest = ( $oFile.FullName | Join-Path -ChildPath "bagged-${sDate}" )
+                    $oManifest = ( New-Item -Path $OldManifest -ItemType Directory )
+
+                    Get-ChildItem -LiteralPath $oFile |% {
+                        $BagItem = $_
+                        If ( $BagItem.FullName -eq $PayloadDirectory.FullName ) {
+                            # 1st pass - skip
+                        }
+                        ElseIf ( $BagItem.FullName -eq $oManifest.FullName ) {
+                            # 1st pass - mark Hidden
+                            $BagItem.Attributes = ( $BagItem.Attributes -bor [System.IO.FileAttributes]::Hidden )
+                        }
+                        Else {
+                            # 1st pass - move to old manifest directory
+                            Move-Item -LiteralPath $_.FullName -Destination $oManifest.FullName
+                        }
+
+                    }
+
+                    Get-ChildItem -LiteralPath $oFile |% {
+                        $BagItem = $_
+                        If ( $BagItem.FullName -eq $PayloadDirectory.FullName ) {
+                            # 2nd pass - empty payload contents into parent directory and remove data directory
+                            Get-ChildItem -LiteralPath $BagItem.FullName |% {
+                                Move-Item -LiteralPath $_.FullName -Destination $oFile
+                            }
+                            Remove-Item -LiteralPath $BagItem.FullName
+                        }
+                    }
+
+                }
+
+            }
+            Else {
+
+                Write-Warning ( "Undo-CSBagPackage: Not a BagIt-formatted directory: {0}" -f $oFile.FullName )
+
+            }
+
+        }
+        Else {
+            Write-Warning ( "Undo-CSBagPackage: Unrecognized file: {0}" -f $Package )
+        }
+
+    }
+
+    End { }
+}
+
+
 Function Get-ItemPackage {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $Ascend=$false, $AscendTop=$null, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
 
@@ -472,6 +540,7 @@ Export-ModuleMember -Function Get-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
 Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
+Export-ModuleMember -Function Undo-CSBagPackage
 Export-ModuleMember -Function Test-ERInstanceDirectory
 Export-ModuleMember -Function Select-ERInstanceDirectories
 Export-ModuleMember -Function Get-ERInstanceData
