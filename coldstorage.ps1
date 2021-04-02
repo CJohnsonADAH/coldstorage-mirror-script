@@ -2517,8 +2517,11 @@ Else {
         Do-Bleep-Bloop
     }
     ElseIf ( $Verb -eq "echo" ) {
-        "VERB:", $Verb
-        "WORDS:", $Words
+        $aFlags = $MyInvocation.BoundParameters
+        "Verb", "Words" |% { $aFlags.Remove($_) }
+
+        $oEcho = @{ "FLAGS"=( $MyInvocation.BoundParameters ); "WORDS"=( $Words ); "VERB"=( $Verb ) }
+        [PSCustomObject] $oEcho | Format-Table 'VERB', 'WORDS', 'FLAGS'
     }
     Else {
         Do-Write-Usage -cmd $MyInvocation.MyCommand
