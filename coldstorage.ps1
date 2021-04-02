@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0401
+@version 2021.0401-1100
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -21,6 +21,8 @@ coldstorage validate: Validate BagIt-formatted preservation packages or cloud st
 #>
 param (
     [Parameter(Position=0)] [string] $Verb,
+    [switch] $Development = $false,
+    [switch] $Production = $false,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
     [switch] $Diff = $false,
@@ -59,6 +61,79 @@ $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 # coldstorage
 #
 # Last-Modified: 24 March 2021
+
+Function Test-CSDevelopmentBranchDir {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
+
+    Process {
+        ( $Item.Name -like "*-development" )
+    }
+
+}
+Function Get-CSProductionBranchDirName {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
+
+    Process {
+        $Item.Parent.FullName | Join-Path -ChildPath ( $Item.Name -replace "-development$", "" )
+    }
+
+}
+Function Get-CSDevelopmentBranchDirName {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
+
+    Process {
+        $Item.Parent.FullName | Join-Path -ChildPath ( "{0}-development" -f $ScriptHomeName )
+    }
+
+}
+
+Function Get-CSProductionBranchDir {
+Param ( $File=$null )
+
+    $ScriptPath = Get-Item -Force -LiteralPath ( Split-Path -Parent $PSCommandPath )
+    $ScriptPath = $( If ($ScriptPath | Test-CSDevelopmentBranchDir) { $ScriptPath | Get-CSProductionBranchDirName } Else { $ScriptPath.FullName } )
+
+    If ( $File -ne $null ) {
+        ( Get-Item -Force -LiteralPath ( $ScriptPath | Join-Path -ChildPath $File ) )
+    }
+    Else {
+        ( Get-Item -Force -LiteralPath ( $ScriptPath ) )
+    }
+
+}
+
+Function Get-CSDevelopmentBranchDir {
+Param ( $File=$null )
+
+    $ScriptPath = Get-Item -Force -LiteralPath ( Split-Path -Parent $PSCommandPath )
+    $ScriptPath = $( If ($ScriptPath | Test-CSDevelopmentBranchDir) { $ScriptPath.FullName } Else { $ScriptPath | Get-CSDevelopmentBranchDirName } )
+
+    If ( $File -ne $null ) {
+        ( Get-Item -Force -LiteralPath ( $ScriptPath | Join-Path -ChildPath $File ) )
+    }
+    Else {
+        ( Get-Item -Force -LiteralPath ( $ScriptPath ) )
+    }
+
+}
+
+# Do we need to hand off control to an alternate branch of the script?
+If ( $Development -or $Production ) {
+    $ps1 = $( If ($Development) { ( Get-CSDevelopmentBranchDir -File ( Split-Path -Leaf $PSCommandPath ) ) } Else { ( Get-CSProductionBranchDir -File ( Split-Path -Leaf $PSCommandPath ) ) } )
+    $Branch = $( If ( $Development ) { "Development" } Else { "Production" } )
+    If ( $ps1 ) {
+
+        $aParameters = $MyInvocation.BoundParameters
+        $aParameters[$Branch] = $False
+        Write-Warning ( "[{0}] Invoking the {1} branch {2}" -f  $MyInvocation.MyCommand.Name, $Branch, $ps1.FullName )
+        & ( "{0}" -f $ps1.FullName ) @aParameters
+       
+    }
+    Else {
+        Write-Warning ( "[{0}] Could not find {1} branch for {2}" -f $MyInvocation.MyCommand.Name, $Branch, $PSCommandPath )
+    }
+    Exit
+}
 
 Function ColdStorage-Script-Dir {
 Param ( $File=$null )
