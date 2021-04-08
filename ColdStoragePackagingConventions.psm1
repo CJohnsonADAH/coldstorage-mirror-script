@@ -18,8 +18,119 @@ Param ( $Command, $File=$null )
 $global:gPackagingConventionsCmd = $MyInvocation.MyCommand
 
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageFiles.psm1" )
+Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageScanFilesOK.psm1" )
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageRepositoryLocations.psm1" )
+
+#############################################################################################################
+## PUBLIC FUNCTIONS: PIPELINE FOR PACKAGING #################################################################
+#############################################################################################################
+
+Function Select-CSPackagesOK {
+
+    [Cmdletbinding()]
+
+param (
+    [Switch]
+    $Quiet,
+
+    [String]
+    $Exclude="^$",
+
+    [Switch]
+    $Force=$false,
+
+    [Switch]
+    $Rebag=$false,
+
+    [Int[]]
+    $OKCodes=@( 0 ),
+
+    [Int[]]
+    $ContinueCodes=@( 0 ),
+
+    [String[]]
+    $Skip=@( ),
+
+    [Switch]
+    $ShowWarnings=$false,
+
+    [Parameter(ValueFromPipeline=$true)]
+    $File
+)
+
+    Begin {
+        if ( $Exclude.Length -eq 0 ) {
+            $Exclude = "^$"
+        }
+    }
+
+    Process {
+        $ToScan = @()
+
+        $Anchor = $PWD
+
+        $DirName = $File.FullName
+        $BaseName = $File.Name
+
+        If ( Test-ERInstanceDirectory($File) ) {
+            $ERMeta = ( $File | Get-ERInstanceData )
+            $ERCode = $ERMeta.ERCode
+        }
+        Else {
+            $ERCode = $null
+        }
+
+        If ( Test-BagItFormattedDirectory($File) ) {
+            #FIXME: Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "BagIt formatted directory" -ERCode:$ERCode -Verbose -Line ( Get-CurrentLine )
+            
+            # Pass it thru iff we have requested rebagging
+            If ( $Rebag ) { $ToScan += , $File }
+        }
+        ElseIf ( Test-ERInstanceDirectory($File) ) {
+            If ( -not ( $BaseName -match $Exclude ) ) {
+                $ERMeta = ( $File | Get-ERInstanceData )
+                $ERCode = $ERMeta.ERCode
+
+                # chdir $DirName
+
+                if ( Test-BagItFormattedDirectory($File) ) {
+                    # FIXME: Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                }
+                else {
+                    # FIXME: Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+                    $ToScan += , $File
+                }
+            }
+            Else {
+                # FIXME: Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+            }
+
+            # chdir $Anchor
+        }
+        ElseIf ( Test-IndexedDirectory($File) ) {
+            # FIXME: Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
+            $ToScan += , $File
+        }
+        Else {
+            Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
+                If ( Test-UnbaggedLooseFile($_) ) {
+                    $LooseFile = $_.Name
+                    # FIXME: Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
+
+                    $ToScan += , $_
+                }
+                Else {
+                    # FIXME: Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
+                }
+            }
+        }
+        $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings | Write-Output
+    }
+
+    End {
+    }
+}
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
@@ -529,6 +640,7 @@ Process {
 End { }
 }
 
+Export-ModuleMember -Function Select-CSPackagesOK
 Export-ModuleMember -Function Test-IndexedDirectory
 Export-ModuleMember -Function Test-BaggedIndexedDirectory
 Export-ModuleMember -Function Test-ZippedBag

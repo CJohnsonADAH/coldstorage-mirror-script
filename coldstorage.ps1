@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0401-1100
+@version 2021.0408-1446
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -163,6 +163,7 @@ Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Scr
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageScanFilesOK.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
@@ -225,19 +226,45 @@ End { }
 }
 
 Function Shall-We-Continue {
-Param ( [Parameter(ValueFromPipeline=$true)] $ExitCode )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ) )
 
 Begin { $result = $true }
 
 Process {
-    If ( $ExitCode -gt 0 ) {
-        $ShouldWeContinue = Read-Host "Exit Code ${ExitCode}, Continue (Y/N)? "
+    $ExitCode = $null
+
+    If ( $Item | Get-Member -MemberType NoteProperty -Name CSScannedOK ) {
+        $ErrorCodes = ( $Item | Get-CSScannedFilesErrorCodes )
     }
-    Else {
-        $ShouldWeContinue = "Y"
+    ElseIf ( ( $Item -is [Int] ) -or ( $Item -is [Long] ) -or ( $Item -is [Array] ) ) {
+    # Singleton, treat as an ExitCode, with default convention 0=OK, 1..255=Error
+        $ErrorCodes = ( $Item |% { $ExitCode=$_ ; $ok = ( $OKCodes -eq $ExitCode ) ; If ( $ok.Count -eq 0 ) { [PSCustomObject] @{ "ExitCode"=$ExitCode; "OK"=$OKCodes } } } )
     }
 
-    $result = ( $result -and ( $ShouldWeContinue -eq "Y" ) )
+    $ShouldWeContinue = "Y"
+    $ErrorCodes |% {
+        $Error = $_
+        If ( $Error ) {
+            $ExitCode = $Error.ExitCode
+            $Tag = $( If ( $Error.Tag ) { "[{0}] " -f $Error.Tag } Else { "" } )
+            
+            $Mesg = ( "{0}Exit Code {1:N0}" -f $Tag, $ExitCode )
+            If ( $result ) {
+                If ( $Force ) {
+                    ( "{0}; continuing anyway due to -Force flag" -f $Mesg ) | Write-Warning
+                    $ShouldWeContinue = "Y"
+                }
+                Else {
+                    $ShouldWeContinue = ( Read-Host ( "{0}. Continue (Y/N)? " -f $Mesg ) )
+                }
+            }
+            Else {
+                ( "{0}; stopped due to user input." -f $Mesg ) | Write-Warning
+            }
+
+            $result = ( $result -and ( $ShouldWeContinue -eq "Y" ) )
+        }
+    }
 }
 
 End { $result }
@@ -1229,6 +1256,15 @@ param (
     [Switch]
     $Rebag=$false,
 
+    [String[]]
+    $Skip=@( ),
+
+    [switch]
+    $Force=$false,
+
+    [switch]
+    $Bundle=$false,
+
     [Parameter(ValueFromPipeline=$true)]
     $File
 )
@@ -1332,8 +1368,7 @@ param (
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
             Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
-
-            If ( $File.FullName | Do-Scan-ERInstance | Shall-We-Continue ) {
+            If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                 Do-Bag-Directory -DIRNAME $File.FullName
             }
         }
@@ -1652,15 +1687,15 @@ End {
 
 }
 
-function Do-Bag-Repo-Dirs ($Pair, $From, $To) {
+function Do-Bag-Repo-Dirs ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false) {
     $Anchor = $PWD 
 
     chdir $From
-    dir -Attributes Directory | Do-Clear-And-Bag -Quiet -Exclude $null
+    dir -Attributes Directory | Do-Clear-And-Bag -Quiet -Exclude $null -Skip:$Skip -Force:$Force
     chdir $Anchor
 }
 
-function Do-Bag ($Pairs=$null) {
+function Do-Bag ($Pairs=$null, $Skip=@(), [switch] $Force=$false ) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     if ( $Pairs.Count -lt 1 ) {
@@ -1677,7 +1712,7 @@ function Do-Bag ($Pairs=$null) {
         $src = $locations[2]
         $dest = $locations[1]
 
-        Do-Bag-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}"
+        Do-Bag-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force
         $i = $i + 1
     }
 }
@@ -2255,23 +2290,28 @@ Else {
     }
     ElseIf ( $Verb -eq "bag" ) {
         $N = ( $Words.Count )
+        $SkipScan = @( )
+        If ( $NoScan ) {
+            $SkipScan = @( "clamav" )
+        }
 
         If ( $Items ) {
             If ( $Recurse ) {
-                $Words | Get-Item -Force |% { Write-Verbose ( "CHECK: " + $_.FullName ) ; Get-Unbagged-ChildItem -LiteralPath $_.FullName } | Do-Clear-And-Bag 
+                $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; Get-Unbagged-ChildItem -LiteralPath $_.FullName } | Do-Clear-And-Bag -Skip:$SkipScan -Force:$Force -Bundle:$Bundle
             }
             Else {
-                $Words | Get-Item -Force |% { Write-Verbose ( "CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag 
+                $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Skip:$SkipScan -Force:$Force -Bundle:$Bundle
             }
         }
         Else {
-            Do-Bag -Pairs $Words
+            Do-Bag -Pairs $Words -Skip:$SkipScan -Force:$Force
         }
+
     }
     ElseIf ( $Verb -eq "rebag" ) {
         $N = ( $Words.Count )
         If ( $Items ) {
-            $Words | Get-Item -Force |% { Write-Verbose ( "CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Rebag
+            $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Rebag
         }
     }
     ElseIf ( $Verb -eq "unbag" ) {
