@@ -33,6 +33,7 @@ param (
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $NoScan = $false,
+    [switch] $Bundle = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
     [switch] $Unbagged = $false,
@@ -1287,6 +1288,16 @@ param (
         }
         Else {
             $ERCode = $null
+        }
+
+        If ( $Bundle ) {
+            If ( Test-Path -LiteralPath $DirName -PathType Container ) {
+                If ( -Not ( Test-BagItFormattedDirectory($File) ) ) {
+                    If ( -Not ( Test-IndexedDirectory($File) ) ) {
+                        Add-IndexHTML -Directory $DirName -RelativeHref
+                    }
+                }
+            }
         }
 
         If ( Test-BagItFormattedDirectory($File) ) {
