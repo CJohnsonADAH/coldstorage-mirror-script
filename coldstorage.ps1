@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0408-1446
+@version 2021.0409
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -58,10 +58,6 @@ $RipeDays = 7
 
 $Verbose = ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent )
 $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
-
-# coldstorage
-#
-# Last-Modified: 24 March 2021
 
 Function Test-CSDevelopmentBranchDir {
 Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
@@ -1389,7 +1385,7 @@ param (
                     $LooseFile = $_.Name
                     Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
-                    if ( $_.FullName | Do-Scan-ERInstance | Shall-We-Continue ) {
+                    if ( $_ | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                         Do-Bag-Loose-File -LiteralPath $_.FullName
                     }
                 }
