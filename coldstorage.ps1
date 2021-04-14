@@ -964,10 +964,35 @@ function Sync-Metadata ($from, $to, $verbose) {
     }
 }
 
-Function Do-Mirror-Clean-Up-Obsolete-Files {
-Param ($From, $To, $Trashcan, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $NewProgressId=0)
+Function Remove-ItemToTrash {
+Param ( [Parameter(ValueFromPipeline=$true)] $From)
 
-    $aDirs = Get-ChildItem -Directory -LiteralPath "$To"
+    Begin { }
+
+    Process {
+        $From = Get-FileLiteralPath($From)
+        $To = ($From | Get-MirrorMatchedItem -Trashcan -IgnoreBagging)
+
+        ( "Move-Item -LiteralPath {0} -Destination {1} -Force" -f $From, $To ) | Write-Verbose
+
+        $TrashContainer = ( $To | Split-Path -Parent )
+        If ( -Not ( Test-Path -LiteralPath $TrashContainer ) ) {
+            New-Item -ItemType Directory -Path $TrashContainer -Force
+        }
+
+        Move-Item -LiteralPath $From -Destination $To -Force
+    }
+
+    End { }
+
+}
+
+Function Remove-MirroredFilesWhenObsolete {
+Param ($From, $To, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $NewProgressId=0)
+
+    ( "[mirror] Remove-MirroredFilesWhenObsolete -From:{0} -To:{1} -Batch:{2} -Depth:{3} -ProgressId:{4} -NewProgressId:{5}" -f $From, $To, $Batch, $Depth, $ProgressId, $NewProgressId ) | Write-Debug
+
+    $aDirs = Get-ChildItem -LiteralPath "$To"
     $N = $aDirs.Count
     $aDirs | Get-Unmatched-Items -Match "$From" -DiffLevel 0 -OnConsider {
         Param($File, $Candidate, $DiffLevel, $I);
@@ -978,17 +1003,11 @@ Param ($From, $To, $Trashcan, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $
 
         $BaseName = $_.Name
         $MoveFrom = $_.FullName
-        $MoveTo = ($_ | Rebase-File -To $Trashcan)
-
         If ( -Not ( $_ | Test-UnmirroredDerivedItem ) ) {
-            "Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force"
-            If ( -Not ( Test-Path -LiteralPath $Trashcan ) ) {
-                mkdir $Trashcan
-            }
-            Move-Item -LiteralPath $MoveFrom -Destination $MoveTo -Force
+            $MoveFrom | Remove-ItemToTrash
         }
         ElseIf ( $Verbose ) {
-            Write-Warning "SKIPPED (UNMIRRORED DERIVED ITEM): [${MoveFrom}]"
+            "[mirror:Remove-MirroredFilesWhenObsolete] SKIPPED (UNMIRRORED DERIVED ITEM): [${MoveFrom}]" | Write-Verbose
         }
     }
     If ( -Not $Batch ) {
@@ -998,7 +1017,7 @@ Param ($From, $To, $Trashcan, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $
 }
 
 Function Do-Mirror-Directories {
-Param ($From, $to, $Trashcan, $DiffLevel=1, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $NewProgressId=0)
+Param ($From, $to, $DiffLevel=1, [switch] $Batch=$false, $Depth=0, $ProgressId=0, $NewProgressId=0)
     $aDirs = @( )
     If ( Test-Path -LiteralPath "$From" ) {
         $aDirs = Get-ChildItem -Directory -LiteralPath "$From"
@@ -1026,7 +1045,7 @@ Param ($From, $to, $Trashcan, $DiffLevel=1, [switch] $Batch=$false, $Depth=0, $P
 }
 
 Function Do-Mirror-Files {
-Param ($From, $To, $Trashcan, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
+Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $ProgressId=0, $NewProgressId=0)
 
     $i = 0
     $aFiles = @( )
@@ -1097,7 +1116,9 @@ Param( $From, $To, $ProgressId, $NewProgressId, [switch] $Batch=$false )
     }
 }
 
-function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Batch=$false) {
+Function Sync-MirroredFiles {
+Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
+
     $IdBase = (10 * $Depth)
     If ($Depth -gt 0) {
         $RootedIdBase = 0
@@ -1108,6 +1129,12 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Bat
 
     $sActScanning = "Scanning contents: [${From}]"
     $sStatus = "*.*"
+
+    If ( -Not ( Test-Path -LiteralPath "${To}" ) ) {
+        $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found." -f $global:gCSSCriptName, $To )
+        Write-Error $ErrMesg
+        Return
+    }
 
     $sTo = $To
     If (Test-BagItFormattedDirectory -File $To) {
@@ -1124,7 +1151,7 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Bat
     If ( -Not $Batch ) {
         Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (rm)" -percentComplete 0
     }
-    Do-Mirror-Clean-Up-Obsolete-Files -From $From -To $To -Trashcan $Trashcan -Batch:$Batch -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
+    Remove-MirroredFilesWhenObsolete -From $From -To $To -Batch:$Batch -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## COPY OVER (mkdir): Create child directories on destination to mirror subdirectories of source. ################
@@ -1133,7 +1160,7 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Bat
     If ( -Not $Batch ) {
         Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (mkdir)" -percentComplete 20
     }
-    Do-Mirror-Directories -From $From -To $To -Trashcan $Trashcan -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
+    Do-Mirror-Directories -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
@@ -1142,7 +1169,7 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Bat
     If ( -Not $Batch ) {
         Write-Progress -Id ($RootedIdBase + 2) -Activity $sActScanning -Status "${sStatus} (cp)" -percentComplete 40
     }
-    Do-Mirror-Files -From $From -To $To -Trashcan $Trashcan -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
+    Do-Mirror-Files -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth -ProgressId $RootedIdBase -NewProgressId $IdBase
 
     ##################################################################################################################
     ## METADATA: Synchronize source file system meta-data to destination #############################################
@@ -1172,13 +1199,12 @@ function Do-Mirror ($From, $To, $Trashcan, $DiffLevel=1, $Depth=0, [switch] $Bat
         $BaseName = $_.Name
         $MirrorFrom = $_.FullName
         $MirrorTo = ($_ | Rebase-File -To "${To}")
-        $MirrorTrash = ($_ | Rebase-File -To "${Trashcan}")
 
         $i = $i + 1
         If ( -Not $Batch ) {
             Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Status "${BaseName}" -percentComplete (100*$i / $N)
         }
-        Do-Mirror -From "${MirrorFrom}" -To "${MirrorTo}" -Trashcan "${MirrorTrash}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch
+        Sync-MirroredFiles -From "${MirrorFrom}" -To "${MirrorTo}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch
     }
     If ( -Not $Batch ) {
         Write-Progress -Id ($RootedIdBase + 2) -Activity "Recursing into subdirectories [${From}]" -Completed
@@ -1206,14 +1232,9 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
             $slug = $locations[0]
             $src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
             $dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
-            $TrashcanLocation = ( $Pair | Get-ColdStorageTrashLocation )
-
-            if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
-                mkdir "${TrashcanLocation}"
-            }
 
             Write-Progress -Id 1138 -Activity "Mirroring between ADAHFS servers and ColdStorage" -Status "Location: ${Pair}" -percentComplete ( 100 * $i / $N )
-            Do-Mirror -From "${src}" -To "${dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel -Batch:$Batch
+            Sync-MirroredFiles -From "${src}" -To "${dest}" -DiffLevel $DiffLevel -Batch:$Batch
         } else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
@@ -1374,6 +1395,11 @@ param (
             chdir $Anchor
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
+            #$ToScanAndBag += , [PSCustomObject] @{
+            #    "Message"=@{ "FileName"=$File.Name; "Message"="indexed directory. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
+            #    "File"=$File.FullName;
+            #    "Method"="Do-Bag-Directory"
+            #}
             Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
             If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                 Do-Bag-Directory -DIRNAME $File.FullName
@@ -1383,6 +1409,12 @@ param (
             Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
                 If ( Test-UnbaggedLooseFile($_) ) {
                     $LooseFile = $_.Name
+                    #$ToScanAndBag += , [PSCustomObject] @{
+                    #    "Message"=@{ "FileName"=$File.Name; "Message"="loose file. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
+                    #    "File"=$File.FullName;
+                    #    "Method"="Do-Bag-Directory"
+                    #}
+
                     Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
                     if ( $_ | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
@@ -2230,7 +2262,6 @@ Else {
                     $oRepository = ( Get-FileRepositoryLocation -File $File )
                     $sRepository = $oRepository.FullName
                     $RepositorySlug = ( Get-FileRepositoryName -File $File )
-                    $TrashcanLocation = ( $RepositorySlug | Get-ColdStorageTrashLocation )
 
                     $Src = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
                     $Dest = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
@@ -2238,18 +2269,13 @@ Else {
                     Write-Debug ( "REPOSITORY: {0}" -f $sRepository )
                     Write-Debug ( "SLUG: {0}" -f $RepositorySlug )
                     Write-Verbose ( "FROM: {0}; TO: {1}" -f $Src, $Dest )
-                    Write-Debug ( "TRASHCAN: {0}" -f $TrashcanLocation )
                     Write-Verbose ( "DIFF LEVEL: {0}" -f $DiffLevel )
 
                     If ( -Not $WhatIf ) {
-                        if ( -Not ( Test-Path -LiteralPath "${TrashcanLocation}" ) ) { 
-                            mkdir "${TrashcanLocation}"
-                        }
-
-                        Do-Mirror -From "${Src}" -To "${Dest}" -Trashcan "${TrashcanLocation}" -DiffLevel $DiffLevel -Batch:$Batch
+                        Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel $DiffLevel -Batch:$Batch
                     }
                     Else {
-                        Write-Host "(WhatIf) Do-Mirror -From '${Src}' -To '${Dest}' -Trashcan '${TrashcanLocation}' -DiffLevel $DiffLevel -Batch $Batch"
+                        Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch"
                     }
 
                 }
