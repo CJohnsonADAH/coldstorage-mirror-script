@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0409
+@version 2021.0414
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -973,11 +973,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $From)
         $From = Get-FileLiteralPath($From)
         $To = ($From | Get-MirrorMatchedItem -Trashcan -IgnoreBagging)
 
-        ( "Move-Item -LiteralPath {0} -Destination {1} -Force" -f $From, $To ) | Write-Verbose
+        ( "Trashcan Path: {0}" -f $To ) | Write-Debug
+        ( "[Remove-ItemsToTrash] Move-Item -LiteralPath {0} -Destination {1} -Force" -f $From, $To ) | Write-Verbose
 
         $TrashContainer = ( $To | Split-Path -Parent )
         If ( -Not ( Test-Path -LiteralPath $TrashContainer ) ) {
-            New-Item -ItemType Directory -Path $TrashContainer -Force
+            "[Remove-ItemsToTrash] Create destination container: ${TrashContainer}" | Write-Verbose
+            $TrashContainer = ( New-Item -ItemType Directory -Path $TrashContainer -Force )
         }
 
         Move-Item -LiteralPath $From -Destination $To -Force

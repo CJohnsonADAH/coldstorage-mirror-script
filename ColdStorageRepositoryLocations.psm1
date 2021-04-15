@@ -55,7 +55,7 @@ $RepositoryAliases = @{
 #############################################################################################################
 
 Function Get-ColdStorageRepositories {
-Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false )
+Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false )
 
     Begin { }
 
@@ -78,7 +78,9 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                     "Reflection"=$row[1];
                     "Original"=$row[2];
                     "ColdStorage"=$row[3];
-                    "Trashcan"=( $Key | Get-ColdStorageTrashLocation )
+                }
+                If ( -Not $NoTrash ) {
+                    $hLocations["Trashcan"] = ( $Key | Get-ColdStorageTrashLocation -Mirrors:($global:gColdStorageMirrors))
                 }
                 $filteredOut[$Key] = [PSCustomObject] @{
                     "Collection"=$row[0];
@@ -134,25 +136,85 @@ Function Get-ColdStorageZipLocation {
 Param ( $Repository )
 
     $BaseDir = Get-ColdStorageLocation -Repository $Repository
+    $ZipDir = ( $BaseDir | Join-Path -ChildPath "ZIP" )
 
-    If ( Test-Path -LiteralPath "${BaseDir}\ZIP" ) {
-        Get-Item -Force -LiteralPath "${BaseDir}\ZIP"
+    If ( Test-Path -LiteralPath $ZipDir ) {
+        Get-Item -Force -LiteralPath $ZipDir
     }
 }
 
+Function Get-FileNameSlug {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Text,
+    [String] $Replace='-',
+    [switch] $Lowercase=$false,
+    [String] $Keep='',
+    [String] $Filter="([^0-9A-Za-z{0}]{1})",
+    [switch] $NoTrim=$false,
+    [switch] $NoCondense=$false,
+    $Last=1
+)
+
+    Begin { }
+
+    Process {
+        $Output = ( $Text )
+        If ( $Lowercase ) {
+            $Output = $Output.ToLower()
+        }
+        If ( $NoCondense ) {
+            $Repeater = "" # capture only one at a stretch
+        }
+        Else {
+            $Repeater = "+" # capture many at a stretch
+        }
+        $Regex = ( $Filter -f $Regex,$Repeater )
+
+        $Filters = @( @{ "In"='^$'; "Out"=""}, @{ "In"=$Regex; "Out"=$Replace } )
+        If ( -Not $NoTrim ) {
+            $Filters += , @{ "In"=( "^(({0})+)" -f [Regex]::Escape($Replace) ); "Out"="" }
+            $Filters += , @{ "In"=( "(({0})+)$" -f [Regex]::Escape($Replace) ); "Out"="" }
+        }
+        
+        $Filters |% { $RR = [PSCustomObject] $_; $Output = ( $Output -replace $RR.In,$RR.Out ); $Output } | Select-Object -Last $Last
+    }
+
+    End { }
+
+}
+
 Function Get-ColdStorageTrashLocation {
-Param ( [Parameter(ValueFromPipeline=$true)] $Repository )
+Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=$false, $Mirrors=$null )
 
     Begin {
-        $mirrors = ( Get-ColdStorageRepositories )
+        If ( $Mirrors -eq $null ) {
+            $aMirrors = ( Get-ColdStorageRepositories -NoTrash )
+        }
+        Else {
+            $aMirrors = $Mirrors
+        }
         
     }
 
     Process {
+        $TrashLocation = "${ColdStorageBackup}"
+        
         If ( $Repository -ne $null ) {
-            If ( $mirrors.ContainsKey($Repository) ) {
-                $location = $mirrors[$Repository]
-                $slug = $location[0]
+            If ( $aMirrors.ContainsKey($Repository) ) {
+                $Location = $aMirrors[$Repository]
+                $Group = ( $Location[0] -replace '[^A-Za-z0-9]+', '_' )
+                $Slug = ( ( "{0} {1}" -f $Group,$Repository ) | Get-FileNameSlug -Replace "_" )
+
+                $TrashLocation = ( $TrashLocation | Join-Path -ChildPath $Slug )
+
+                If ( -Not $NoTimestamp ) {
+                    $Stamp = ( Get-Date -UFormat "%Y-%m-%d" | Get-FileNameSlug -Replace "-" )
+                    $TrashLocation = ( $TrashLocation | Join-Path -ChildPath $Stamp )
+                    If ( -Not ( Test-Path -LiteralPath $TrashLocation ) ) {
+                        $TrashLocation = ( New-Item -ItemType Directory $TrashLocation ).FullName
+                    }
+                }
+
             }
             Else {
                 Write-Warning ( "Get-ColdStorageTrashLocation: Requested repository [{0}] does not exist." -f $Repository )
@@ -162,7 +224,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Repository )
             Write-Warning "Get-ColdStorageTrashLocation: no valid repository found (null Repository parameter)"
         }
 
-        "${ColdStorageBackup}\${slug}_${Repository}"
+        "${TrashLocation}" | Write-Output
     }
 
     End { }
@@ -593,7 +655,10 @@ Process {
 
         $There |% {
             $Aspect = $_.Name
-            $Location =  ( $_.Value | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
+            $Location =  $_.Value
+            If ( Test-Path -LiteralPath $Location ) {
+                $Location = ( $Location | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
+            }
 
             # Simple Case -- do we have an alter at the exactly corresponding relative path?
             $ProspectivePath = ( $Location | Join-Path -ChildPath $Stem )
@@ -616,47 +681,49 @@ Process {
                             # if known file is IN a bag, test for an alter OUTSIDE the bag
                             # if known file is OUTSIDE a bag, test for an alter IN a bag
                             # only use this to change the return value IF the alternative path exists
-                            $oMirroredParent = ( Get-Item -Force -LiteralPath $_ )
-                            $sMirroredParent = $oMirroredParent.FullName
+                            If ( Test-Path -LiteralPath $_ ) {
+                                $oMirroredParent = ( Get-Item -Force -LiteralPath $_ )
+                                $sMirroredParent = $oMirroredParent.FullName
 
-                            $aProspectivePath = (( ( @($sMirroredParent) + $Container.RelativePath ) -ne $null ) -ne "" )
-                            $sProspectivePath = ( $aProspectivePath -join "\" )
+                                $aProspectivePath = (( ( @($sMirroredParent) + $Container.RelativePath ) -ne $null ) -ne "" )
+                                $sProspectivePath = ( $aProspectivePath -join "\" )
 
-                            # Attempt to adjust around BagIt formatting:
-                            # if known file is IN a bag, test for an alter OUTSIDE the bag
-                            # if known file is OUTSIDE a bag, test for an alter IN a bag
-                            # only use this to change the return value IF the alternative path exists
-                            $Leaf = ( $aProspectivePath | Select-Object -Last 1 )
-                            $Branch = ( $aProspectivePath | Select-Object -SkipLast 1 )
+                                # Attempt to adjust around BagIt formatting:
+                                # if known file is IN a bag, test for an alter OUTSIDE the bag
+                                # if known file is OUTSIDE a bag, test for an alter IN a bag
+                                # only use this to change the return value IF the alternative path exists
+                                $Leaf = ( $aProspectivePath | Select-Object -Last 1 )
+                                $Branch = ( $aProspectivePath | Select-Object -SkipLast 1 )
 
-                            # Test for an alter INSIDE a bag
-                            $AlternativePath = ( @($Branch) + @("data") + @($Leaf) )
-                            $sAlternativePath = ( $AlternativePath -join "\" )
+                                # Test for an alter INSIDE a bag
+                                $AlternativePath = ( @($Branch) + @("data") + @($Leaf) )
+                                $sAlternativePath = ( $AlternativePath -join "\" )
 
-                            If ( Test-Path -LiteralPath "${sAlternativePath}" ) {
-                                $sPossiblePath = $sAlternativePath
-                            }
-
-                            # If we are already in a bag, test for an alter OUTSIDE the bag
-                            Else {
-                            
-                                $InData = ( $Leaf -eq "data" )
-                                If ( $Branch.Count -gt 0 ) {
-                                    $InData = ($InData -or ( $Branch[-1] -eq "data" ))
+                                If ( Test-Path -LiteralPath "${sAlternativePath}" ) {
+                                    $sPossiblePath = $sAlternativePath
                                 }
 
-                                If ( $InData ) {
-                                    If ( Test-BagItFormattedDirectory -File $oParent ) {
-                                       
-                                        $LeafFileName = ( $Container.RelativePath | Select-Object -Skip 1 )
-                                        $AlternativePath = ( @($oMirroredParent) + @($LeafFileName) )
-                                        $sAlternativePath = ( $AlternativePath -join "\" )
-                                        
-                                        ( "LEAF FILE NAME: {0}" -f "${LeafFileName}" ) | Write-Debug
-                                        ( "PARENT PATH: {0}" -f $oMirroredParent.FullName ) | Write-Debug
+                                # If we are already in a bag, test for an alter OUTSIDE the bag
+                                Else {
+                            
+                                    $InData = ( $Leaf -eq "data" )
+                                    If ( $Branch.Count -gt 0 ) {
+                                        $InData = ($InData -or ( $Branch[-1] -eq "data" ))
+                                    }
 
-                                        If ( Test-Path -LiteralPath "${sAlternativePath}" ) {
-                                            $sPossiblePath = $sAlternativePath
+                                    If ( $InData ) {
+                                        If ( Test-BagItFormattedDirectory -File $oParent ) {
+                                       
+                                            $LeafFileName = ( $Container.RelativePath | Select-Object -Skip 1 )
+                                            $AlternativePath = ( @($oMirroredParent) + @($LeafFileName) )
+                                            $sAlternativePath = ( $AlternativePath -join "\" )
+                                        
+                                            ( "LEAF FILE NAME: {0}" -f "${LeafFileName}" ) | Write-Debug
+                                            ( "PARENT PATH: {0}" -f $oMirroredParent.FullName ) | Write-Debug
+
+                                            If ( Test-Path -LiteralPath "${sAlternativePath}" ) {
+                                                $sPossiblePath = $sAlternativePath
+                                            }
                                         }
                                     }
                                 }
@@ -714,6 +781,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair, [switch] $Original=$fa
 Export-ModuleMember -Function Get-ColdStorageRepositories
 Export-ModuleMember -Function Get-ColdStorageLocation
 Export-ModuleMember -Function Get-ColdStorageZipLocation
+Export-ModuleMember -Function Get-FileNameSlug
 Export-ModuleMember -Function Get-ColdStorageTrashLocation
 Export-ModuleMember -Function Get-FileRepository
 Export-ModuleMember -Function Get-FileRepositoryName
