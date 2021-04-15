@@ -84,22 +84,6 @@ End { }
 
 }
 
-Function Get-ADPNetReportFileName {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
-
-    Begin { }
-
-    Process {
-        $oFile = Get-FileObject($File)
-        $sRemotePath = ( $oFile | Get-ADPNetStartDir )
-
-        ( "{0}.au.txt" -f $sRemotePath ) | Write-Output
-    }
-
-    End { }
-
-}
-
 Function Get-ADPNetStartURL {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Parameterize=$false )
 
@@ -116,6 +100,41 @@ Process {
 }
 
 End { }
+
+}
+
+Function Get-ADPNetReportFileName {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        $sRemotePath = ( $oFile | Get-ADPNetStartDir )
+
+        ( "{0}.au.txt" -f $sRemotePath ) | Write-Output
+    }
+
+    End { }
+
+}
+
+Function Get-ADPNetReportURL {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Parameterize=$false )
+
+    Begin { $hrefPrefix = ( "{0}/" -f ( Get-ColdStorageSettings -Name "Drop-Server-URL" ).TrimEnd("/") ) }
+
+    Process {
+        $hrefPath = ( $File | Get-ADPNetReportFileName )
+        If ( $Parameterize ) {
+            @{ base_url=$hrefPrefix; filename=$hrefPath }
+        }
+        Else {
+            ( "{0}{1}" -f $hrefPrefix, $hrefPath )
+        }
+    }
+
+    End { }
 
 }
 
@@ -365,6 +384,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
             $File
         }
         Else {
+            $auParams = @{}
+
             $sAUTitle = ( $File | Get-ADPNetAUTitle )
             $sInstitution = ( Get-ColdStorageSettings -Name "Institution" )
 
@@ -379,14 +400,17 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
             $sFileSizeFiles = ( "{0:N0} file{1}" -f $nFiles,$( If ( $nFiles -ne 1 ) { "s" } Else { "" } ) )
             $sFileSize = ( "{0} ({1}, {2})" -f $sFileSizeReadable,$sFileSizeBytes,$sFileSizeFiles )
 
-            $sFromPeer = ( Get-ColdStorageSettings -Name "ADPNet-Node" )
-            $sToPeer = $null # FIXME: stub this for the moment
-
             $Book = ( $File | Get-ADPNetStartUrl -Parameterize )
             $pluginParams = ( $sPluginJar | Get-ADPNetPlugins | Get-ADPNetPluginDetails -Interpolate:$Book )
 
-            $sAUStartURL = ( $pluginParams["au_start_url"] |% { $_ } )
-            $sAUManifest = ( $pluginParams['au_manifest'] |% { $_ } )
+            $auParams['Start URL'] = ( $pluginParams["au_start_url"] |% { $_ } )
+            $auParams['Manifest URL'] = ( $pluginParams['au_manifest'] |% { $_ } )
+
+            $auParams['Ingest Step'] = 'staged' # FIXME: stub this for now, maybe make configurable later
+            $auParams['Ingest Report'] = ( $File | Get-ADPNetReportURL )
+
+            $auParams['From Peer'] = ( Get-ColdStorageSettings -Name "ADPNet-Node" )
+            $auParams['To Peer'] = $null # FIXME: stub this for the moment, maybe make configurable later
 
             $hashAU = @{
                 'Ingest Title'=( "{0}: {1}" -f $sInstitution,$sAUTitle );
@@ -397,12 +421,6 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
                 'Plugin Version'=( $pluginParams["plugin_version"] |% { $_ } );
                 'au_name'=( $pluginParams["au_name"] |% { $_ } );
                 'au_start_url'=( $pluginParams["au_start_url"] |% { $_ } );
-            }
-            If ( $sAUStartURL ) {
-                $hashAU['Start URL']=( $sAUStartURL )
-            }
-            If ( $sAUManifest ) {
-                $hashAU['Manifest URL']=( $sAUManifest )
             }
 
             $pluginParams["plugin_config_props"] |% {
@@ -420,11 +438,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
                 }
             }
 
-            If ( $sFromPeer ) {
-                $hashAU['From Peer']=( $sFromPeer )
-            }
-            If ( $sToPeer) {
-                $hashAU['To Peer']=( $sToPeer )
+            $auParams.Keys |% {
+                If ( $auParams[$_] ) {
+                    $hashAU[$_] = $auParams[$_]
+                }
             }
 
             $hashAU
@@ -466,7 +483,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [string] $Output="Text" )
         Else {
             $group0 = @( 'Ingest Title', 'File Size', 'From Peer', 'To Peer' )
             $group1 = @( 'Plugin JAR', 'Plugin ID', 'Plugin Name', 'Plugin Version' )
-            $group2 = @( 'Start URL', 'Manifest URL' )
+            $group2 = @( 'Start URL', 'Manifest URL', 'Ingest Step', 'Ingest Report' )
             $group3 = $( $hashAU.Keys |% { If ( -Not ( ($group0+$group1+$group2+$group3) -ieq $_ ) ) { $_ } } )
             $group4 = @( 'JSON Packet' )
             "INGEST INFORMATION AND PARAMETERS:"
@@ -1413,4 +1430,5 @@ Export-ModuleMember -Function Expand-ADPNetPlugin
 
 Export-ModuleMember -Function Add-ADPNetAUReport
 Export-ModuleMember -Function Get-ADPNetReportFileName
+Export-ModuleMember -Function Get-ADPNetReportURL
 Export-ModuleMember -Function Set-DropServerAUReport
