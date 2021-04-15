@@ -334,7 +334,14 @@ Param ( [Parameter(ValueFromPipeline=$True)] $Piped, $Name=$null, [switch] $Wild
     Process {
         If ( $KeepOn ) {
             $Location = Get-FileObject($Piped)
-            $TestPath = ( $Location.FullName | Join-Path -ChildPath $Name )
+
+            If ( $Name ) {
+                $TestPath = ( $Location.FullName | Join-Path -ChildPath $Name )
+            }
+            Else {
+                $TestPath = $Location.FullName
+            }
+
             If ( Test-Path -LiteralPath $TestPath ) {
                 Get-Item -Force -LiteralPath $TestPath
                 $KeepOn = $All

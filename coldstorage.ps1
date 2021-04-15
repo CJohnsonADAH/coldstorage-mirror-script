@@ -384,17 +384,6 @@ End {
 
 }
 
-Function Compress-Archive-7z {
-Param ( [switch] $WhatIf=$false, $LiteralPath, $DestinationPath )
-
-    $ZipExe = Get-ExeFor7z
-    $add = "a"
-    $zip = "-tzip"
-    $batch = "-y"
-
-    ( & "${ZipExe}" "${add}" "${zip}" "${batch}" "${DestinationPath}" "${LiteralPath}" ) | Write-Host
-}
-
 #############################################################################################################
 ## BagIt DIRECTORIES ########################################################################################
 #############################################################################################################
@@ -1950,17 +1939,18 @@ Begin { }
 
 Process {
     
+    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress.Open( ( "Processing {0}" -f "${sArchive}" ), "Validating bagged preservation package", 5 )
+
     If ( Test-BagItFormattedDirectory -File $File ) {
         $oFile = Get-FileObject -File $File
         $sFile = Get-FileLiteralPath -File $File
 
         $Validated = ( Do-Validate-Bag -DIRNAME $sFile )
-        
-        $Validated
-        If ( $Validated | Did-It-Have-Validation-Errors | Shall-We-Continue ) {
 
-            $Progress = [CSProgressMessenger]::new( -Not $Batch )
-            $Progress.Open( ( "Processing {0}" -f "${sArchive}" ), "Locating archive", 4 )
+        $Progress.Update( "Validated bagged preservation package" )
+        
+        If ( $Validated | Did-It-Have-Validation-Errors | Shall-We-Continue ) {
 
             $oZip = ( Get-ZippedBagOfUnzippedBag -File $oFile )
 
@@ -1968,7 +1958,7 @@ Process {
 
             If ( $oZip.Count -gt 0 ) {
                 $sArchiveHashed = $oZip.FullName
-                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$false }
+                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$false; "Validated"=$Validated; "Compressed"=$null }
                 $Progress.Update( "Located archive with MD5 Checksum", 2 )
             }
             Else {
@@ -1983,13 +1973,13 @@ Process {
                 $sZipName = "${sZipPrefix}_z${ts}"
                 $sArchive = ( $sRepository | Join-Path -ChildPath "${sZipName}.zip" )
 
-                Compress-Archive-7z -WhatIf:$WhatIf -LiteralPath ${sFile} -DestinationPath ${sArchive}
+                $CompressResult = ( $sFile | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath ${sArchive} )
 
                 $Progress.Update( "Computing MD5 checksum" )
                 If ( -Not $WhatIf ) {
                     $md5 = $( Get-FileHash -LiteralPath "${sArchive}" -Algorithm MD5 ).Hash.ToLower()
                 }
-                else {
+                Else {
                     $stream = [System.IO.MemoryStream]::new()
                     $writer = [System.IO.StreamWriter]::new($stream)
                     $writer.write($sArchive)
@@ -2005,23 +1995,24 @@ Process {
                     Move-Item -WhatIf:$WhatIf -LiteralPath $sArchive -Destination $sArchiveHashed
                 }
 
-                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$true }
+                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$true; "Validated-Bag"=$Validated; "Compressed"=$CompressResult }
             }
             
             $Progress.Update( "Testing zip file integrity" )
 
             If ( $Result -ne $null ) {
-                $Result | Add-Member -MemberType NoteProperty -Name Validated -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed )
+                $Result | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed )
                 $Result | Write-Output
             }
 
-            $Progress.Complete()
         }
     }
     Else {
         $sFile = $File.FullName
         Write-Warning "${sFile} is not a BagIt-formatted directory."
     }
+
+    $Progress.Complete()
 
 }
 
@@ -2603,6 +2594,9 @@ Else {
             If ( $sBucket ) {
                 $DefaultProps = @{ Bucket="${sBucket}" }
                 $PropsFileName = "aws.json"
+            }
+            Else {
+                Write-Warning "[$sCommandWithVerb] Where's the Bucket?"
             }
         }
         Else {

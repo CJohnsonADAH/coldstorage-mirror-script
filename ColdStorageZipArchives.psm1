@@ -252,6 +252,20 @@ End { }
 
 }
 
+Function Compress-ArchiveWith7z {
+Param ( [switch] $WhatIf=$false, [Parameter(ValueFromPipeline=$true)] $LiteralPath, $DestinationPath )
+
+    $ZipExe = Get-ExeFor7z
+    $add = "a"
+    $zip = "-tzip"
+    $batch = "-y"
+
+    $sLiteralPath = Get-FileLiteralPath($LiteralPath)
+    $Output = ( & "${ZipExe}" "${add}" "${zip}" "${batch}" "${DestinationPath}" "${sLiteralPath}" )
+    $ExitCode = $LastExitCode
+    ( @( $ExitCode ) + @( $Output ) ) | Write-Output
+}
+
 Export-ModuleMember -Function Test-ZippedBagIntegrity
 Export-ModuleMember -Function Get-ZippedBagProfessedMD5
 Export-ModuleMember -Function Get-ZippedBagNamePrefix
@@ -260,3 +274,4 @@ Export-ModuleMember -Function New-ZippedBagsContainer
 Export-ModuleMember -Function Add-ZippedBagsContainer
 Export-ModuleMember -Function Get-ZippedBagsContainer
 Export-ModuleMember -Function Test-ZippedBagsContainer
+Export-ModuleMember -Function Compress-ArchiveWith7z
