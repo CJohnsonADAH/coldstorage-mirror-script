@@ -2,21 +2,25 @@
 ## DEPENDENCIES #############################################################################################
 #############################################################################################################
 
-Function My-Script-Directory {
+$global:gColdStorageSettingsModuleCmd = $MyInvocation.MyCommand
+    
+    $modSource = ( $global:gColdStorageSettingsModuleCmd.Source | Get-Item -Force )
+    $modPath = ( $modSource.Directory | Get-Item -Force )
+
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
+
+Function Get-ScriptPath {
 Param ( $Command, $File=$null )
 
     $Source = ( $Command.Source | Get-Item -Force )
     $Path = ( $Source.Directory | Get-Item -Force )
 
     If ( $File -ne $null ) {
-        $Path = ($Path.FullName + "\" + $File)
+        $Path = ($Path.FullName | Join-Path -ChildPath $File)
     }
 
     $Path
 }
-$global:gColdStorageSettingsModuleCmd = $MyInvocation.MyCommand
-
-Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gColdStorageSettingsModuleCmd -File "ColdStorageFiles.psm1" )
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
@@ -65,7 +69,7 @@ Param ( [switch] $NoClobber=$false, [switch] $ReturnObject=$false )
 }
 
 Function Get-ColdStorageSettingsFiles () {
-    $JsonDir = ( My-Script-Directory -Command $global:gColdStorageSettingsModuleCmd  ).FullName
+    $JsonDir = ( Get-ScriptPath -Command $global:gColdStorageSettingsModuleCmd  ).FullName
 
     $paths = "${JsonDir}\settings.json", "${JsonDir}\settings-${env:COMPUTERNAME}.json"
     
@@ -161,7 +165,15 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [ValidateSet('Highest', 'Nea
         $aCascade = ( $File | Get-ItemColdStoragePropsCascade -Order:$Order )
 
         If ( $Cascade ) {
-            $aCascade | Get-TablesMerged -NoClobber
+            $SourceLocations = @( )
+            $aCascade |% {
+                $Props = $_
+                $Props | Get-Member -MemberType NoteProperty -Name SourceLocation |% {
+                    $PropName = $_.Name
+                    $SourceLocations += , ( $Props.${PropName} )
+                }
+            }
+            $aCascade | Add-Member -PassThru -Type NoteProperty -Name "Cascade" -Value $SourceLocations | Get-TablesMerged -NoClobber
         }
         Else {
             $aCascade | Select-Object -First 1

@@ -91,6 +91,57 @@ End {
 
 }
 
+Function New-CloudStorageBucket {
+Param( [Parameter(ValueFromPipeline=$true)] $Bucket )
+
+    Begin { $AWS = Get-ExeForAWSCLI }
+
+    Process {
+        If ( $AWS ) {
+            If ( $Bucket ) {
+                # Let's check whether or not this Bucket already exists.
+                $JSON = ( & "${AWS}" s3api get-bucket-versioning --bucket "${Bucket}" 2>$null )
+                $errAWS = $LastExitCode
+
+                If ( $errAWS -gt 0 ) {
+                    
+                    $JSON = ( & "${AWS}" s3api create-bucket --acl private --bucket "${Bucket}" )
+                    $errAWS = $LastExitCode
+                    
+                    If ( $errAWS -eq 0 ) {
+                        $hBucketResults = @{
+                            "URI"=( "s3://{0}" -f "${Bucket}" )
+                            "Create"=( $JSON | ConvertFrom-Json )
+                        }
+
+                        $JSON = ( & "${AWS}" s3api put-bucket-versioning --bucket "${Bucket}" --versioning-configuration "Status=Enabled" )
+                        $errAWS = $LastExitCode
+
+                        If ( $errAWS -eq 0 ) {
+                            $hBucketResults["Versioning"] = ( $JSON | ConvertFrom-Json )
+                        }
+                        Else {
+                            Write-Warning "[New-CloudStorageBucket] Failed to set versioning on bucket '${Bucket}': ${JSON}"
+                        }
+                        [PSCustomObject] $hBucketResults | Write-Output
+
+                    }
+                    Else {
+                        Write-Warning "[New-CloudStorageBucket] Failed to create bucket '${Bucket}': ${JSON}"
+                    }
+                }
+                Else {
+                    Write-Warning "[New-CloudStorageBucket] Bucket '${Bucket}' already exists."
+                }
+
+            }
+        }
+    }
+
+    End { If ( -Not $AWS ) { Write-Error "[New-CloudStorageBucket] aws CLI tool not found!" } }
+
+}
+
 Function Get-CloudStorageListing {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject )
 
@@ -254,5 +305,6 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
 }
 
 Export-ModuleMember -Function Get-CloudStorageBucket
+Export-ModuleMember -Function New-CloudStorageBucket
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket

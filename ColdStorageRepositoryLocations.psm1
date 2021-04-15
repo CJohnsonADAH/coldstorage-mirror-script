@@ -381,7 +381,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 }
 
 Function New-ColdStorageRepositoryDirectoryProps {
-Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [switch] $Force = $false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [string] $FileName="props.json", [switch] $Force = $false )
 
     $Props = ( $File | Get-ColdStorageRepositoryDirectoryProps )
     If ( $Props -and -Not ( $Force ) ) {
@@ -393,7 +393,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [switch] $Force = $f
 
         $Parent = $oFile.FullName
         $csName = ".coldstorage"
-        $csDir = "${Parent}\${csName}"
+        $csDir = ( "${Parent}" | Join-Path -ChildPath "${csName}" )
         If ( Test-Path -LiteralPath "${csDir}" -PathType Container ) {
             $PropsDir = ( Get-Item -Force -LiteralPath "${csDir}" )
         }
@@ -403,8 +403,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [switch] $Force = $f
 
         If ( $PropsDir ) {
             $sPropsDir = $PropsDir.FullName
-            $Table | ConvertTo-Json > "${sPropsDir}\props.json"
-            Get-Content "${sPropsDir}\props.json"
+            $sPropsFile = ( "${sPropsDir}" | Join-Path -ChildPath $FileName )
+            $Table | ConvertTo-Json | Out-File -LiteralPath "${sPropsFile}" -Encoding utf8
+            Get-Content "${sPropsFile}"
         }
         Else {
             "[coldstorage settle] Could not locate or create a props directory" | Write-Warning

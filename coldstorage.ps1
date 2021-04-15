@@ -36,6 +36,8 @@ param (
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $NoScan = $false,
+    [switch] $Bucket = $false,
+    [switch] $Make = $false,
     [switch] $Bundle = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
@@ -45,6 +47,7 @@ param (
     [switch] $Report = $false,
     [switch] $ReportOnly = $false,
     [switch] $Dependencies = $false,
+    $Props = $null,
     [String] $Output = "-",
     [String[]] $Side = "local,cloud",
     [String[]] $Name = @(),
@@ -2005,14 +2008,14 @@ Process {
                 $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$true }
             }
             
+            $Progress.Update( "Testing zip file integrity" )
+
             If ( $Result -ne $null ) {
-                $Result
+                $Result | Add-Member -MemberType NoteProperty -Name Validated -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed )
+                $Result | Write-Output
             }
 
-            $Progress.Update( "Testing zip file integrity" )
-            Test-ZippedBagIntegrity -File $sArchiveHashed
-
-            $Progress.Completed()
+            $Progress.Complete()
         }
     }
     Else {
@@ -2420,6 +2423,10 @@ Else {
     }
     ElseIf ( $Verb -eq "bucket" ) {
         $Words | Get-CloudStorageBucket
+        If ( $Make ) {
+            $Words | Get-CloudStorageBucket | New-CloudStorageBucket
+        }
+
     }
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Words = $Words
@@ -2589,7 +2596,22 @@ Else {
 
     }
     ElseIf ( $Verb -eq "settle" ) {
-        $sLocation, $sDomain, $sRepository, $sPrefix, $Remainder = ( $Words )
+        $sLocation, $Remainder = ( $Words )
+        $PropsFileName = "props.json"
+        If ( $Bucket ) {
+            $sBucket, $Remainder = ( $Remainder )
+            If ( $sBucket ) {
+                $DefaultProps = @{ Bucket="${sBucket}" }
+                $PropsFileName = "aws.json"
+            }
+        }
+        Else {
+            $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
+            If ( $sDomain ) {
+                $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
+            }
+        }
+
         If ( $sLocation -eq "here" ) {
             $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
         }
@@ -2597,7 +2619,23 @@ Else {
             $oFile = Get-FileObject($sLocation)
         }
         If ( $oFile -ne $null ) {
-            @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" } | New-ColdStorageRepositoryDirectoryProps -File $oFile -Force:$Force
+            $vProps = $Props            
+            If ( $vProps -is [String] ) {
+                If ( $vProps ) {
+                    $vProps = ( $vProps | ConvertFrom-Json )
+                }
+            }
+            If ( $vProps -ne $null ) {
+                $vProps = ( $vProps | Get-TablesMerged )
+            }
+            If ( -Not ( $vProps -is [Hashtable] ) ) {
+                $vProps = $DefaultProps
+            }
+
+            $vProps | New-ColdStorageRepositoryDirectoryProps -File $oFile -Force:$Force -FileName:$PropsFileName 
+            If ( $Bucket ) {
+                ( $oFile | Add-ZippedBagsContainer )
+            }
         }
     }
     ElseIf ( $Verb -eq "bleep" ) {

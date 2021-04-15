@@ -136,11 +136,52 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Location, [switch] $All=$false )
     Begin { $KeepOn=$true }
 
     Process {
+        $Props = ( $Location.FullName | Get-ItemColdStorageProps -Cascade )
+        $ZipUniverse = $Props["Zip"]
+        $JunctionDestination = $null
+        If ( $ZipUniverse ) {
+            $ZipUniverse = ( $ZipUniverse | ConvertTo-ColdStorageSettingsFilePath | Get-LocalPathFromUNC )
+            $JunctionDestination = ( $Props.Cascade | Select-Object -First 1 | Split-MirrorMatchedPath -Stem |% { $ZipUniverse | Join-Path -ChildPath $_ } )
+            If ( $JunctionDestination ) {
+                $JunctionDestination = $JunctionDestination | Join-Path -ChildPath "ZIP"
+            }
+        }
+
         $oZipDir = $null
         If ( $KeepOn ) {
             $sZipDir = ( $Location.FullName | Join-Path -ChildPath "ZIP" )
-            $oZipDir = ( New-Item -ItemType Directory -Path "${sZipDir}" )
+            If ( $JunctionDestination -eq $null ) {
+                $oZipDir = ( New-Item -ItemType Directory -Path "${sZipDir}" )
+            }
+            Else {
+                If ( -Not ( Test-Path -LiteralPath "${JunctionDestination}" ) ) {
+                    $oZipJunct = ( New-Item -ItemType Directory -Path "${JunctionDestination}" )
+                }
+                $oZipDir = ( New-Item -ItemType Junction -Path "${sZipDir}" -Value "${JunctionDestination}" )
+            }
             $oZipDir ; $KeepOn = ( $All -Or ( -Not $oZipDir ) )
+        }
+    }
+
+    End { }
+
+}
+
+Function Add-ZippedBagsContainer {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ), [switch] $All=$false )
+
+    Begin { }
+
+    Process {
+        # OPTION 1. Look for the nearest .coldstorage location for this repository.
+        $Locations = ( $File | Get-ItemPropertiesDirectoryLocation -Name ".coldstorage" -Order Nearest -All:$All )
+
+        $Locations | Select-Object -First 1 |% {
+            $Loc = $_
+            $oZipDir = ( Get-ChildItem "ZIP" -LiteralPath $Loc.FullName )
+            If ( -Not $oZipDir ) {
+                $Loc | New-ZippedBagsContainer
+            }
         }
     }
 
@@ -155,7 +196,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ), [switch] $
 Begin { }
 
 Process {
-    # OPTION 1. Look for the nearest .coldzip location for this repository.
+    # OPTION 1. Look for the nearest .coldstorage location for this repository.
     $Locations = ( $File | Get-ItemPropertiesDirectoryLocation -Name ".coldstorage" -Order Nearest -All:$All )
 
     # OPTION 2. Look in the big collective pool for this repository.
@@ -216,5 +257,6 @@ Export-ModuleMember -Function Get-ZippedBagProfessedMD5
 Export-ModuleMember -Function Get-ZippedBagNamePrefix
 Export-ModuleMember -Function Get-ZippedBagOfUnzippedBag
 Export-ModuleMember -Function New-ZippedBagsContainer
+Export-ModuleMember -Function Add-ZippedBagsContainer
 Export-ModuleMember -Function Get-ZippedBagsContainer
 Export-ModuleMember -Function Test-ZippedBagsContainer
