@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0415
+@version 2021.0416
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -44,6 +44,7 @@ param (
     [switch] $Unbagged = $false,
     [switch] $Unzipped = $false,
     [switch] $Zipped = $false,
+    [switch] $PassThru = $false,
     [switch] $Report = $false,
     [switch] $ReportOnly = $false,
     [switch] $Dependencies = $false,
@@ -58,7 +59,8 @@ param (
     #[switch] $Debug = $false,
     [switch] $WhatIf = $false,
     [switch] $Version = $false,
-    [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words
+    [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
+    [Parameter(ValueFromPipeline=$true)] $Piped
 )
 $RipeDays = 7
 
@@ -482,60 +484,128 @@ Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, [switch] $Quiet=
 
 }
 
-Function Do-Bag-Directory ($DIRNAME, [switch] $Verbose=$false) {
+# Out-BagItFormattedDirectory: Invoke the BagIt.py external script to bag a preservation package
+# Formerly known as: Do-Bag-Directory
+Function Out-BagItFormattedDirectory {
 
-    $Anchor = $PWD
-    chdir $DIRNAME
+    [CmdletBinding()]
 
-    Get-SystemArtifactItems -LiteralPath "." | Remove-Item -Force -Verbose:$Verbose
+Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false )
 
-    "PS ${PWD}> bagit.py ." | Write-Verbose
+    Begin { }
+
+    Process {
+        $BagDir = $( If ( $DIRNAME -is [String] ) { $DIRNAME } Else { Get-FileObject($DIRNAME) |% { $_.FullName } } )
+
+        Push-Location ( $BagDir )
+
+        Get-SystemArtifactItems -LiteralPath "." | Remove-Item -Force -Verbose:$Verbose
+
+        "PS ${PWD}> bagit.py ." | Write-Verbose
     
-    $BagIt = Get-PathToBagIt
-	$Python = Get-ExeForPython
-    $Output = ( & $( Get-ExeForPython ) "${BagIt}\bagit.py" . 2>&1 )
-    $NotOK = $LASTEXITCODE
+        $BagItPy = ( Get-PathToBagIt | Join-Path -ChildPath "bagit.py" )
+	    $Python = Get-ExeForPython
+        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" . 2>&1 )
+        $NotOK = $LASTEXITCODE
 
-    If ( $NotOK -gt 0 ) {
-        "ERR-BagIt: returned ${NotOK}" | Write-Verbose
-        $Output | Write-Error
-    }
-    Else {
-        $Output 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
+        If ( $NotOK -gt 0 ) {
+            "ERR-BagIt: returned ${NotOK}" | Write-Verbose
+            $Output | Write-Error
+        }
+        Else {
+            
+            # Send the bagit.py console output to Verbose stream
+            $Output 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
+            
+            # If requested, pass thru the successfully bagged directory to Output stream
+            If ( $PassThru ) {
+                Get-FileObject -File $BagDir | Write-Output
+            }
+
+        }
+
+        Pop-Location
     }
 
-    chdir $Anchor
+    End { }
 }
 
-function Do-Bag-Loose-File ($LiteralPath) {
-    $cmd = Get-Command-With-Verb
+# Out-BaggedPackage
+# Formerly known as: Do-Bag-Loose-File
+Function Out-BaggedPackage {
 
-    $Anchor = $PWD
+    [CmdletBinding()]
 
-    $Item = Get-Item -Force -LiteralPath $LiteralPath
-    
-    chdir $Item.DirectoryName
-    $OriginalFileName = $Item.Name
-    $OriginalFullName = $Item.FullName
-    $FileName = ( $Item | Get-PathToBaggedCopyOfLooseFile )
+Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$false )
 
-    $BagDir = ".\${FileName}"
-    if ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
-        $BagDir = mkdir -Path $BagDir
-    }
+    Begin { $cmd = ( Get-Command-With-Verb ) }
 
-    Move-Item -LiteralPath $Item -Destination $BagDir
-    Do-Bag-Directory -DIRNAME $BagDir
-    if ( $LastExitCode -eq 0 ) {
-        $NewFilePath = "${BagDir}\data\${OriginalFileName}"
-        if ( Test-Path -LiteralPath "${NewFilePath}" ) {
-            New-Item -ItemType HardLink -Path $OriginalFullName -Target $NewFilePath | %{ "[$cmd] Bagged ${BagDir}, created link to payload: $_" }
+    Process {
+        $Item = Get-FileObject($LiteralPath)
+
+        # If this is a single (loose) file, then we will create a parallel counterpart directory
+        If ( Test-Path -LiteralPath $Item.FullName -PathType Leaf ) {
+
+            Push-Location $Item.DirectoryName
+
+            $OriginalFileName = $Item.Name
+            $OriginalFullName = $Item.FullName
+            $FileName = ( $Item | Get-PathToBaggedCopyOfLooseFile )
+
+            $BagDir = ( Get-Location | Join-Path -ChildPath "${FileName}" )
+            If ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
+                $oBagDir = ( New-Item -Type Directory -Path $BagDir )
+                $BagDir = $( If ( $oBagDir ) { $oBagDir.FullName } Else { $null } )
+            }
+
+            If ( Test-Path -LiteralPath $BagDir -PathType Container ) {
+                
+                # Move the loose file into its containing counterpart directory. We'll re-link it to its old directory later.
+                Move-Item -LiteralPath $Item -Destination $BagDir
+
+                # Now rewrite the counterpart directory as a BagIt-formatted preservation package
+                $BagDir | Out-BagItFormattedDirectory -PassThru:$PassThru
+                If ( $LastExitCode -eq 0 ) {
+
+                    # If all went well, then hardlink a reference at the loose file's old location to the new BagIt directory payload
+                    $DataDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
+                    $Payload = ( "${DataDir}" | Join-Path -ChildPath "${OriginalFileName}" )
+                    If ( Test-Path -LiteralPath "${Payload}" ) {
+                        
+                        New-Item -ItemType HardLink -Path "${OriginalFullName}" -Target "${Payload}" | %{ "[$cmd] Bagged ${BagDir}, created link to payload: $_" | Write-Verbose }
 	        
-            Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
-            Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
+                        # Set file attributes to ReadOnly -- bagged copies should remain immutable
+                        Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
+                        Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
+
+                    }
+                    Else {
+                        ( "[$cmd] BagIt process completed OK, but ${cmd} could not locate BagIt payload: '{0}'" -f "${Payload}" ) | Write-Error
+                    }
+
+                }
+
+            }
+            Else {
+                ( "[$cmd] Could not create or locate counterpart directory for BagIt to operate on: '{0}'" -f "${BagDir}" ) | Write-Error
+            }
+
+            Pop-Location
+
+        }
+
+        # If this is a directory, then we run BagIt directly over the directory.
+        ElseIf ( Test-Path -LiteralPath $Item.FullName -PathType Container ) {
+            $LiteralPath | Out-BagItFormattedDirectory -Verbose:$Verbose -PassThru:$PassThru
+        }
+
+        Else {
+            ( "[$cmd] Preservation package not found: '{0}'" -f $LiteralPath ) | Write-Warning
         }
     }
-    chdir $Anchor
+
+    End { }
+
 }
 
 #############################################################################################################
@@ -1022,7 +1092,7 @@ Param ($From, $To, [switch] $Batch=$false, $Depth=0)
         If ( -Not ( $_ | Test-UnmirroredDerivedItem ) ) {
             $MoveFrom | Remove-ItemToTrash
         }
-        ElseIf ( $Verbose ) {
+        Else {
             "[mirror:Remove-MirroredFilesWhenObsolete] SKIPPED (UNMIRRORED DERIVED ITEM): [${MoveFrom}]" | Write-Verbose
         }
     }
@@ -1244,7 +1314,9 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
     $Progress.Complete()
 }
 
-function Do-Clear-And-Bag {
+# Out-BagItFormattedDirectoryWhenCleared: invoke a malware scanner (ClamAV) to clear preservation packages, then a bagger (BagIt.py) to bag them
+# Formerly known as: Do-Clear-And-Bag
+Function Out-BagItFormattedDirectoryWhenCleared {
 
     [Cmdletbinding()]
 
@@ -1266,6 +1338,9 @@ param (
 
     [switch]
     $Bundle=$false,
+
+    [switch]
+    $PassThru=$false,
 
     [Parameter(ValueFromPipeline=$true)]
     $File
@@ -1336,7 +1411,7 @@ param (
                 
                 Set-Location "rebag-data"
 
-                Do-Bag-Directory -DIRNAME ( $PWD )
+                $PWD | Out-BagItFormattedDirectory
                 
                 Get-ChildItem -LiteralPath . |% {
                     Move-Item $_.FullName -Destination $Bag.FullName -Verbose
@@ -1348,6 +1423,11 @@ param (
                 Set-Location $Anchor
 
                 Write-Verbose ( $Bag ).FullName
+
+                If ( $PassThru ) {
+                    ( $Bag ) | Write-Output
+                }
+
                 #Move-Item -LiteralPath ( $payloadDir ).FullName -
             }
 
@@ -1367,7 +1447,7 @@ param (
                     
                     $NotOK = ( $DirName | Do-Scan-ERInstance )
                     If ( $NotOK | Shall-We-Continue ) {
-                        Do-Bag-Directory -DIRNAME $DirName
+                        Out-BagItFormattedDirectory -DIRNAME $DirName -PassThru:$PassThru
                     }
 
                 }
@@ -1382,11 +1462,11 @@ param (
             #$ToScanAndBag += , [PSCustomObject] @{
             #    "Message"=@{ "FileName"=$File.Name; "Message"="indexed directory. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
             #    "File"=$File.FullName;
-            #    "Method"="Do-Bag-Directory"
+            #    "Method"="Out-BagItFormattedDirectory"
             #}
             Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
             If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                Do-Bag-Directory -DIRNAME $File.FullName
+                $File | Out-BaggedPackage -PassThru:$PassThru
             }
         }
         Else {
@@ -1396,13 +1476,13 @@ param (
                     #$ToScanAndBag += , [PSCustomObject] @{
                     #    "Message"=@{ "FileName"=$File.Name; "Message"="loose file. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
                     #    "File"=$File.FullName;
-                    #    "Method"="Do-Bag-Directory"
+                    #    "Method"="Out-BaggedPackage"
                     #}
 
                     Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
                     if ( $_ | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                        Do-Bag-Loose-File -LiteralPath $_.FullName
+                        $_ | Out-BaggedPackage -PassThru:$PassThru
                     }
                 }
                 Else {
@@ -1716,15 +1796,17 @@ End {
 
 }
 
-function Do-Bag-Repo-Dirs ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false) {
-    $Anchor = $PWD 
-
-    chdir $From
-    dir -Attributes Directory | Do-Clear-And-Bag -Quiet -Exclude $null -Skip:$Skip -Force:$Force
-    chdir $Anchor
+# Invoke-BagChildDirectories: Given a parent directory (typically a repository root), loop through each child directory and do a clear-and-bag
+# Formerly known as: Do-Bag-Repo-Dirs
+Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false) {
+    Push-Location $From
+    Get-ChildItem -Directory | Out-BagItFormattedDirectoryWhenCleared -Quiet -Exclude $null -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
+    Pop-Location
 }
 
-function Do-Bag ($Pairs=$null, $Skip=@(), [switch] $Force=$false ) {
+# Invoke-ColdStorageRepositoryBag
+# Formerly known as: Do-Bag
+function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false ) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     if ( $Pairs.Count -lt 1 ) {
@@ -1741,7 +1823,7 @@ function Do-Bag ($Pairs=$null, $Skip=@(), [switch] $Force=$false ) {
         $src = $locations[2]
         $dest = $locations[1]
 
-        Do-Bag-Repo-Dirs -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force
+        Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
         $i = $i + 1
     }
 }
@@ -2317,6 +2399,8 @@ Else {
         $global:gScriptContextName = $sCommandWithVerb
     }
 
+    $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
+
     If ( $Verb -eq "mirror" ) {
         $N = ( $Words.Count )
 
@@ -2403,21 +2487,21 @@ Else {
 
         If ( $Items ) {
             If ( $Recurse ) {
-                $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; Get-Unbagged-ChildItem -LiteralPath $_.FullName } | Do-Clear-And-Bag -Skip:$SkipScan -Force:$Force -Bundle:$Bundle
+                $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; Get-Unbagged-ChildItem -LiteralPath $_.FullName } | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
             }
             Else {
-                $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Skip:$SkipScan -Force:$Force -Bundle:$Bundle
+                $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
             }
         }
         Else {
-            Do-Bag -Pairs $Words -Skip:$SkipScan -Force:$Force
+            Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
         }
 
     }
     ElseIf ( $Verb -eq "rebag" ) {
         $N = ( $Words.Count )
         If ( $Items ) {
-            $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Do-Clear-And-Bag -Rebag
+            $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Rebag -PassThru:$PassThru
         }
     }
     ElseIf ( $Verb -eq "unbag" ) {
@@ -2458,8 +2542,7 @@ Else {
     }
     ElseIf ( $Verb -eq "manifest" ) {
 
-        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        $Words | ForEach {
+        $allObjects | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
             $Location = ( Get-Item -LiteralPath $_ )
             $sTitle = ( $Location | Get-ADPNetAUTitle )
             If ( -Not $sTitle ) {
@@ -2703,10 +2786,10 @@ Else {
     }
     ElseIf ( $Verb -eq "echo" ) {
         $aFlags = $MyInvocation.BoundParameters
-        "Verb", "Words" |% { $aFlags.Remove($_) }
+        "Verb", "Words" |% { $Removed = ( $aFlags.Remove($_) ) }
 
-        $oEcho = @{ "FLAGS"=( $MyInvocation.BoundParameters ); "WORDS"=( $Words ); "VERB"=( $Verb ) }
-        [PSCustomObject] $oEcho | Format-Table 'VERB', 'WORDS', 'FLAGS'
+        $oEcho = @{ "FLAGS"=( $MyInvocation.BoundParameters ); "WORDS"=( $Words ); "VERB"=( $Verb ); "PIPED"=( $Input ) }
+        [PSCustomObject] $oEcho | Format-Table 'VERB', 'WORDS', 'FLAGS', "PIPED"
     }
     Else {
         Do-Write-Usage -cmd $MyInvocation.MyCommand

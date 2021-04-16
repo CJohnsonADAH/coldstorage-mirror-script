@@ -7,21 +7,32 @@ Module for utility functions dealing with the local or network-shared file syste
 @version 2021.0324
 #>
 
-Function Get-FileObject ( $File ) {
-    
-    $oFile = $null
-    If ( ( $File -is [String] ) -and ( $File.length -gt 0 ) ) {
+Function Get-FileObject {
 
-        If ( Test-Path -LiteralPath "${File}" ) {
-            $oFile = ( Get-Item -Force -LiteralPath "${File}" )
+    [CmdletBinding()]
+
+Param( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $oFile = $null
+        If ( ( $File -is [String] ) -and ( $File.length -gt 0 ) ) {
+
+            If ( Test-Path -LiteralPath "${File}" ) {
+                $oFile = ( Get-Item -Force -LiteralPath "${File}" )
+            }
+
+        }
+        Else {
+            $oFile = $File
         }
 
-    }
-    Else {
-        $oFile = $File
+        $oFile
     }
 
-    $oFile
+    End { }
+
 }
 
 Function Get-FileLiteralPath {
