@@ -268,29 +268,40 @@ Process {
     $reUNCRepo = [Regex]::Escape($sRepository)
     $sPathRelativeToRepo = ( $sFileUNCPath -ireplace "^${reUNCRepo}\\+","" )
     
-    $RepositoryNodes = Get-ColdStorageSettings -Name "AU-Titles"
+    # Is there a PowerShell script in this item's .coldstorage directory?
+    $PropsDirs = ( $File | Get-ItemPropertiesDirectoryLocation -Name ".coldstorage" -Order Highest -All )
+    $ADPNetScripts = ( $PropsDirs | Join-Path -ChildPath "to-adpnet*.ps1" | Get-ChildItem )
 
-    $Title = $null
-    If ( $RepositoryNodes.${sRepositoryNode} ) {
-        $sFileName = $oFile.Name
-        $Node = $RepositoryNodes.${sRepositoryNode}
+    If ( $ADPNetScripts.Count -gt 0 ) {
+        $Consumed = 0
+        $ADPNetScripts |% { $Script = $_; $OriginalTitle = $oFile.Name ; $Title = $OriginalTitle ; If ( -Not $Consumed ) { $Title = ( $Title | & "${Script}" get au title -Package $oFile -Original "${OriginalTitle}" ); $Consumed = $LastExitCode; }  }
+    }
+    Else {
+        $RepositoryNodes = Get-ColdStorageSettings -Name "AU-Titles"
 
-        $Node.PSObject.Properties | ForEach {
-            $Wildcard = ( $_.Name | ConvertTo-ColdStorageSettingsFilePath )
-            $Props = $_.Value -split "//"
+        $Title = $null
+        If ( $RepositoryNodes.${sRepositoryNode} ) {
+            $sFileName = $oFile.Name
+            $Node = $RepositoryNodes.${sRepositoryNode}
 
-            ( "[${global:gCSScriptName} manifest] Checking AU Title rule: {0} -> {1}" -f $Wildcard, $Props ) | Write-Verbose
+            $Node.PSObject.Properties | ForEach {
+                $Wildcard = ( $_.Name | ConvertTo-ColdStorageSettingsFilePath )
+                $Props = $_.Value -split "//"
+
+                ( "[${global:gCSScriptName} manifest] Checking AU Title rule: {0} -> {1}" -f $Wildcard, $Props ) | Write-Verbose
             
-            If ( ".\${sPathRelativeToRepo}\${sFileName}" -like $Wildcard ) {
-                $Pattern = $Props[0]
-                $Process = ( $Props[1] -split "/" )[0..1]
+                If ( ".\${sPathRelativeToRepo}\${sFileName}" -like $Wildcard ) {
+                    $Pattern = $Props[0]
+                    $Process = ( $Props[1] -split "/" )[0..1]
 
-                $sSlug = $oFile.NAme -replace $Process
-                $Title = $Pattern -f ( $sSlug )
+                    $sSlug = $oFile.Name -replace $Process
+                    $sPapa = ( ( ( $oFile | Split-Path -Parent) | Split-Path -Leaf ) -replace $Process )
+                    $sPapaSlug = "${sPapa} ${sSlug}" 
+                    $Title = ( $Pattern -f ( $sSlug, $sPapaSlug ) )
+                }
+
             }
-
         }
-
     }
     
     If ( $Title ) {
