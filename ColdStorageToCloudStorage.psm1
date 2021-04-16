@@ -132,11 +132,30 @@ Param( [Parameter(ValueFromPipeline=$true)] $Bucket )
                         $errAWS = $LastExitCode
 
                         If ( $errAWS -eq 0 ) {
-                            $hBucketResults["Versioning"] = ( $JSON | ConvertFrom-Json )
+                            $oBucketResult = ( $JSON | ConvertFrom-Json )
+                            If ( -Not $oBucketResult ) {
+                                $oBucketResult = "Enabled"
+                            }
+                            $hBucketResults["Versioning"] = $oBucketResult
                         }
                         Else {
                             Write-Warning "[New-CloudStorageBucket] Failed to set versioning on bucket '${Bucket}': ${JSON}"
                         }
+
+                        $JSON = ( & "${AWS}" s3api put-public-access-block --bucket "${Bucket}" --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" )
+                        $errAWS = $LastExitCode
+
+                        If ( $errAWS -eq 0 ) {
+                            $oBucketResult = ( $JSON | ConvertFrom-Json )
+                            If ( -Not $oBucketResult ) {
+                                $oBucketResult = "Blocked"
+                            }
+                            $hBucketResults["PublicAccess"] = $oBucketResult
+                        }
+                        Else {
+                            Write-Warning "[New-CloudStorageBucket] Failed to set versioning on bucket '${Bucket}': ${JSON}"
+                        }
+
                         [PSCustomObject] $hBucketResults | Write-Output
 
                     }
