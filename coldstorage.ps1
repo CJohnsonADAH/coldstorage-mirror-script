@@ -2513,11 +2513,10 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "zip" ) {
-        $N = ( $Words.Count )
 
-        $Words |% {
+        $allObjects |% {
             $sFile = Get-FileLiteralPath -File $_
-            If ( Test-BagItFormattedDirectory -File $_ ) {
+            If ( Test-BagItFormattedDirectory -File $sFile ) {
                 $_ | Do-Zip-Bagged-Directory
             }
             ElseIf ( Test-LooseFile -File $_ ) {
@@ -2533,6 +2532,7 @@ Else {
                 $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Do-Zip-Bagged-Directory
             }
         }
+
     }
     ElseIf ( ("index", "bundle") -ieq $Verb ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
@@ -2561,12 +2561,15 @@ Else {
         $Words | Do-CloudUploadsAbort        
     }
     ElseIf ( $Verb -eq "bucket" ) {
+        $allObjects = ( $allObjects | ColdStorage-Command-Line -Default ( ( Get-Location ).Path ) )
+
         If ( $Make ) {
-            $Words | Get-CloudStorageBucket -Force:$Force | New-CloudStorageBucket
+            $allObjects | Get-CloudStorageBucket -Force:$Force | New-CloudStorageBucket
         }
         Else {
-            $Words | Get-CloudStorageBucket -Force:$Force
+            $allObjects | Get-CloudStorageBucket -Force:$Force
         }
+
     }
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Words = $Words
