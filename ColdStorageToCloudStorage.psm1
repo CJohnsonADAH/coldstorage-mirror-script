@@ -16,6 +16,7 @@ Param ( $Command, $File=$null )
 }
 
 Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageSettings.psm1" )
+Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageFiles.psm1" )
 Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageRepositoryLocations.psm1" )
 
 #############################################################################################################
@@ -23,7 +24,7 @@ Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "Col
 #############################################################################################################
 
 Function Get-CloudStorageBucket {
-Param( [Parameter(ValueFromPipeline=$true)] $Package, $Repository=@( ) )
+Param( [Parameter(ValueFromPipeline=$true)] $Package, $Repository=@( ), [switch] $Force=$false )
 
 Begin { }
 
@@ -36,7 +37,7 @@ Process {
     }
     $Props = ( $oPackage | Get-ItemColdStorageProps -Order Nearest -Cascade )
     
-    If ( $Props.ContainsKey("Bucket") ) {
+    If ( $Props.ContainsKey("Bucket") -and ( -Not $Force ) ) {
         $packageName = ( $oPackage.Name )
         $packageSlug = ( ( $packageName.ToLower() ) -replace "[^A-Za-z0-9\-]+","-" )
         ( $Props["Bucket"] -f $packageName,$packageSlug ) | Write-Output
@@ -53,18 +54,31 @@ Process {
             }
             'Masters' {
                 $RepositorySlug = $sRepository.ToLower()
+
                 $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
 
+                # OPTION 1. Is this item CONTAINED WITHIN a Zipped Bags Container? If so, try to extract a default from the ZIP file name
                 If ( $ContainingDirectory | Test-ZippedBagsContainer ) {
-                    Push-Location ( $oRepository.Location.FullName )
                     $Prefix = $oRepository.Prefix
                     $RelativePath = ( $oPackage.Name -replace "^${Prefix}","" )
-                    Pop-Location
+                }
+                ElseIf ( Test-Path -LiteralPath $oPackage.FullName -PathType Container ) {
+                
+                    $RelativePath = ( $ContainingDirectory.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location )
+
+                # OPTION 2. Is this item a preservation package? If so, its bucket is based on its parent.
+                    If ( $oPackage | Get-ItemPackage ) {
+                        $RelativePath = ( $ContainingDirectory.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location )
+                    }
+
+                # OPTION 3. Does this item contain preservation packages? If so, its bucket is based on itself.
+                    ElseIf ( $oPackage | Get-ChildItemPackages ) {
+                        $RelativePath = ( $oPackage.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location )
+                    }
+
                 }
                 Else {
-                    Push-Location ( $oRepository.Location.FullName )
-                    $RelativePath = ( $ContainingDirectory.FullName | Resolve-Path -Relative )
-                    Pop-Location
+                    $RelativePath = ( $ContainingDirectory.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location )
                 }
 
                 $DirectorySlug = ( $RelativePath.ToLower() -replace "[^a-z0-9]+","-" )

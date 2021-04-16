@@ -281,6 +281,26 @@ End { }
 
 }
 
+Function Resolve-PathRelativeTo {
+Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [Parameter(Position=0)] $Base )
+
+    Begin { }
+
+    Process {
+        # We do this in PROCESS not in BEGIN/END because otherwise we can FUBAR relative paths used earlier in the pipeline.
+        Push-Location ( Get-FileLiteralPath($Base) )
+
+        $LiteralPath = $( If ( $LiteralPath -is [String] ) { $LiteralPath } Else { Get-FileObject($LiteralPath) |% { $_.FullName } } )
+        $LiteralPath | Resolve-Path -Relative
+
+        # We do this in PROCESS not in BEGIN/END because otherwise we can FUBAR relative paths used earlier in the pipeline.
+        Pop-Location
+    }
+
+    End {  }
+
+}
+
 # WAS/IS: Get-File-FileSystem-Location/Get-ItemFileSystemLocation
 Function Get-ItemFileSystemLocation {
 Param( [Parameter(ValueFromPipeline=$true)] $Piped, $File=$null )
@@ -388,6 +408,7 @@ Export-ModuleMember -Function Get-SystemArtifactItems
 Export-ModuleMember -Function Test-DifferentFileContent
 Export-ModuleMember -Function Get-UNCPathResolved
 Export-ModuleMember -Function Get-LocalPathFromUNC
+Export-ModuleMember -Function Resolve-PathRelativeTo
 Export-ModuleMember -Function Get-ItemFileSystemLocation
 Export-ModuleMember -Function Get-ItemFileSystemParent
 Export-ModuleMember -Function Get-ItemFileSystemSearchPath

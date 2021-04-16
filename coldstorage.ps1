@@ -2206,6 +2206,71 @@ Param (
 
 }
 
+Function Add-CSPropsFile {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Location,
+    [String] $Name="props.json",
+    [String] $Format="application/json",
+    [Object[]] $Props=$null,
+    [switch] $PassThru=$false,
+    [switch] $ReturnObject=$false,
+    [switch] $ReturnJson=$false,
+    [switch] $Force=$false
+)
+
+    Begin { }
+
+    Process {
+        $oProps = $null
+        $Props |% {
+            $vProps = $_
+            If ( $vProps -ne $null ) {
+                If ( -Not ( $oProps -is [Hashtable] ) ) {
+                    
+                    # Passed in a string - try to interpret as JSON
+                    If ( $vProps -is [String] ) {
+                        Try {
+                            $oProps = ( $vProps | ConvertFrom-Json )
+                            $oProps = ( $oProps | Get-TablesMerged )
+                        }
+                        Catch [System.ArgumentException] {
+                            ( "[Add-CSPropsFile] Invalid JSON? '{0}'" -f $vProps ) | Write-Warning
+                        }
+                    }
+
+                    # Passed in something else, probably Hashtable or object
+                    Else {
+                        $oProps = ( $vProps | Get-TablesMerged )
+                    }
+                }
+            }
+        }
+
+        If ( $oProps -is [Hashtable] ) {
+            $outProps = ( $oProps | New-ColdStorageRepositoryDirectoryProps -File:$Location -Force:$Force -FileName:$Name )
+        }
+        Else {
+            ( "[Add-CSPropsFile] No properties provided? Location={0} FileName={1}" -f $Location.FullName, $Name) | Write-Warning
+        }
+
+        If ( $PassThru ) {
+            $Location
+        }
+
+        If ( $outProps ) {
+            If ( $ReturnObject ) {
+                $oProps
+            }
+            If ( $ReturnJson ) {
+                $outProps
+            }
+        }
+
+    }
+
+    End { }
+}
+
 function Do-Write-Usage ($cmd) {
     $mirrors = ( Get-ColdStorageRepositories )
 
@@ -2413,11 +2478,12 @@ Else {
         $Words | Do-CloudUploadsAbort        
     }
     ElseIf ( $Verb -eq "bucket" ) {
-        $Words | Get-CloudStorageBucket
         If ( $Make ) {
-            $Words | Get-CloudStorageBucket | New-CloudStorageBucket
+            $Words | Get-CloudStorageBucket -Force:$Force | New-CloudStorageBucket
         }
-
+        Else {
+            $Words | Get-CloudStorageBucket -Force:$Force
+        }
     }
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Words = $Words
@@ -2589,22 +2655,7 @@ Else {
     ElseIf ( $Verb -eq "settle" ) {
         $sLocation, $Remainder = ( $Words )
         $PropsFileName = "props.json"
-        If ( $Bucket ) {
-            $sBucket, $Remainder = ( $Remainder )
-            If ( $sBucket ) {
-                $DefaultProps = @{ Bucket="${sBucket}" }
-                $PropsFileName = "aws.json"
-            }
-            Else {
-                Write-Warning "[$sCommandWithVerb] Where's the Bucket?"
-            }
-        }
-        Else {
-            $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
-            If ( $sDomain ) {
-                $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
-            }
-        }
+        $DefaultProps = $null
 
         If ( $sLocation -eq "here" ) {
             $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
@@ -2612,24 +2663,39 @@ Else {
         Else {
             $oFile = Get-FileObject($sLocation)
         }
-        If ( $oFile -ne $null ) {
-            $vProps = $Props            
-            If ( $vProps -is [String] ) {
-                If ( $vProps ) {
-                    $vProps = ( $vProps | ConvertFrom-Json )
+
+        If ( $Bucket ) {
+            $sBucket, $Remainder = ( $Remainder )
+
+            If ( -Not $sBucket ) {
+                $DefaultBucket = $oFile.FullName | Get-CloudStorageBucket -Force 
+                $iWhich = $Host.UI.PromptForChoice("${sCommandWithVerb}", "Use default bucket name [${DefaultBucket}]?", @("&Yes", "&No"), 1)
+                If ( $iWhich -eq 0 ) {
+                    $sBucket = $DefaultBucket
                 }
             }
-            If ( $vProps -ne $null ) {
-                $vProps = ( $vProps | Get-TablesMerged )
+
+            If ( $sBucket ) {
+                $DefaultProps = @{ Bucket="${sBucket}" }
+                $PropsFileName = "aws.json"
             }
-            If ( -Not ( $vProps -is [Hashtable] ) ) {
-                $vProps = $DefaultProps
+            Else {
+                Write-Warning "[$sCommandWithVerb] ${PropsFileName} maybe not created: No bucket name specified."
+            }
+        }
+        Else {
+            $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
+            If ( $sDomain ) {
+                $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
+            }
+            Else {
+                Write-Warning "[$sCommandWithVerb] ${PropsFileName} not created - expected: Domain, Repository, Prefix"
             }
 
-            $vProps | New-ColdStorageRepositoryDirectoryProps -File $oFile -Force:$Force -FileName:$PropsFileName 
-            If ( $Bucket ) {
-                ( $oFile | Add-ZippedBagsContainer )
-            }
+        }
+
+        If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
+            $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer
         }
     }
     ElseIf ( $Verb -eq "bleep" ) {
