@@ -400,6 +400,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Table, $File, [string] $FileName="
         Else {
             $PropsDir = ( New-Item -ItemType Directory -Path "${Parent}" -Name "${csName}" -Verbose )
         }
+        If ( $PropsDir ) {
+            $PropsDir.Attributes += "Hidden"
+        }
 
         If ( $PropsDir ) {
             $sPropsDir = $PropsDir.FullName
