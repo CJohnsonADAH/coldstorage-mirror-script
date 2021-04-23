@@ -50,6 +50,7 @@ param (
     [switch] $Dependencies = $false,
     $Props = $null,
     [String] $Output = "-",
+    [switch] $Posted = $false,
     [String[]] $Side = "local,cloud",
     [String[]] $Name = @(),
     [String] $LogLevel=0,
@@ -2376,6 +2377,217 @@ Param ( $Start, $End )
 
 }
 
+# Get-LineStripComments
+#
+# I used techniques suggested by answers in these threads, but rewritten from scratch for my own purposes:
+#
+# * Regex to strip line comments from C#: https://stackoverflow.com/questions/3524317/regex-to-strip-line-comments-from-c-sharp/3524689#3524689
+# * Use a function in Powershell replace: https://stackoverflow.com/questions/30666101/use-a-function-in-powershell-replace
+
+Function Get-LineStripComments {
+Param ( [Parameter(ValueFromPipeline=$true)] $Line )
+
+    Begin { }
+
+    Process {
+        
+        $reLineComments = "#(?:.*)$"
+        $reDoubleQuoteStrings = "([""][^""]*[""])"
+        $reSingleQuoteStrings = "(['][^']*['])"
+        $reLines = [regex] ( "{0}|{1}|{2}" -f $reLineComments,$reDoubleQuoteStrings,$reSingleQuoteStrings )
+        $reAllComment = ( "^{0}" -f $reLineComments )
+        
+        $reLines.Replace( $Line, [ScriptBlock] {
+            Param( $Match )
+            If ( $Match[0] -match $reAllComment ) {
+                ""
+            }
+            Else {
+                $Match[0]
+            }
+        } )
+    }
+
+    End { }
+}
+
+Function Test-CSScriptAllowed {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null )
+
+    Begin { }
+
+    Process {
+        $oLocation = Get-FileObject($From)
+
+        $DealBroke = $false
+
+        If ( Test-Path $oLocation.FullName -PathType Container ) {
+            $Relative = ( $File | Resolve-PathRelativeTo -Base $oLocation.FullName )
+            $DealBroke = ( $DealBroke -or ( $Relative -like ".\never\*" ) )
+            $DealBroke = ( $DealBroke -or ( $Relative -like ".\done\*" ) )
+        }
+
+        $Owner = ( Get-Acl $File.FullName | Select-Object Owner )
+        
+        $DealBroke = ( $DealBroke -or ( $As.Name -ne $Owner.Owner ) )
+
+        ( -Not $DealBroke ) | Write-Output
+    }
+
+    End { }
+}
+
+Function Test-CSScriptMovable {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null )
+
+    Begin { }
+
+    Process {
+        $oLocation = Get-FileObject($From)
+
+        $DealBroke = $false
+
+        If ( Test-Path $oLocation.FullName -PathType Container ) {
+            $Relative = ( $File | Resolve-PathRelativeTo -Base $oLocation.FullName )
+            $DealBroke = ( $DealBroke -or ( $Relative -like ".\again\*" ) )
+            $DealBroke = ( $DealBroke -or ( $Relative -like ".\never\*" ) )
+            $DealBroke = ( $DealBroke -or ( $Relative -like ".\done\*" ) )
+        }
+
+        $Owner = ( Get-Acl $File.FullName | Select-Object Owner )
+        
+        $DealBroke = ( $DealBroke -or ( $As.Name -ne $Owner.Owner ) )
+
+        ( -Not $DealBroke ) | Write-Output
+    }
+
+    End { }
+
+}
+
+Function Invoke-CSScriptedSession {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null, [switch] $Batch )
+
+    Begin {
+    }
+
+    Process {
+        $oLocation = Get-FileObject($From)
+
+        $ToMove = @( )
+        $Lines = @( )    
+        
+        If ( $File -is [string] ) {
+            $oFile = Get-Item -Path $File -Force
+        }
+        Else {
+            $oFile = Get-FileObject($File)
+        }
+
+        $oFile |% {
+            $Lines += Get-Content $_.FullName
+            $ToMove += $oFile
+        }
+
+        If ( $Lines.Count -gt 0 ) {
+            $LogFile = New-TemporaryFile
+
+            $BoundaryString = ( "script:{0}" -f ( $File.ToString().ToLower() -replace "[^a-z0-9]+","-" ) )
+            $t0 = ( Get-Date )
+            
+            # Preamble: Starting timestamp.
+            ( "Date: {0}" -f ( $t0 | Get-Date -UFormat "%c" ) ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+            ( "" ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+
+            # Loop: Log the command-line, then execute it and log the output.
+            $Lines |% {
+            
+                $Line = ( $_ | Get-LineStripComments )
+                If ( $Line.Trim() ) {
+                    $cmdLine = ( $Line.Trim() -replace "^(coldstorage([.]ps1)?\s+)?", ( "{0} " -f $global:gCSScriptPath ) )
+                    ( "--{0}" -f $BoundaryString ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                    ( "PS {0}> {1}" -f $PWD,$cmdLine ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                    ( "" ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                    ( "--{0}" -f $BoundaryString ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                    ( Invoke-Expression "${cmdline}" ) 2>&1 3>&1 4>&1 | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                    ( "" ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                }
+
+            }
+            $tN = ( Get-Date )
+
+            # Epilog: Output the time span.
+            ( "--{0}--" -f $BoundaryString ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+            Invoke-BatchCommandEpilog -Start:$t0 -End:$tN | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+
+            $Date = ( Get-Date -UFormat "%Y-%m-%d" )
+            $DoneDir = ( $oLocation.FullName | Join-Path -ChildPath "done" | Join-Path -ChildPath $Date )
+
+            $ToMove |% {
+                $movable = $_
+
+                $Timestamp = ( Get-Date -UFormat "%Y%m%d%H%M%S" )
+
+                $DoneFileBase = ( $movable.FullName | Resolve-PathRelativeTo -Base $oLocation.FullName )
+                $DoneFileBase = ( $DoneFileBase -replace "^[^A-Za-z0-9]+","" )
+                $DoneFile = ( $DoneFileBase -replace "[^A-Za-z0-9]+","-" )
+                $DoneFile = ( "{0}-run-{1}.txt" -f "${DoneFile}","${Timestamp}" )
+
+                $DonePath = ( $DoneDir | Join-Path -ChildPath $DoneFile )
+
+                If ( $movable | Test-CSScriptMovable -As:$As -From:$From ) {
+
+                    If ( -Not ( Test-Path -LiteralPath $DoneDir -PathType Container ) ) {
+                        $oDoneDir = ( New-Item -ItemType Directory -Path $DoneDir -Force )
+                    }
+
+                    Move-Item -LiteralPath $movable.FullName -Destination $DonePath
+
+                }
+
+                $DoneFile = ( $DoneFileBase -replace "[^A-Za-z0-9]+","-" )
+                $DoneFile = ( "{0}-run-{1}.log" -f "${DoneFile}","${Timestamp}" )
+                $DonePath = ( $DoneDir | Join-Path -ChildPath $DoneFile )
+                Write-Warning ( "DONE? {0}" -f $DonePath )
+                Move-Item -LiteralPath $LogFile.FullName -Destination $DonePath
+
+                $LogFile = ( Get-Item -LiteralPath $DonePath -Force )
+
+            }
+
+            $LogFile.FullName
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Out-CSStream {
+Param( [Parameter(ValueFromPipeline=$true)] $Line, [String] $Stream )
+
+    Begin { }
+
+    Process {
+        $JsonLines = ( $Line | Get-Member -MemberType NoteProperty |% { $PropName=$_.Name ; ( "{0}={1}" -f ${PropName}, ( $Line.${PropName} | Convertto-Json -Compress ) ) } )
+        Switch ( $Stream )
+        {
+            "Verbose" { $JsonLines | Write-Verbose }
+            "Debug" { $JsonLines | Write-Debug }
+            "Warning" { $JsonLines | Write-Warning }
+            "Error" { $JsonLines | Write-Error }
+            default { $Line | Format-Table 'VERB', 'WORDS', 'FLAGS', "PIPED" | Write-Output }
+
+        }
+                
+    }
+
+    End { }
+
+}
+
+
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 
 If ( $Verbose ) {
@@ -2633,6 +2845,28 @@ Else {
             -Output:$Output
         
     }
+    ElseIf ( $Verb -eq "script" ) {
+        If ( -Not $Posted ) {
+            $Words | Invoke-CSScriptedSession -Batch:$Batch
+        }
+        Else {
+            $Location = ( Get-ColdStorageSettings -Name "Script-Queue" | ConvertTo-ColdStorageSettingsFilePath )
+            $User = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            $Scripts = ( Get-ChildItem -Recurse -LiteralPath "${Location}" |% {
+                $File = $_
+
+                If ( Test-Path -LiteralPath $File.FullName -PathType Leaf ) {
+                    If ( $File | Test-CSScriptAllowed -As:$User -From:$Location ) { 
+                        Write-Warning ( "HELLO HELLO: {0}" -f $File.FullName )
+                        $File
+                    }
+                }
+
+            } )
+            $Scripts | Invoke-CSScriptedSession -Batch:$Batch -As:$User -From:$Location
+        }
+
+    }
     ElseIf ( $Verb -eq "settings" ) {
         Get-ColdStorageSettings -Name $Words
     }
@@ -2792,7 +3026,7 @@ Else {
         "Verb", "Words" |% { $Removed = ( $aFlags.Remove($_) ) }
 
         $oEcho = @{ "FLAGS"=( $MyInvocation.BoundParameters ); "WORDS"=( $Words ); "VERB"=( $Verb ); "PIPED"=( $Input ) }
-        [PSCustomObject] $oEcho | Format-Table 'VERB', 'WORDS', 'FLAGS', "PIPED"
+        [PSCustomObject] $oEcho | Out-CSStream -Stream:$Output
     }
     Else {
         Do-Write-Usage -cmd $MyInvocation.MyCommand

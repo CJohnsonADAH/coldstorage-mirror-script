@@ -4,6 +4,7 @@
     "7za": "//ADAHColdStorage/Share/Binaries/7z-1900/x64",
 	"Python": "//ADAHColdStorage/Share/Binaries/WinPython64/python-3.9.0rc1.amd64",
     "AWS": "//ADAHColdStorage/Share/Binaries/AWS-CLI",
+    "Script-Queue": "//ADAHColdStorage/Share/Scripts/.coldqueue",
 	"Institution": "Alabama Department of Archives and History",
 	"Drop-Server-SFTP": "adah@drop.adpn.org",
 	"Drop-Server-URL": "http://drop.adpn.org/drop-server/adah/drop_au_content_in_here/",
