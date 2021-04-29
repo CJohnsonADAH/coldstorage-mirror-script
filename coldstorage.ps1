@@ -2107,7 +2107,7 @@ Function Do-CloudUploadsAbort {
 
     $Bucket = "er-collections-unprocessed"
 
-    $sMultipartUploadsJSON = ( & aws s3api list-multipart-uploads --bucket "${Bucket}" )
+    $sMultipartUploadsJSON = ( & $( Get-ExeForAWSCLI ) s3api list-multipart-uploads --bucket "${Bucket}" )
     $oMultipartUploads = $( $sMultipartUploadsJSON | ConvertFrom-Json )
     $oMultipartUploads.Uploads |% {
         $Key = $_.Key
@@ -2115,7 +2115,7 @@ Function Do-CloudUploadsAbort {
         If ( $Key -and $UploadId ) {
             $cAbort = ( Read-Host -Prompt "ABORT ${Key}, # ${UploadId}? (Y/N)" )
             If ( $cAbort[0] -ieq 'Y' ) {
-                & aws s3api abort-multipart-upload --bucket "${Bucket}" --key "${Key}" --upload-id "${UploadId}"
+                & $( Get-ExeForAWSCLI ) s3api abort-multipart-upload --bucket "${Bucket}" --key "${Key}" --upload-id "${UploadId}"
             }
         }
     }
