@@ -2121,6 +2121,39 @@ Function Do-CloudUploadsAbort {
     }
 }
 
+Function Invoke-ColdStorageSettings {
+Param ( [Parameter(ValueFromPipeline=$true)] $Word, [String] $Output="" )
+
+    Begin { $SettingsMode=$null; $Skip=0 }
+
+    Process {
+        If ( $SettingsMode -eq "get" ) {
+          
+            Get-ColdStorageSettings -Name $Word -Output:$Output -Skip:$Skip
+            $Skip=1
+        
+        }
+        ElseIf ( $SettingsMode -ne $null ) {
+            ( "[{0}] Unknown method: the script does not have a way to {1} setting {2}." -f $global:gCSCommandWithVerb, $SettingsMode, $Word ) | Write-Warning
+        }
+        Else {
+
+            $SettingsMode = "get"
+            Switch ( $Word ) {
+
+                "get" { $SettingsMode=$Word }
+                "set" { $SettingsMode=$Word }
+                default { @("get", $Word) | Invoke-ColdStorageSettings -Output:$Output ; $Skip=1 }
+
+            }
+
+        }
+    }
+
+    End { }
+
+}
+
 Function Invoke-ColdStorageTo {
 Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly )
 
@@ -2589,6 +2622,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Line, [String] $Stream )
 
 
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
+$global:gCSCommandWithVerb = $sCommandWithVerb
 
 If ( $Verbose ) {
     $VerbosePreference = "Continue"
@@ -2868,7 +2902,7 @@ Else {
 
     }
     ElseIf ( $Verb -eq "settings" ) {
-        Get-ColdStorageSettings -Name $Words
+        $Words | Invoke-ColdStorageSettings -Output:$Output
     }
     ElseIf ( $Verb -eq "test" ) {
         $Object,$Words = $Words

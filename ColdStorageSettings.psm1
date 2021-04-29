@@ -27,17 +27,58 @@ Param ( $Command, $File=$null )
 #############################################################################################################
 
 Function Get-ColdStorageSettings {
-Param([String] $Name="")
+Param([String] $Name="", [String] $Output="", [Int] $Skip=0 )
 
-Begin { }
+    Begin { }
 
-Process {
-    Get-ColdStorageSettingsJson | Get-JsonSettings -Name $Name
+    Process {
+
+        $vSetting = ( Get-ColdStorageSettingsJson | Get-JsonSettings -Name $Name )
+        Switch ( $Output ) {
+            "CSV" { $vSetting | ConvertTo-KeyValuePairs -Name:$Name | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$Skip }
+            "JSON" { $vSetting | ConvertTo-Json }
+            default { $vSetting }
+        }
+
+    }
+
+    End { }
+
 }
 
-End { }
-}
+Function ConvertTo-KeyValuePairs {
+Param ( [Parameter(ValueFromPipeline=$true)] $Data, [String] $Name="" )
 
+    Begin { }
+
+    Process {
+        
+        If ( $Data -is [Hashtable] ) {
+            
+            $Data.Keys |% {
+                $Key = $_ ; $Value = $Table[$Key]
+                [PSCustomObject] @{ "Name"=( $Key ); "Value"=( $Value ) }
+            }
+
+        }
+        ElseIf ( $Data | Get-Member -MemberType NoteProperty ) {
+
+            $Data.PSObject.Properties |% {
+                $Key = $_.Name; $Value = $_.Value
+                [PSCustomObject] @{ "Name"=( $Key ); "Value"=( $Value ) }
+            }
+               
+        }
+        Else { 
+        
+            [PSCustomObject] @{ "Name"=( $Name ); "Value"=( $Data ) }
+
+        }
+
+    }
+
+    End { }
+}
 
 Function Get-TablesMerged {
 Param ( [switch] $NoClobber=$false, [switch] $ReturnObject=$false )
@@ -273,6 +314,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Module, [switch] $Bork=$false )
 }
 
 Export-ModuleMember -Function Get-ColdStorageSettings
+Export-ModuleMember -Function ConvertTo-KeyValuePairs
 Export-ModuleMember -Function Get-TablesMerged
 Export-ModuleMember -Function Get-ColdStorageSettingsFiles
 Export-ModuleMember -Function Get-ColdStorageSettingsDefaults
