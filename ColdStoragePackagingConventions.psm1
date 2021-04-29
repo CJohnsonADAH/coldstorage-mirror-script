@@ -192,6 +192,41 @@ End { }
 
 }
 
+Function Get-ItemPackageZippedBag {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse )
+
+    Begin { }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        
+        # 1. Does this have a Package property .CSPackageZip? If so, return that.
+        $oZipNotes = ( $oFile | Get-Member -MemberType NoteProperty -Name "CSPackageZip" )
+        If ( $oZipNotes ) {
+            $oZipNotes |% { $PropName = $_.Name ; $oFile.${PropName} }
+        }
+
+        # 2. Is this a direct reference to a zipped package? If so, return this.
+        ElseIf ( Test-ZippedBag -LiteralPath $oFile ) {
+            $oFile
+        }
+
+        # 3. Try to get packaging information on this item, recursing into child items if requested.
+        Else {
+            $oPackage = ( $oFile | Get-ItemPackage -Ascend -CheckZipped )
+            If ( $oPackage.Count -gt 0 ) {
+                $oPackage | Get-ItemPackageZippedBag
+            }
+            ElseIf ( $Recurse ) {
+                $oFile | Get-ChildItemPackages -Recurse:$Recurse -CheckZipped | Get-ItemPackageZippedBag
+            }
+        }
+
+    }
+
+    End { }
+
+}
 
 #############################################################################################################
 ## LOOSE FILES: Typically found in ER Processed directory and DA directories. ###############################
@@ -645,6 +680,7 @@ Export-ModuleMember -Function Test-IndexedDirectory
 Export-ModuleMember -Function Test-BaggedIndexedDirectory
 Export-ModuleMember -Function Test-ZippedBag
 Export-ModuleMember -Function Select-ZippedBags
+Export-ModuleMember -Function Get-ItemPackageZippedBag
 Export-ModuleMember -Function Test-LooseFile
 Export-ModuleMember -Function Test-UnbaggedLooseFile
 Export-ModuleMember -Function Get-PathToBaggedCopyOfLooseFile

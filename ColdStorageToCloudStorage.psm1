@@ -298,18 +298,38 @@ End {
 
 }
 
+Function Get-ItemPackageForCloudStorageBucket {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, $ShowWarnings=$null )
+
+    Begin { }
+
+    Process {
+        $Items = ( Get-FileObject -File $File | Get-ItemPackageZippedBag -Recurse:$Recurse )
+        If ( $Items ) {
+            $Items
+        }
+        ElseIf ( $ShowWarnings ) {
+            ( "[{0}{1}] Could not find preservation package: {2}" -f $ShowWarnings,$( If ( $Recurse ) { " -Recurse" } Else { "" } ),$File ) | Write-Warning
+        }
+    }
+
+    End { }
+
+}
+
 Function Add-PackageToCloudStorageBucket {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [switch] $Recurse=$false )
 
     Begin { If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
 
-        $oFile = Get-FileObject -File $File
-        $sFile = $oFile.FullName
-        $Bucket = ($sFile | Get-CloudStorageBucket)
+        $oFile = $null
+        $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:("{0} to cloud" -f $global:gCSScriptName) |% {
+            $oFile = $_
+            $sFile = $oFile.FullName
+            $Bucket = ($sFile | Get-CloudStorageBucket)
 
-        If ( $sFile ) {
             If ( $Bucket ) {
                 # AWS-CLI does not cope well with long path names even if Windows is configured to handle them.
                 # Workaround solution, from https://forums.aws.amazon.com/thread.jspa?threadID=322302&tstart=100 :
@@ -324,11 +344,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
                 & $( Get-ExeForAWSCLI ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
             }
             Else {
-                Write-Warning ( "[to cloud] Could not identify bucket: {0}" -f $File )
+                Write-Warning ( "[{0} to cloud] Could not identify bucket: {1}" -f $global:gCSScriptName,$File )
             }
-        }
-        Else {
-            Write-Warning ( "[to cloud] No such file: {0}" -f $File )
         }
 
     }
@@ -340,4 +357,5 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false )
 Export-ModuleMember -Function Get-CloudStorageBucket
 Export-ModuleMember -Function New-CloudStorageBucket
 Export-ModuleMember -Function Get-CloudStorageListing
+Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket
