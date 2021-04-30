@@ -2370,6 +2370,42 @@ Param (
 
 }
 
+Function Invoke-ColdStorageRepository {
+Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, [String] $Output="" )
+
+    Begin { }
+
+    Process {
+        If ( $Items -Or ( -Not $Repository ) ) {
+            $aItems = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )            
+        }
+        Else {
+            $aItems = @( )
+            $Words | ForEach {
+                $Term = $_
+                If ( Test-Path -LiteralPath $Term ) {
+                    $aItems += , $Term
+                }
+                Else {
+                    $repo = Get-ColdStorageRepositories -Repository:$Term -Tag
+                    If ( $repo.Locations ) {
+                        $aItems += , $repo.Locations.ColdStorage
+                    }
+                }
+            }
+        }
+
+        $aItems |% {
+            $File = Get-FileObject -File $_ 
+            [PSCustomObject] @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
+        } | Out-CSData -Output:$Output
+    }
+
+    End { }
+
+}
+
+
 Function Add-CSPropsFile {
 Param (
     [Parameter(ValueFromPipeline=$true)] $Location,
@@ -2668,6 +2704,17 @@ Param( [Parameter(ValueFromPipeline=$true)] $Line, [String] $Stream )
 
 }
 
+Function Out-CSData {
+Param ( [String] $Output="" )
+
+    Switch ( $Output ) {
+        "CSV" { $Input | ConvertTo-Csv -NoTypeInformation }
+        "JSON" { $Input | ConvertTo-Json }
+        default { $Input | Write-Output }
+    }
+
+}
+
 
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
@@ -2898,17 +2945,7 @@ Else {
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
-        $Table = ( $Words | Get-RepositoryStats -Count:($Words.Count) -Verbose:$Verbose -Batch:$Batch )
-        If ( "CSV" -ieq $Output ) {
-            $Table | ConvertTo-CSV
-        }
-        ElseIf ( "JSON" -ieq $Output ) {
-            $Table | ConvertTo-Json
-        }
-        Else {
-            $Table | Write-Output
-        }
-
+        ( $Words | Get-RepositoryStats -Count:($Words.Count) -Verbose:$Verbose -Batch:$Batch ) | Out-CSData -Output:$Output
     }
     ElseIf ( $Verb -eq "packages" ) {
 
@@ -2963,30 +3000,7 @@ Else {
 
     }
     ElseIf ( $Verb -eq "repository" ) {
-        If ( $Items -Or ( -Not $Repository ) ) {
-            $aItems = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )            
-        }
-        Else {
-            $aItems = @( )
-            $Words | ForEach {
-                $Term = $_
-                If ( Test-Path -LiteralPath $Term ) {
-                    $aItems += , $Term
-                }
-                Else {
-                    $repo = Get-ColdStorageRepositories -Repository:$Term -Tag
-                    If ( $repo.Locations ) {
-                        $aItems += , $repo.Locations.ColdStorage
-                    }
-                }
-            }
-        }
-
-        $aItems | ForEach {
-            $File = Get-FileObject -File $_
-            @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
-        }
-
+        Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$Words -Output:$Output
     }
     ElseIf ( $Verb -eq "zipname" ) {
         $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
