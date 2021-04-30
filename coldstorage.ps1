@@ -2636,6 +2636,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null, [swi
     Process {
         $oLocation = Get-FileObject($From)
 
+        $Date = ( Get-Date -UFormat "%Y-%m-%d" )
+        $DoneDir = ( $oLocation.FullName | Join-Path -ChildPath "done" | Join-Path -ChildPath $Date )
+
         $ToMove = @( )
         $Lines = @( )    
         
@@ -2663,6 +2666,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null, [swi
 
             # Loop: Log the command-line, then execute it and log the output.
             $Lines |% {
+                $OneLineLog = New-TemporaryFile
             
                 $Line = ( $_ | Get-LineStripComments )
                 If ( $Line.Trim() ) {
@@ -2670,6 +2674,19 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null, [swi
                     ( "--{0}" -f $BoundaryString ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
                     ( "PS {0}> {1}" -f $PWD,$cmdLine ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
                     ( "" ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
+                    
+                    ( "PS {0}> {1}" -f $PWD,$cmdLine ) | Out-File -Append -LiteralPath ( $OneLineLog.FullName ) -Encoding utf8
+                    
+                    $Timestamp = ( Get-Date -UFormat "%Y%m%d%H%M%S" )
+                    
+                    $CSWord = ( $cmdLine -split "\s" | Select-Object -Skip 1 | Select-Object -First 1 )
+                    $DoneFileBase = ( $CSWord -replace "^[^A-Za-z0-9]+","" )
+                    $DoneFile = ( $DoneFileBase -replace "[^A-Za-z0-9]+","-" )
+                    $DoneFile = ( "{0}-launched-{1}.txt" -f "${DoneFile}","${Timestamp}" )
+                    $DonePath = ( $DoneDir | Join-Path -ChildPath $DoneFile )
+
+                    Move-Item -LiteralPath $OneLineLog.FullName -Destination $DonePath
+
                     ( "--{0}" -f $BoundaryString ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
                     ( Invoke-Expression "${cmdline}" ) 2>&1 3>&1 4>&1 | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
                     ( "" ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
@@ -2681,9 +2698,6 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $As=$null, $From=$null, [swi
             # Epilog: Output the time span.
             ( "--{0}--" -f $BoundaryString ) | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
             Invoke-BatchCommandEpilog -Start:$t0 -End:$tN | Out-File -Append -LiteralPath ( $LogFile.FullName ) -Encoding utf8
-
-            $Date = ( Get-Date -UFormat "%Y-%m-%d" )
-            $DoneDir = ( $oLocation.FullName | Join-Path -ChildPath "done" | Join-Path -ChildPath $Date )
 
             $ToMove |% {
                 $movable = $_
