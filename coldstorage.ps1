@@ -2266,7 +2266,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [switch] $FullName, [switch] 
 }
 
 Function Invoke-ColdStorageInVs {
-Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $WhatIf=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false, [switch] $PassThru=$false )
+Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $Recurse=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false, [switch] $PassThru=$false, [switch] $WhatIf=$false )
 
         $Destinations = ("cloud", "drop", "adpnet")
         Switch ( $Destination ) {
@@ -2274,7 +2274,7 @@ Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Reposito
                 $aSide = ( $Side |% { $_ -split "," } )
                 $aItems = $( If ( $Items ) { $What } Else { ( Get-ZippedBagsContainer -Repository:$What ) } )
 
-                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -Context:("{0} {1}" -f $global:gCSCommandWithVerb,$Destination ) -ReturnObject | Select-CSFileInfo -FullName:$FullName -ReturnObject:$PassThru
+                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -Recurse:$true -Context:("{0} {1}" -f $global:gCSCommandWithVerb,$Destination ) -ReturnObject | Select-CSFileInfo -FullName:$FullName -ReturnObject:$PassThru
             }
             default {
                 ( "[{0} {1}] Unknown destination. Try: ({2})" -f ($global:gCSCommandWithVerb, $Destination, ( $Destinations -join ", " )) ) | Write-Warning
@@ -2958,7 +2958,7 @@ Else {
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $Object, $Words = $Words
-        Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
+        Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
     }
     ElseIf ( $Verb -eq "cloud" ) {
         $aSide = ( $Side |% { $_ -split "," } )

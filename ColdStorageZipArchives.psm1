@@ -244,8 +244,11 @@ Process {
     $Parent = ( $File | Get-ItemFileSystemParent | Get-UNCPathResolved )
     $Repository = ( $File | Get-FileRepositoryLocation ).FullName
 
-    $result = ( ( $Parent -ieq $Repository ) -and ( $oFile.Name -eq "ZIP" ) )
-    $result | Write-Output
+    $isNamedZIP = ( $oFile.Name -eq "ZIP" )
+    $isGlobalZIP = ( ( $Parent -ieq $Repository ) -and $isNamedZIP )
+    $isLocalZIP = ( ( $Parent | Test-ColdStoragePropsDirectory -NoPackageTest ) -and $isNamedZIP )
+
+    ( $isGlobalZIP -or $isLocalZIP ) | Write-Output
 }
 
 End { }

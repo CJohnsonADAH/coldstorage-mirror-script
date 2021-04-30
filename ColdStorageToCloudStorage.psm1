@@ -176,33 +176,40 @@ Param( [Parameter(ValueFromPipeline=$true)] $Bucket )
 }
 
 Function Get-CloudStorageListing {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [string] $Context="Get-CloudStorageListing" )
 
-Begin { $bucketFiles = @{ }; }
+Begin { $bucketFiles = @{ } }
 
 Process {
 
-    $oFile = Get-FileObject -File $File
-    $sFile = $oFile.FullName
-    $Bucket = ($sFile | Get-CloudStorageBucket)
-    If ( $Bucket -eq $null ) {
-        Write-Warning ( "Get-CloudStorageListing: could not determine bucket for {0}" -f $sFile )
-    }
-    Else{
-    
-        If ( $sFile ) {
-            If ( Test-Path -LiteralPath $sFile -PathType Container ) {
-                $Files = ( Get-ChildItem -LiteralPath $sFile -Filter "*.zip" )
-            }
-            Else {
-                $Files = @( Get-FileObject -File $sFile )
-            }
-        }
+    $oFile = $null
+    Get-FileObject($File) | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:$Context |% {
+        $oFile = $_
+        $sFile = $oFile.FullName
+        $Bucket = ($sFile | Get-CloudStorageBucket)
 
-        If ( -Not $bucketFiles.ContainsKey($Bucket) ) {
-            $bucketFiles[$Bucket] = @( )
+    #$oFile = Get-FileObject -File $File
+    #$sFile = $oFile.FullName
+    #$Bucket = ($sFile | Get-CloudStorageBucket)
+        If ( $Bucket -eq $null ) {
+            Write-Warning ( "Get-CloudStorageListing: could not determine bucket for {0}" -f $sFile )
         }
-        $bucketFiles[$Bucket] = $bucketFiles[$Bucket] + $Files
+        Else{
+    
+            If ( $sFile ) {
+                If ( Test-Path -LiteralPath $sFile -PathType Container ) {
+                    $Files = ( Get-ChildItem -LiteralPath $sFile -Filter "*.zip" )
+                }
+                Else {
+                    $Files = @( Get-FileObject -File $sFile )
+                }
+            }
+
+            If ( -Not $bucketFiles.ContainsKey($Bucket) ) {
+                $bucketFiles[$Bucket] = @( )
+            }
+            $bucketFiles[$Bucket] = $bucketFiles[$Bucket] + $Files
+        }
     }
 }
 
@@ -213,34 +220,53 @@ End {
 
         If ( $Files.Count -ne 1 ) {
             Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-ExeForAWSCLI ),$Bucket )
-            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" )
+            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
         }
         Else {
             $FileName = $Files.Name
             Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f $( Get-ExeForAWSCLI ),$Bucket,$FileName )
-            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" )
+            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" ) ; $awsExitCode = $LastExitCode
         }
-    }
 
-    If ( -Not $Unmatched ) {
-        $Side = @("local", "cloud")
-    }
+        If ( -Not $Unmatched ) {
+            $Side = @("local", "cloud")
+        }
 
-    Write-Debug ( "Side(s): {0}" -f ( $Side -join ", " ) )
+        Write-Debug ( "Side(s): {0}" -f ( $Side -join ", " ) )
 
-    If ( $jsonReply ) {
-        $oReply = ( $jsonReply | ConvertFrom-Json )
+        $sContext = ( "[{0}:{1}] " -f $global:gCSScriptName,$Bucket )
 
-        If ( $oReply ) {
+        If ( $jsonReply ) {
+            $oCloudContents = $null
+            $isDataGood = $false
+            $oReply = ( $jsonReply | ConvertFrom-Json )
+            If ( $oReply ) {
+                If ( $oReply.Contents ) {
+                    $oCloudContents = $oReply.Contents
+                    $isDataGood = $true
+                }
+                Else {
+                    ( "${sContext}could not find contents in JSON reply: {0}; object:" -f $jsonReply ) | Write-Warning
+                    $oReply | Write-Warning
+                }
+            }
+            Else {
+                ( "${sContext}could not parse JSON reply: {0}" -f $jsonReply ) | Write-Warning
+            }
+        }
+        Else {
+            $oCloudContents = @( )
+            $isDataGood = ( $awsExitCode -eq 0 )
+        }
 
-            If ( $oReply.Contents ) {
+        If ( $isDataGood ) {
 
-            $ObjectKeys = ( $oReply.Contents |% { $_.Key } )
-            $ObjectObjects = ( $oReply.Contents |% { $sKey = $_.Key; @{ "${sKey}"=$_ } } )
+            $ObjectKeys = ( $oCloudContents |% { $_.Key } )
+            $ObjectObjects = ( $oCloudContents |% { $sKey = $_.Key; @{ "${sKey}"=$_ } } )
             $sHeader = $null
 
             If ( $Side -ieq "local" ) {
-                Write-Debug "[vs-cloud:${Bucket}] Local side"
+                Write-Debug "${sContext}Local side"
                 If ( $Unmatched -And ( $Side.Count -gt 1 ) ) {
                     $sHeader = "`r`n=== ADAHColdStorage ==="
                 }
@@ -260,12 +286,13 @@ End {
             }
 
             $FileNames = ( $Files | Get-ItemPropertyValue -Name "Name" ) 
+
             If ( $Unmatched -and ( $Side -ieq "cloud" ) ) {
-                Write-Debug "[vs-cloud:${Bucket}] Cloud side"
+                "${sContext}Cloud side" | Write-Debug
                 If ( $Side.Count -gt 1 ) {
                     $sHeader = "`r`n=== Cloud Storage (AWS) ==="
                 }
-                $oReply.Contents |% {
+                $oCloudContents |% {
                     $Match = ( @( ) + @( $FileNames ) ) -ieq $_.Key
                     If ( $Match.Count -eq 0 ) {
                         If ( $ReturnObject ) {
@@ -279,21 +306,12 @@ End {
                 }
             }
 
-            }
-            Else {
-                Write-Warning ( "[cloud:${Bucket}] could not find contents in JSON reply: {0}; object:" -f $jsonReply )
-                Write-Warning $oReply
-            }
-
         }
         Else {
-            Write-Warning ( "[cloud:${Bucket}] could not parse JSON reply: {0}" -f $jsonReply )
+            Write-Warning ( "[cloud:${Bucket}] AWS CLI processing error: {0}" -f $awsExitCode )
         }
-    }
-    Else {
-        Write-Warning ( "[cloud:${Bucket}] null JSON reply: {0}" -f $jsonReply )
-    }
 
+    }
 }
 
 }

@@ -211,7 +211,12 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse )
             $oFile
         }
 
-        # 3. Try to get packaging information on this item, recursing into child items if requested.
+        # 3. Is this a container of a bunch of zipped packages? If so, return those packages.
+        ElseIf ( $oFile | Test-ZippedBagsContainer ) {
+            ( Get-ChildItem -LiteralPath $oFile.FullName -Filter "*.zip" )
+        }
+
+        # 4. Try to get packaging information on this item, recursing into child items if requested.
         Else {
             $oPackage = ( $oFile | Get-ItemPackage -Ascend -CheckZipped )
             If ( $oPackage.Count -gt 0 ) {
