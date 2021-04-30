@@ -2246,6 +2246,25 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
 }
 
 
+Function Invoke-ColdStorageInVs {
+Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $WhatIf=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false )
+
+        $Destinations = ("cloud", "drop", "adpnet")
+        Switch ( $Destination ) {
+            "cloud" { 
+                $aSide = ( $Side |% { $_ -split "," } )
+                $aItems = $( If ( $Items ) { $What } Else { ( Get-ZippedBagsContainer -Repository:$What ) } )
+
+                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -ReturnObject |% { If ( $FullName ) { $_.FullName } Else { $_.Name } }
+            }
+            default {
+                ( "[{0} {1}] Unknown destination. Try: ({2})" -f ($global:gCSCommandWithVerb, $Destination, ( $Destinations -join ", " )) ) | Write-Warning
+            }
+        }
+
+}
+
+
 Function Write-ColdStoragePackagesReport {
 Param (
     [Parameter(ValueFromPipeline=$true)] $Package,
@@ -2915,24 +2934,9 @@ Else {
         Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
-        $bUnmatched = ( $Verb -ieq "vs" )
         $Object, $Words = $Words
-        $Destinations = ("cloud", "drop")
-
-        If ( $Object -eq "cloud" ) {
-
-            $aSide = ( $Side |% { $_ -split "," } )
-            $aItems = $( If ( $Items ) { $Words } Else { ( Get-ZippedBagsContainer -Repository:$Words ) } )
-
-            $aItems | Get-CloudStorageListing -Unmatched:$bUnmatched -Side:($aSide) -ReturnObject |% { If ( $FullName ) { $_.FullName } Else { $_.Name } }
-
-        }
-        Else {
-            Write-Warning ( "[${Verb}:${Object}] Unknown destination. Try: ({0})" -f ( $Destinations -join ", " ) )
-        }
-
+        Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -WhatIf:$WhatIf
     }
-
     ElseIf ( $Verb -eq "cloud" ) {
         $aSide = ( $Side |% { $_ -split "," } )
 
