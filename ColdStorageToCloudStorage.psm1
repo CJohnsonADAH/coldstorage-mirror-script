@@ -211,7 +211,7 @@ End {
         $Bucket = $_
         $Files = $bucketFiles[$Bucket]
 
-        If ( $Files.Count -gt 1 ) {
+        If ( $Files.Count -ne 1 ) {
             Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-ExeForAWSCLI ),$Bucket )
             $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" )
         }
