@@ -38,6 +38,7 @@ param (
     [switch] $NoScan = $false,
     [switch] $Bucket = $false,
     [switch] $Make = $false,
+    [switch] $Halt = $false, 
     [switch] $Bundle = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
@@ -2103,22 +2104,66 @@ End { }
 
 }
 
-Function Do-CloudUploadsAbort {
+Function Stop-CloudStorageUploadsToBucket {
+Param ( [Parameter(ValueFromPipeline=$true)] $Bucket, [switch] $Batch=$false, [switch] $WhatIf=$false )
 
-    $Bucket = "er-collections-unprocessed"
+    Begin { If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
-    $sMultipartUploadsJSON = ( & $( Get-ExeForAWSCLI ) s3api list-multipart-uploads --bucket "${Bucket}" )
-    $oMultipartUploads = $( $sMultipartUploadsJSON | ConvertFrom-Json )
-    $oMultipartUploads.Uploads |% {
-        $Key = $_.Key
-        $UploadId = $_.UploadId
-        If ( $Key -and $UploadId ) {
-            $cAbort = ( Read-Host -Prompt "ABORT ${Key}, # ${UploadId}? (Y/N)" )
-            If ( $cAbort[0] -ieq 'Y' ) {
-                & $( Get-ExeForAWSCLI ) s3api abort-multipart-upload --bucket "${Bucket}" --key "${Key}" --upload-id "${UploadId}"
+    Process {
+
+        $sMultipartUploadsJSON = ( & $( Get-ExeForAWSCLI ) s3api list-multipart-uploads --bucket "${Bucket}" )
+        $oMultipartUploads = $( $sMultipartUploadsJSON | ConvertFrom-Json )
+        $oMultipartUploads.Uploads |% {
+            $Key = $_.Key
+            $UploadId = $_.UploadId
+            If ( $Key -and $UploadId ) {
+                If ( $Batch ) {
+                    Write-Warning "ABORT {$Key}, # ${UploadId} ..."
+                    $cAbort = 'Y'
+                }
+                Else {
+                    $cAbort = ( Read-Host -Prompt "ABORT ${Key}, # ${UploadId}? (Y/N)" )
+                }
+                If ( $cAbort[0] -ieq 'Y' ) {
+                    If ( $WhatIf ) {
+                        ( "& {0} {1} {2} {3} {4} {5} {6} {7} {8}" -f $( Get-ExeForAWSCLI ),"s3api","abort-multipart-upload","--bucket","${Bucket}","--key","${Key}","--upload-id","${UploadId}" ) | Write-Output
+                    }
+                    Else {
+                        & $( Get-ExeForAWSCLI ) s3api abort-multipart-upload --bucket "${Bucket}" --key "${Key}" --upload-id "${UploadId}"
+                    }
+                }
             }
         }
+
     }
+
+    End { }
+
+}
+
+Function Stop-CloudStorageUploads {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Batch=$false, [switch] $WhatIf=$false )
+
+    Begin {
+        $Buckets = @{ }
+    }
+
+    Process {
+        If ( $Package ) {
+            $MaybeBucket = ( Get-FileObject($Package) | Get-CloudStorageBucket )
+            If ( $MaybeBucket ) {
+                $Buckets[$MaybeBucket] = $true
+            }
+        }
+        Else {
+            ( "[{0}] Could not determine cloud storage bucket for item: '{1}'" -f $global:gCSCommandWithVerb,$Package ) | Write-Warning
+        }
+    }
+
+    End {
+        $Buckets.Keys | Stop-CloudStorageUploadsToBucket -Batch:$Batch -WhatIf:$WhatIf
+    }
+
 }
 
 Function Invoke-ColdStorageSettings {
@@ -2155,7 +2200,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Word, [String] $Output="" )
 }
 
 Function Invoke-ColdStorageTo {
-Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly )
+Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly, [switch] $Halt=$false, [switch] $Batch=$false )
 
     $Destinations = ("cloud", "drop", "adpnet")
 
@@ -2163,7 +2208,10 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
         Write-Warning ( "[${global:gScriptContextName}:${Destination}] Not yet implemented for repositories. Try: & coldstorage to ${Destination} -Items [File1] [File2] [...]" )
     }
     ElseIf ( $Destination -eq "cloud" ) {
-        If ( $Diff ) {
+        If ( $Halt ) {
+            $What | Stop-CloudStorageUploads -Batch:$Batch -WhatIf:$WhatIf
+        }
+        ElseIf ( $Diff ) {
             $Anchor = $PWD
             $Candidates = ( $What | Get-Item -Force | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
             $Candidates | Write-Verbose
@@ -2803,9 +2851,6 @@ Else {
 
         $Words | Add-ADPNetAUToDropServerStagingDirectory
     }
-    ElseIf ( $Verb -eq "abort-cloud-uploads" ) {
-        $Words | Do-CloudUploadsAbort        
-    }
     ElseIf ( $Verb -eq "bucket" ) {
         $allObjects = ( $allObjects | ColdStorage-Command-Line -Default ( ( Get-Location ).Path ) )
 
@@ -2820,8 +2865,7 @@ Else {
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Words = $Words
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-
-        Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -WhatIf:$WhatIf
+        Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $bUnmatched = ( $Verb -ieq "vs" )
