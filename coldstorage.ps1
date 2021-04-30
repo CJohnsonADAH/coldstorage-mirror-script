@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0428
+@version 2021.0430
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -2505,6 +2505,13 @@ function Do-Write-Usage ($cmd) {
     Write-Output "       `t`tfor detailed documentation"
 }
 
+Function Get-CSScriptVersion {
+    $oHelpMe = ( Get-Help ${global:gCSScriptPath} )
+    $ver = ( $oHelpMe.Synopsis -split "@" |% { If ( $_ -match '^version\b' ) { $_ } } )
+    If ( $ver.Count -gt 0 ) { Write-Output "${global:gCSScriptName} ${ver}" }
+    Else { $oHelpMe }
+}
+
 Function Invoke-BatchCommandEpilog {
 Param ( $Start, $End )
 
@@ -2746,10 +2753,7 @@ if ( $Help -eq $true ) {
     Do-Write-Usage -cmd $MyInvocation.MyCommand
 }
 ElseIf ( $Version ) {
-    $oHelpMe = ( Get-Help ${global:gCSScriptPath} )
-    $ver = ( $oHelpMe.Synopsis -split "@" |% { If ( $_ -match '^version\b' ) { $_ } } )
-    If ( $ver.Count -gt 0 ) { Write-Output "${global:gCSScriptName} ${ver}" }
-    Else { $oHelpMe }
+    Get-CSScriptVersion | Write-Output
 }
 Else {
     $t0 = date
