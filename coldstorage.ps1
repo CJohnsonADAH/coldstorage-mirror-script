@@ -2440,6 +2440,61 @@ Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, [String] $O
 
 }
 
+Function Invoke-ColdStorageSettle {
+Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch=$false )
+
+    Begin { }
+
+    Process {
+        $sLocation, $Remainder = ( $Words )
+        $PropsFileName = "props.json"
+        $DefaultProps = $null
+
+        If ( $sLocation -eq "here" ) {
+            $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
+        }
+        Else {
+            $oFile = Get-FileObject($sLocation)
+        }
+
+        If ( $Bucket ) {
+            $sBucket, $Remainder = ( $Remainder )
+
+            If ( -Not $sBucket ) {
+                $DefaultBucket = $oFile.FullName | Get-CloudStorageBucket -Force 
+                $iWhich = $Host.UI.PromptForChoice("${sCommandWithVerb}", "Use default bucket name [${DefaultBucket}]?", @("&Yes", "&No"), 1)
+                If ( $iWhich -eq 0 ) {
+                    $sBucket = $DefaultBucket
+                }
+            }
+
+            If ( $sBucket ) {
+                $DefaultProps = @{ Bucket="${sBucket}" }
+                $PropsFileName = "aws.json"
+            }
+            Else {
+                Write-Warning "[$sCommandWithVerb] ${PropsFileName} maybe not created: No bucket name specified."
+            }
+        }
+        Else {
+            $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
+            If ( $sDomain ) {
+                $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
+            }
+            Else {
+                Write-Warning "[$sCommandWithVerb] ${PropsFileName} not created - expected: Domain, Repository, Prefix"
+            }
+
+        }
+
+        If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
+            $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer
+        }
+    }
+
+    End { }
+
+}
 
 Function Add-CSPropsFile {
 Param (
@@ -3106,50 +3161,7 @@ Else {
 
     }
     ElseIf ( $Verb -eq "settle" ) {
-        $sLocation, $Remainder = ( $Words )
-        $PropsFileName = "props.json"
-        $DefaultProps = $null
-
-        If ( $sLocation -eq "here" ) {
-            $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
-        }
-        Else {
-            $oFile = Get-FileObject($sLocation)
-        }
-
-        If ( $Bucket ) {
-            $sBucket, $Remainder = ( $Remainder )
-
-            If ( -Not $sBucket ) {
-                $DefaultBucket = $oFile.FullName | Get-CloudStorageBucket -Force 
-                $iWhich = $Host.UI.PromptForChoice("${sCommandWithVerb}", "Use default bucket name [${DefaultBucket}]?", @("&Yes", "&No"), 1)
-                If ( $iWhich -eq 0 ) {
-                    $sBucket = $DefaultBucket
-                }
-            }
-
-            If ( $sBucket ) {
-                $DefaultProps = @{ Bucket="${sBucket}" }
-                $PropsFileName = "aws.json"
-            }
-            Else {
-                Write-Warning "[$sCommandWithVerb] ${PropsFileName} maybe not created: No bucket name specified."
-            }
-        }
-        Else {
-            $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
-            If ( $sDomain ) {
-                $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
-            }
-            Else {
-                Write-Warning "[$sCommandWithVerb] ${PropsFileName} not created - expected: Domain, Repository, Prefix"
-            }
-
-        }
-
-        If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
-            $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer
-        }
+        Invoke-ColdStorageSettle -Words:$Words -Bucket:$Bucket -Force:$Force -Batch:$Batch
     }
     ElseIf ( $Verb -eq "bleep" ) {
         Do-Bleep-Bloop
