@@ -522,7 +522,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $AU, $LocalFolder, $WhatIf )
         $TempFile = New-TemporaryFile
 
         $AU | Write-ADPNetAUReport | Out-File -LiteralPath $TempFile.FullName -Encoding utf8
-        $AU | Write-ADPNetAUUrlRetrievalTest | Out-File -LiteralPath $TempFile.FullName -Append -Encoding utf8
+        #$AU | Write-ADPNetAUUrlRetrievalTest | Out-File -LiteralPath $TempFile.FullName -Append -Encoding utf8
 
         # Upload output to SFTP repository with an appropriate file name, to be pulled down on the preservation node.
         $TempFile | Set-DropServerAUReport -LocalFolder:$LocalFolder -WhatIf:$WhatIf

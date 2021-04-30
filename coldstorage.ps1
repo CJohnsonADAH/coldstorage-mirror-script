@@ -2245,9 +2245,28 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
     }
 }
 
+Function Select-CSFileInfo {
+Param( [Parameter(ValueFromPipeline=$true)] $File, [switch] $FullName, [switch] $ReturnObject )
+
+    Begin { }
+
+    Process {
+        If ( $ReturnObject) {
+            $File
+        }
+        ElseIf ( $FullName ) {
+            $File.FullName
+        }
+        Else {
+            $File.Name
+        }
+    }
+
+    End { }
+}
 
 Function Invoke-ColdStorageInVs {
-Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $WhatIf=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false )
+Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $WhatIf=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false, [switch] $PassThru=$false )
 
         $Destinations = ("cloud", "drop", "adpnet")
         Switch ( $Destination ) {
@@ -2255,7 +2274,7 @@ Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Reposito
                 $aSide = ( $Side |% { $_ -split "," } )
                 $aItems = $( If ( $Items ) { $What } Else { ( Get-ZippedBagsContainer -Repository:$What ) } )
 
-                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -ReturnObject |% { If ( $FullName ) { $_.FullName } Else { $_.Name } }
+                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -Context:("{0} {1}" -f $global:gCSCommandWithVerb,$Destination ) -ReturnObject | Select-CSFileInfo -FullName:$FullName -ReturnObject:$PassThru
             }
             default {
                 ( "[{0} {1}] Unknown destination. Try: ({2})" -f ($global:gCSCommandWithVerb, $Destination, ( $Destinations -join ", " )) ) | Write-Warning
@@ -2331,11 +2350,8 @@ Param (
             
             }
         }
-        ElseIf ( $FullName ) {
-            $_.FullName
-        }
         Else {
-            $_
+            $_ | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
         }
         $Subsequent = $true
     }
@@ -2506,10 +2522,13 @@ function Do-Write-Usage ($cmd) {
 }
 
 Function Get-CSScriptVersion {
+Param ( [string] $Verb="", $Words=@( ), $Flags=@{ } )
+
     $oHelpMe = ( Get-Help ${global:gCSScriptPath} )
     $ver = ( $oHelpMe.Synopsis -split "@" |% { If ( $_ -match '^version\b' ) { $_ } } )
     If ( $ver.Count -gt 0 ) { Write-Output "${global:gCSScriptName} ${ver}" }
     Else { $oHelpMe }
+
 }
 
 Function Invoke-BatchCommandEpilog {
@@ -2753,7 +2772,7 @@ if ( $Help -eq $true ) {
     Do-Write-Usage -cmd $MyInvocation.MyCommand
 }
 ElseIf ( $Version ) {
-    Get-CSScriptVersion | Write-Output
+    Get-CSScriptVersion -Verb:$Verb -Words:$Words -Flags:$MyInvocation.BoundParameters | Write-Output
 }
 Else {
     $t0 = date
@@ -2939,7 +2958,7 @@ Else {
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $Object, $Words = $Words
-        Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -WhatIf:$WhatIf
+        Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
     }
     ElseIf ( $Verb -eq "cloud" ) {
         $aSide = ( $Side |% { $_ -split "," } )
