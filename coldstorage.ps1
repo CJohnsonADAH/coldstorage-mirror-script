@@ -616,8 +616,65 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
 
 Add-Type -Assembly System.Web
 
-function Select-URI-Link {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false )
+Function ConvertTo-HTMLDocument {
+Param ( [Parameter(ValueFromPipeline=$true)] $BodyBlock, [String] $Title )
+
+    Begin {
+        $NL = [Environment]::NewLine
+        $DocType = "<!DOCTYPE html>"
+
+        $Soup = @()
+
+        $Soup += , $DocType
+        $Soup += , "<html>"
+        $Soup += , "<head>"
+        $Soup += , ( "<title>{0}</title>" -f $Title )
+        $Soup += , "</head>"
+
+        $Soup += , "<body>"
+        $Soup += , ( "<h1>{0}</h1>" -f $Title )
+    }
+
+    Process {
+        $Soup += , $BodyBlock
+    }
+
+    End {
+        $Soup += , "</body>"
+        $Soup += , "</html>"
+
+        ( $Soup -join "${NL}" ) | Write-Output
+    }
+
+}
+
+Function ConvertTo-HTMLList {
+Param ( [Parameter(ValueFromPipeline=$true)] $LI, $ListTag="ul", $ItemTag="li" )
+
+    Begin {
+        $ListTagElement = ( $ListTag.Trim("<>") -split "\s+" | Select-Object -First 1 )
+        $OpenList=( "<{0}>" -f $ListTag );
+        $CloseList = ( "</{0}>" -f $ListTagElement )
+
+        $ItemTagElement = ( $ItemTag.Trim("<>") -split "\s+" | Select-Object -First 1 )
+        $OpenItem = ( "  <{0}>" -f $ItemTag )
+        $CloseItem = ( "</{0}>" -f $ItemTagElement )
+
+        $OpenList | Write-Output
+    }
+
+    Process {
+        ( '{0}{1}{2}' -f $OpenItem,$LI,$CloseItem ) | Write-Output
+    }
+
+    End {
+        $CloseList | Write-Output
+    }
+
+}
+
+Function ConvertTo-HTMLLink {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false, [String] $Tag='<a href="{0}">{1}</a>' )
 
     Begin { Push-Location; Set-Location $RelativeTo }
 
@@ -625,6 +682,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $Relat
         $URL = $File.FileURI
 
         $FileName = ($File | Resolve-Path -Relative)
+        $FileBaseName = ( $File.Name )
+        $FileSlug = ( $File.BaseName )
 
         If ( $RelativeHref ) {
             $RelativeURL = (($FileName.Split("\") | % { [URI]::EscapeDataString($_) }) -join "/")
@@ -636,15 +695,15 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $Relat
 
         $TEXT = [System.Web.HttpUtility]::HtmlEncode($FileName)
 
-        '<a href="{0}">{1}</a>' -f $HREF, $TEXT
+        ( $Tag -f $HREF, $TEXT, $FileBaseName, $FileSlug ) | Write-Output
     }
 
     End { Pop-Location }
 
 }
 
-function Add-File-URI {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null )
+function Add-FileURI {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null, [switch] $PassThru=$false )
 
     Begin { }
 
@@ -661,7 +720,9 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null )
         $protocolLocalAuthority = "file:///"
         
         $File | Add-Member -NotePropertyName "FileURI" -NotePropertyValue "${protocolLocalAuthority}$URL"
-        $File
+        If ( $PassThru ) {
+            $File
+        }
     }
 
     End { }
@@ -703,16 +764,16 @@ Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
         }
 
         If ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
-            $listing = Get-ChildItem -Recurse -LiteralPath "${UNC}" | Get-UNCPathResolved -ReturnObject | Add-File-URI | Sort-Object -Property FullName | Select-URI-Link -RelativeTo $UNC -RelativeHref:${RelativeHref}
+            
+            Get-ChildItem -Recurse -LiteralPath "${UNC}" `
+                | Get-UNCPathResolved -ReturnObject `
+                | Add-FileURI -PassThru `
+                | Sort-Object -Property FullName `
+                | ConvertTo-HTMLLink -RelativeTo $UNC -RelativeHref:${RelativeHref} `
+                | ConvertTo-HTMLList `
+                | ConvertTo-HTMLDocument -Title ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) ) `
+                | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
 
-            $NL = [Environment]::NewLine
-
-            $htmlUL = $listing | % -Begin { "<ul>" } -Process { '  <li>' + $_ + "</li>" } -End { "</ul>" }
-            $htmlTitle = ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) )
-
-            $htmlOut = ( "<!DOCTYPE html>${NL}<html>${NL}<head>${NL}<title>{0}</title>${NL}</head>${NL}<body>${NL}<h1>{0}</h1>${NL}{1}${NL}</body>${NL}</html>${NL}" -f $htmlTitle, ( $htmlUL -Join "${NL}" ) )
-
-            $htmlOut | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
         }
         Else {
             Write-Warning "index.html already exists in ${Directory}. To force index.html to be regenerated, use -Force flag."
