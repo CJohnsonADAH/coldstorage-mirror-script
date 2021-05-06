@@ -680,6 +680,185 @@ Process {
 End { }
 }
 
+
+#############################################################################################################
+## BUNDLED DIRECTORIES: index.html FOR BOUND SUBDIRECTORIES #################################################
+#############################################################################################################
+
+Add-Type -Assembly System.Web
+
+Function ConvertTo-HTMLDocument {
+Param ( [Parameter(ValueFromPipeline=$true)] $BodyBlock, [String] $Title )
+
+    Begin {
+        $NL = [Environment]::NewLine
+        $DocType = "<!DOCTYPE html>"
+
+        $Soup = @()
+
+        $Soup += , $DocType
+        $Soup += , "<html>"
+        $Soup += , "<head>"
+        $Soup += , ( "<title>{0}</title>" -f $Title )
+        $Soup += , "</head>"
+
+        $Soup += , "<body>"
+        $Soup += , ( "<h1>{0}</h1>" -f $Title )
+    }
+
+    Process {
+        $Soup += , $BodyBlock
+    }
+
+    End {
+        $Soup += , "</body>"
+        $Soup += , "</html>"
+
+        ( $Soup -join "${NL}" ) | Write-Output
+    }
+
+}
+
+Function ConvertTo-HTMLList {
+Param ( [Parameter(ValueFromPipeline=$true)] $LI, $ListTag="ul", $ItemTag="li" )
+
+    Begin {
+        $ListTagElement = ( $ListTag.Trim("<>") -split "\s+" | Select-Object -First 1 )
+        $OpenList=( "<{0}>" -f $ListTag );
+        $CloseList = ( "</{0}>" -f $ListTagElement )
+
+        $ItemTagElement = ( $ItemTag.Trim("<>") -split "\s+" | Select-Object -First 1 )
+        $OpenItem = ( "  <{0}>" -f $ItemTag )
+        $CloseItem = ( "</{0}>" -f $ItemTagElement )
+
+        $OpenList | Write-Output
+    }
+
+    Process {
+        ( '{0}{1}{2}' -f $OpenItem,$LI,$CloseItem ) | Write-Output
+    }
+
+    End {
+        $CloseList | Write-Output
+    }
+
+}
+
+Function ConvertTo-HTMLLink {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false, [String] $Tag='<a href="{0}">{1}</a>' )
+
+    Begin { Push-Location; Set-Location $RelativeTo }
+
+    Process {
+        $URL = $File.FileURI
+
+        $FileName = ($File | Resolve-Path -Relative)
+        $FileBaseName = ( $File.Name )
+        $FileSlug = ( $File.BaseName )
+
+        If ( $RelativeHref ) {
+            $RelativeURL = (($FileName.Split("\") | % { [URI]::EscapeDataString($_) }) -join "/")
+            $HREF = [System.Web.HttpUtility]::HtmlEncode($RelativeURL)
+        }
+        Else {
+            $HREF = [System.Web.HttpUtility]::HtmlEncode($URL)
+        }
+
+        $TEXT = [System.Web.HttpUtility]::HtmlEncode($FileName)
+
+        ( $Tag -f $HREF, $TEXT, $FileBaseName, $FileSlug ) | Write-Output
+    }
+
+    End { Pop-Location }
+
+}
+
+Function Add-FileURI {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null, [switch] $PassThru=$false )
+
+    Begin { }
+
+    Process {
+        $UNC = $File.FullName
+		If ($RelativeTo -ne $null) {
+			$BaseUNC = $RelativeTo.FullName
+			
+		}
+		
+        $Nodes = $UNC.Split("\") | % { [URI]::EscapeDataString($_) }
+
+        $URL = ( $Nodes -Join "/" )
+        $protocolLocalAuthority = "file:///"
+        
+        $File | Add-Member -NotePropertyName "FileURI" -NotePropertyValue "${protocolLocalAuthority}$URL"
+        If ( $PassThru ) {
+            $File
+        }
+    }
+
+    End { }
+
+}
+
+Function Add-IndexHTML {
+Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false, [string] $Context=$null )
+
+    Begin { $MyCommand = $MyInvocation.MyCommand ; $sContext = $( If ( $Context ) { $Context } Else { $MyCommand } ) }
+
+    Process {
+        if ( $Directory -eq $null ) {
+            $Path = ( Get-Location )
+        } else {
+            $Path = ( $Directory )
+        }
+
+        If ( ( -Not $Force ) -And ( Test-MirrorMatchedItem -File "${Path}" -Reflection ) ) {
+            $originalLocation = ( "${Path}" | Get-MirrorMatchedItem -Original )
+            ( "[{0}] This is a mirror-image location. Setting Location to: {1}." -f $sContext,$originalLocation ) | Write-Warning
+            $originalLocation | Add-IndexHTML -RelativeHref:$RelativeHref -Force:$Force -Context:$Context
+
+            $originalIndexHTML = ( Get-Item -Force -LiteralPath ( $originalLocation | Join-Path -ChildPath "index.html" ) )
+            If ( $originalIndexHTML ) {
+                If ( Test-Path -LiteralPath "${Path}" -PathType Container ) {
+                    ( "[{0}] Copying HTML from {1} to {2}." -f $sContext,$originalIndexHTML,$Path ) | Write-Warning
+                    Copy-Item -Force:$Force -LiteralPath $originalIndexHTML -Destination "${Path}"
+                }
+            }
+
+        }
+        ElseIf ( Test-Path -LiteralPath "${Path}" ) {
+            $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
+
+            $indexHtmlPath = ( "${UNC}" | Join-Path -ChildPath "index.html" )
+
+            If ( Test-Path -LiteralPath "${indexHtmlPath}" ) {
+                If ( $Force) {
+                    Remove-Item -Force -LiteralPath "${indexHtmlPath}"
+                }
+            }
+
+            If ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
+            
+                Get-ChildItem -Recurse -LiteralPath "${UNC}" `
+                | Get-UNCPathResolved -ReturnObject `
+                | Add-FileURI -PassThru `
+                | Sort-Object -Property FullName `
+                | ConvertTo-HTMLLink -RelativeTo $UNC -RelativeHref:${RelativeHref} `
+                | ConvertTo-HTMLList `
+                | ConvertTo-HTMLDocument -Title ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) ) `
+                | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
+
+            }
+            Else {
+                ( "[{0}] index.html already exists in {1}. To force index.html to be regenerated, use -Force flag." -f $sContext,$Directory ) | Write-Warning
+            }
+        }
+    }
+
+    End { }
+
+}
+
 Export-ModuleMember -Function Select-CSPackagesOK
 Export-ModuleMember -Function Test-IndexedDirectory
 Export-ModuleMember -Function Test-BaggedIndexedDirectory
@@ -699,3 +878,8 @@ Export-ModuleMember -Function Select-ERInstanceDirectories
 Export-ModuleMember -Function Get-ERInstanceData
 Export-ModuleMember -Function Get-ItemPackage
 Export-ModuleMember -Function Get-ChildItemPackages
+Export-ModuleMember -Function ConvertTo-HTMLDocument
+Export-ModuleMember -Function ConvertTo-HTMLList
+Export-ModuleMember -Function ConvertTo-HTMLLink
+Export-ModuleMember -Function Add-FileURI
+Export-ModuleMember -Function Add-IndexHTML

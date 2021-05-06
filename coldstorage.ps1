@@ -610,177 +610,6 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
 
 }
 
-#############################################################################################################
-## index.html FOR BOUND SUBDIRECTORIES ######################################################################
-#############################################################################################################
-
-Add-Type -Assembly System.Web
-
-Function ConvertTo-HTMLDocument {
-Param ( [Parameter(ValueFromPipeline=$true)] $BodyBlock, [String] $Title )
-
-    Begin {
-        $NL = [Environment]::NewLine
-        $DocType = "<!DOCTYPE html>"
-
-        $Soup = @()
-
-        $Soup += , $DocType
-        $Soup += , "<html>"
-        $Soup += , "<head>"
-        $Soup += , ( "<title>{0}</title>" -f $Title )
-        $Soup += , "</head>"
-
-        $Soup += , "<body>"
-        $Soup += , ( "<h1>{0}</h1>" -f $Title )
-    }
-
-    Process {
-        $Soup += , $BodyBlock
-    }
-
-    End {
-        $Soup += , "</body>"
-        $Soup += , "</html>"
-
-        ( $Soup -join "${NL}" ) | Write-Output
-    }
-
-}
-
-Function ConvertTo-HTMLList {
-Param ( [Parameter(ValueFromPipeline=$true)] $LI, $ListTag="ul", $ItemTag="li" )
-
-    Begin {
-        $ListTagElement = ( $ListTag.Trim("<>") -split "\s+" | Select-Object -First 1 )
-        $OpenList=( "<{0}>" -f $ListTag );
-        $CloseList = ( "</{0}>" -f $ListTagElement )
-
-        $ItemTagElement = ( $ItemTag.Trim("<>") -split "\s+" | Select-Object -First 1 )
-        $OpenItem = ( "  <{0}>" -f $ItemTag )
-        $CloseItem = ( "</{0}>" -f $ItemTagElement )
-
-        $OpenList | Write-Output
-    }
-
-    Process {
-        ( '{0}{1}{2}' -f $OpenItem,$LI,$CloseItem ) | Write-Output
-    }
-
-    End {
-        $CloseList | Write-Output
-    }
-
-}
-
-Function ConvertTo-HTMLLink {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false, [String] $Tag='<a href="{0}">{1}</a>' )
-
-    Begin { Push-Location; Set-Location $RelativeTo }
-
-    Process {
-        $URL = $File.FileURI
-
-        $FileName = ($File | Resolve-Path -Relative)
-        $FileBaseName = ( $File.Name )
-        $FileSlug = ( $File.BaseName )
-
-        If ( $RelativeHref ) {
-            $RelativeURL = (($FileName.Split("\") | % { [URI]::EscapeDataString($_) }) -join "/")
-            $HREF = [System.Web.HttpUtility]::HtmlEncode($RelativeURL)
-        }
-        Else {
-            $HREF = [System.Web.HttpUtility]::HtmlEncode($URL)
-        }
-
-        $TEXT = [System.Web.HttpUtility]::HtmlEncode($FileName)
-
-        ( $Tag -f $HREF, $TEXT, $FileBaseName, $FileSlug ) | Write-Output
-    }
-
-    End { Pop-Location }
-
-}
-
-function Add-FileURI {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null, [switch] $PassThru=$false )
-
-    Begin { }
-
-    Process {
-        $UNC = $File.FullName
-		If ($RelativeTo -ne $null) {
-			$BaseUNC = $RelativeTo.FullName
-			
-		}
-		
-        $Nodes = $UNC.Split("\") | % { [URI]::EscapeDataString($_) }
-
-        $URL = ( $Nodes -Join "/" )
-        $protocolLocalAuthority = "file:///"
-        
-        $File | Add-Member -NotePropertyName "FileURI" -NotePropertyValue "${protocolLocalAuthority}$URL"
-        If ( $PassThru ) {
-            $File
-        }
-    }
-
-    End { }
-
-}
-
-function Add-IndexHTML {
-Param( $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false )
-
-    if ( $Directory -eq $null ) {
-        $Path = ( Get-Location )
-    } else {
-        $Path = ( $Directory )
-    }
-
-    If ( ( -Not $Force ) -And ( Test-MirrorMatchedItem -File "${Path}" -Reflection ) ) {
-        $originalLocation = ( "${Path}" | Get-MirrorMatchedItem -Original )
-        Write-Warning "[Add-IndexHTML] This is a mirror-image location. Setting Location to: ${originalLocation}."
-        Add-IndexHTML -Directory $originalLocation -RelativeHref:$RelativeHref -Force:$Force
-
-        $originalIndexHTML = ( Get-Item -Force -LiteralPath ( $originalLocation | Join-Path -ChildPath "index.html" ) )
-        If ( $originalIndexHTML ) {
-            If ( Test-Path -LiteralPath "${Path}" -PathType Container ) {
-                Write-Warning "[Add-IndexHTML] Copying HTML from ${originalIndexHTML} to ${Path}."
-                Copy-Item -Force:$Force -LiteralPath $originalIndexHTML -Destination "${Path}"
-            }
-        }
-
-    }
-    ElseIf ( Test-Path -LiteralPath "${Path}" ) {
-        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
-
-        $indexHtmlPath = ( "${UNC}" | Join-Path -ChildPath "index.html" )
-
-        If ( Test-Path -LiteralPath "${indexHtmlPath}" ) {
-            If ( $Force) {
-                Remove-Item -Force -LiteralPath "${indexHtmlPath}"
-            }
-        }
-
-        If ( -Not ( Test-Path -LiteralPath "${indexHtmlPath}" ) ) {
-            
-            Get-ChildItem -Recurse -LiteralPath "${UNC}" `
-                | Get-UNCPathResolved -ReturnObject `
-                | Add-FileURI -PassThru `
-                | Sort-Object -Property FullName `
-                | ConvertTo-HTMLLink -RelativeTo $UNC -RelativeHref:${RelativeHref} `
-                | ConvertTo-HTMLList `
-                | ConvertTo-HTMLDocument -Title ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) ) `
-                | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
-
-        }
-        Else {
-            Write-Warning "index.html already exists in ${Directory}. To force index.html to be regenerated, use -Force flag."
-        }
-    }
-}
-
 ############################################################################################################
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
@@ -1433,7 +1262,7 @@ param (
             If ( Test-Path -LiteralPath $DirName -PathType Container ) {
                 If ( -Not ( Test-BagItFormattedDirectory($File) ) ) {
                     If ( -Not ( Test-IndexedDirectory($File) ) ) {
-                        Add-IndexHTML -Directory $DirName -RelativeHref
+                        $DirName | Add-IndexHTML -RelativeHref
                     }
                 }
             }
@@ -2907,7 +2736,8 @@ ElseIf ( $Version ) {
 Else {
     $t0 = date
     $sCommandWithVerb = "${sCommandWithVerb} ${Verb}"
-    
+    $global:gCSCommandWithVerb = $sCommandWithVerb
+
     If ( $Verb.Length -gt 0 ) {
         $global:gScriptContextName = $sCommandWithVerb
     }
@@ -3049,9 +2879,7 @@ Else {
     }
     ElseIf ( ("index", "bundle") -ieq $Verb ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        $Words | ForEach {
-            Add-IndexHTML -Directory $_ -RelativeHref -Force:$Force
-        }
+        $Words | Add-IndexHTML -RelativeHref -Force:$Force -Context:"${global:gCSCommandWithVerb}"
     }
     ElseIf ( $Verb -eq "manifest" ) {
 
