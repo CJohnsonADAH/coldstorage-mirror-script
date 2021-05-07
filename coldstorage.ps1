@@ -992,7 +992,7 @@ Param ($From, $To, [switch] $Batch=$false, $Depth=0)
 
 }
 
-Function Do-Mirror-Directories {
+Function Sync-MirroredDirectories {
 Param ($From, $to, $DiffLevel=1, [switch] $Batch=$false, $Depth=0)
     $aDirs = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -1115,7 +1115,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     ##################################################################################################################
 
     $Progress.Update( "${sStatus} (mkdir)" )
-    Do-Mirror-Directories -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth
+    Sync-MirroredDirectories -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth
 
     ##################################################################################################################
     ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
