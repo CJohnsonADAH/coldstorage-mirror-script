@@ -2910,8 +2910,8 @@ Else {
 
     }
     ElseIf ( $Verb -eq "to" ) {
-        $Object, $Words = $Words
-        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
+        $Object, $Remainder = $Words
+        $Words = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
         Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {

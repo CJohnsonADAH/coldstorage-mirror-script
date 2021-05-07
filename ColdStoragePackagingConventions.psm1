@@ -198,8 +198,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse )
     Begin { }
 
     Process {
-        $oFile = Get-FileObject($File)
-        
+        $oJustZippedNotes = ( $File | Get-Member -MemberType NoteProperty -Name "Zip" )
+        If ( $oJustZippedNotes ) {
+            $oFile = Get-FileObject( $oJustZippedNotes |% { $PropName = $_.Name ; $File.${PropName} } )
+        }
+        Else {
+            $oFile = Get-FileObject($File)
+        }
+
         # 1. Does this have a Package property .CSPackageZip? If so, return that.
         $oZipNotes = ( $oFile | Get-Member -MemberType NoteProperty -Name "CSPackageZip" )
         If ( $oZipNotes ) {
