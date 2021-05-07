@@ -583,11 +583,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             $mContents = ( $aContents | Measure-Object -Sum Length )
             #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
                 
-            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged
-            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count
-            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum
+            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
+            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
+            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
             If ( $aZipped -ne $false ) {
-                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped
+                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
             }
             $Package | Write-Output
         }
