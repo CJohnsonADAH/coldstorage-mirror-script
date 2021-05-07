@@ -1,4 +1,5 @@
-﻿#############################################################################################################
+﻿
+#############################################################################################################
 ## DEPENDENCIES #############################################################################################
 #############################################################################################################
 
@@ -33,7 +34,7 @@ $ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
 
 $global:gColdStorageMirrors = @{
     Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageDataER}\Processed", "${ColdStorageDataER}\Processed" )
-    Unprocessed=( "ER", "\\ADAHFS1\PermanentBackup\Unprocessed", "${ColdStorageDataER}\Unprocessed", "${ColdStorageDataER}\Unprocessed" )
+    Unprocessed=( "ER", "\\ADAHFS3\Data\ElectronicRecords\Unprocessed", "${ColdStorageDataER}\Unprocessed", "${ColdStorageDataER}\Unprocessed" )
     Working_ER=( "ER", "${ColdStorageDataER}\Working-Mirror", "\\ADAHFS3\Data\ArchivesDiv\PermanentWorking", "${ColdStorageDataER}\Working-Mirror" )
     Masters=( "DA", "${ColdStorageDataDA}\Masters", "\\ADAHFS3\Data\DigitalMasters", "${ColdStorageDataDA}\Masters" )
     Access=( "DA", "${ColdStorageDataDA}\Access", "\\ADAHFS3\Data\DigitalAccess", "${ColdStorageDataDA}\Access" )
@@ -54,50 +55,125 @@ $RepositoryAliases = @{
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
-Function Get-ColdStorageRepositories {
-Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false )
+Function Test-IsListable {
+Param ( [Parameter(ValueFromPipeline=$true)] $LiteralPath )
 
     Begin { }
 
     Process {
-        $out = $global:gColdStorageMirrors
-
-        If ( $Groups.Count -ge 1 ) {
-        # Filter according to groups
-            $filteredOut = @{}
-            $out.Keys |% { $Key = $_; $row = $out[$Key]; If ( $Groups -ieq $row[0] ) { Write-Debug ( "FILTERED IN: {0}" -f $Key ); $filteredOut[$Key] = $row } Else { Write-Debug ( "FILTERED OUT: {0}" -f $Key ) } }
-            $out = $filteredOut
-        }
-
-        If ( $Tag ) {
-            $filteredOut = @{}
-            $out.Keys |% {
-                $Key = $_
-                $row = $out[$Key]
-                $hLocations = @{
-                    "Reflection"=$row[1];
-                    "Original"=$row[2];
-                    "ColdStorage"=$row[3];
-                }
-                If ( -Not $NoTrash ) {
-                    $hLocations["Trashcan"] = ( $Key | Get-ColdStorageTrashLocation -Mirrors:($global:gColdStorageMirrors))
-                }
-                $filteredOut[$Key] = [PSCustomObject] @{
-                    "Collection"=$row[0];
-                    "Locations"=[PSCustomObject] $hLocations
-                }
+    $Listable = $false
+        If ( Test-Path -LiteralPath "${LiteralPath}" -PathType Container ) {
+            Try {
+                $FirstItem = ( Get-ChildItem -LiteralPath "${LiteralPath}" -ErrorAction Stop | Select-Object -First 1 )
+                $Listable = $true
             }
-            $out = $filteredOut
+            Catch {
+                $Listable = $false        
+            }
         }
-
-        If ( $Repository ) {
-            $out = ( $out[$Repository] )
-        }
-
-        ( $out ) | Write-Output
+        $Listable
     }
 
     End { }
+
+}
+
+Function Get-ColdStorageRepositories {
+Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false )
+
+    Begin { 
+        $GroupMeta = ( Get-ColdStorageSettings -Name "Repository-Groups" )
+        $MirrorsMeta = ( Get-ColdStorageSettings -Name "Repository-Mirrors" )
+    }
+
+    Process {
+
+        If ( $Repository ) {
+
+            $filteredOut = @{ }
+
+            If ( $Tag ) {
+                
+                $Row = $MirrorsMeta.${Repository}
+                
+                $RepositorySlug = ( ${Repository} -split "_" | Select-Object -First 1 )
+
+                $Locations = @( ${RepositorySlug} )
+                $Locations += ( $Row.Groups |% { $Key = $_; $GroupMeta.${Key} } )
+                
+                # 1. Let's fill in Original and Reflection and ColdStorage
+                "Original", "Reflection", "ColdStorage" |% { 
+                    $Aspect = $_
+                    If ( $Row.$Aspect -is [String] ) {
+                        $Alias = ( $Row.$Aspect ).Trim("$")
+                        $ToConvert = $Row.$Alias
+                    }
+                    Else {
+                        $ToConvert = $Row.$Aspect
+                    }
+
+                    $Converted = ( $ToConvert |% { $_ -f $Locations | ConvertTo-ColdStorageSettingsFilePath } )
+                    $Row.$Aspect = ( $Converted |% { $Path = $_ ; If ( $Path | Test-IsListable ) { $Path } } | Select-Object -First 1 )
+                    
+                }
+
+                # 2. Let's fill in Trashcan if not declined
+                If ( -Not $NoTrash ) {
+                    If ( $Row.Trashcan -eq $null ) {
+                        $Row | Add-Member -MemberType "NoteProperty" -Name "Trashcan" -Value ( $Repository | Get-ColdStorageTrashLocation )
+                    }
+                }
+
+                $salientGroups = $Row.Groups
+                If ( $Groups.Count -ge 1 ) {
+                    $salientGroups = $Groups
+                }
+
+                $filteredOut = [PSCustomObject] @{
+                    "Collection"=( $salientGroups | Select-Object -First 1 );
+                    "Locations"=[PSCustomObject] $Row
+                }
+
+            }
+            Else {
+                
+                $taggedOut = ( $Repository | Get-ColdStorageRepositories  -Groups:$Groups -Tag -NoTrash )
+                $filteredOut = @( $taggedOut.Collection, $taggedOut.Locations.Reflection, $taggedOut.Locations.Original, $taggedOut.Locations.ColdStorage )
+
+            }
+
+            ( $filteredOut | Write-Output )
+
+
+        }
+        ElseIf ( $Groups.Count -ge 1 ) {
+
+            $MirrorsMeta | Get-Member -MemberType NoteProperty |% {
+                $Key = $_.Name
+                $Row = $MirrorsMeta.${Key}
+
+                $Intersect = ( $Groups |? { $Row.Groups -icontains $_ } )
+                If ( $Intersect ) {
+                    ( "FILTERED IN ({0}): {1}" -f ($Intersect -join ", "), $Key ) | Write-Debug
+                    $Key | Get-ColdStorageRepositories -Groups:$Intersect -Tag:$Tag -NoTrash:$NoTrash
+                }
+                Else {
+                    ( "FILTERED OUT: {0}" -f $Key) | Write-Debug
+                }
+            }
+
+        }
+        Else {
+            $out = @{ }
+            $Repositories = ( $MirrorsMeta | Get-Member -MemberType NoteProperty |% { $_.Name } )
+            $Repositories |% { $Key = $_; $out[$Key] = ( $Key | Get-ColdStorageRepositories -Groups:$Groups -Tag:$Tag -NoTrash:$NoTrash ) }
+            $out | Write-Output
+        }
+
+    }
+    
+    End { }
+
 }
 
 Function Get-ColdStorageLocation {
@@ -801,3 +877,4 @@ Export-ModuleMember -Function Split-PathEntirely
 Export-ModuleMember -Function Split-MirrorMatchedPath
 Export-ModuleMember -Function Get-MirrorMatchedItem
 Export-ModuleMember -Function Test-MirrorMatchedItem
+Export-ModuleMember -Function Test-IsListable
