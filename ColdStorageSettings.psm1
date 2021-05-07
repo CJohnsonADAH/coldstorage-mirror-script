@@ -33,7 +33,7 @@ Param([String] $Name="", [String] $Output="", [Int] $Skip=0 )
 
     Process {
 
-        $vSetting = ( Get-ColdStorageSettingsJson | Get-JsonSettings -Name $Name )
+        $vSetting = ( Get-ColdStorageSettingsCascade | Get-JsonSettings -Name $Name )
         Switch ( $Output ) {
             "CSV" { $vSetting | ConvertTo-KeyValuePairs -Name:$Name | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$Skip }
             "JSON" { $vSetting | ConvertTo-Json }
@@ -130,14 +130,14 @@ Function Get-ColdStorageSettingsDefaults {
     $Out
 }
 
-Function Get-ColdStorageSettingsJson {
-    Get-ColdStorageSettingsFiles | % {
+Function Get-ColdStorageSettingsCascade {
+    Get-ColdStorageSettingsFiles |% {
         If ( $_ -eq $null ) {
             Get-ColdStorageSettingsDefaults | ConvertTo-Json
         } Else {
             Get-Content -Raw $_
         }
-    } | Get-JsonSettings | Get-TablesMerged | ConvertTo-Json
+    } | Get-JsonSettings | Get-TablesMerged
 }
 
 Function ConvertTo-ColdStorageSettingsFilePath {
@@ -153,12 +153,18 @@ End { }
 }
 
 Function Get-JsonSettings {
-Param([String] $Name="", [Parameter(ValueFromPipeline=$true)] $Json)
+Param([String] $Name="", [Parameter(ValueFromPipeline=$true)] $Table)
 
 Begin { }
 
 Process {
-    $Hashtable = ( $Json | ConvertFrom-Json )
+    If ( $Table -is [string] ) {
+        $Hashtable = ( $Table | ConvertFrom-Json )
+    }
+    Else {
+        $Hashtable = [PSCustomObject] $Table
+    }
+
     If ( $Name.Length -gt 0 ) {
         ( $Hashtable )."${Name}"
     }
@@ -318,7 +324,7 @@ Export-ModuleMember -Function ConvertTo-KeyValuePairs
 Export-ModuleMember -Function Get-TablesMerged
 Export-ModuleMember -Function Get-ColdStorageSettingsFiles
 Export-ModuleMember -Function Get-ColdStorageSettingsDefaults
-Export-ModuleMEmber -Function Get-ColdStorageSettingsJson 
+Export-ModuleMember -Function Get-ColdStorageSettingsCascade
 Export-ModuleMember -Function ConvertTo-ColdStorageSettingsFilePath
 Export-ModuleMember -Function Get-JsonSettings
 Export-ModuleMember -Function Get-ItemColdStorageProps
