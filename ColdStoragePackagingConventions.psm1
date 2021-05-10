@@ -193,9 +193,11 @@ End { }
 }
 
 Function Get-ItemPackageZippedBag {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] $ReturnContainer=$false )
 
-    Begin { }
+    Begin {
+        $Result = @( )
+    }
 
     Process {
         $oJustZippedNotes = ( $File | Get-Member -MemberType NoteProperty -Name "Zip" )
@@ -209,33 +211,62 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse )
         # 1. Does this have a Package property .CSPackageZip? If so, return that.
         $oZipNotes = ( $oFile | Get-Member -MemberType NoteProperty -Name "CSPackageZip" )
         If ( $oZipNotes ) {
-            $oZipNotes |% { $PropName = $_.Name ; $oFile.${PropName} }
+            $Result += , ( Get-FileObject( $oZipNotes |% { $PropName = $_.Name ; $oFile.${PropName} } ) )
         }
 
         # 2. Is this a direct reference to a zipped package? If so, return this.
         ElseIf ( Test-ZippedBag -LiteralPath $oFile ) {
-            $oFile
+            $Result += , $oFile
         }
 
         # 3. Is this a container of a bunch of zipped packages? If so, return those packages.
         ElseIf ( $oFile | Test-ZippedBagsContainer ) {
-            ( Get-ChildItem -LiteralPath $oFile.FullName -Filter "*.zip" )
+            $Result += ( Get-ChildItem -LiteralPath $oFile.FullName -Filter "*.zip" )
         }
 
         # 4. Try to get packaging information on this item, recursing into child items if requested.
         Else {
             $oPackage = ( $oFile | Get-ItemPackage -Ascend -CheckZipped )
             If ( $oPackage.Count -gt 0 ) {
-                $oPackage | Get-ItemPackageZippedBag
+                $Result += ( $oPackage | Get-ItemPackageZippedBag )
             }
             ElseIf ( $Recurse ) {
-                $oFile | Get-ChildItemPackages -Recurse:$Recurse -CheckZipped | Get-ItemPackageZippedBag
+                $Result += ( $oFile | Get-ChildItemPackages -Recurse:$Recurse -CheckZipped | Get-ItemPackageZippedBag )
+            }
+        }
+
+        If ( $Result.Count -gt 0 ) {
+            If ( -Not $ReturnContainer ) {
+                $Result | Write-Output
+                $Result = @( )
             }
         }
 
     }
 
-    End { }
+    End {
+        If ( $Result.Count -gt 0 ) {
+            $Result | Select-ZippedBagsContainers | Write-Output
+        }
+    }
+
+}
+
+Function Select-ZippedBagsContainers {
+Param ( [Parameter(ValueFromPipeline=$true)] $Zip )
+
+    Begin {
+        $Containers = @( )
+    }
+
+    Process {
+        $oZip = Get-FileObject($Zip)
+        $Containers += , $oZip.Directory
+    }
+
+    End {
+        $Containers | Sort-Object -Unique -Property FullName | Write-Output
+    }
 
 }
 
@@ -871,6 +902,7 @@ Export-ModuleMember -Function Test-BaggedIndexedDirectory
 Export-ModuleMember -Function Test-ZippedBag
 Export-ModuleMember -Function Select-ZippedBags
 Export-ModuleMember -Function Get-ItemPackageZippedBag
+Export-MOduleMember -Function Select-ZippedBagsContainers
 Export-ModuleMember -Function Test-LooseFile
 Export-ModuleMember -Function Test-UnbaggedLooseFile
 Export-ModuleMember -Function Get-PathToBaggedCopyOfLooseFile
