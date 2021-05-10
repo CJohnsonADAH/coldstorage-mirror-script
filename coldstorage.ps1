@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0430
+@version 2021.0510
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -577,8 +577,8 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
                         New-Item -ItemType HardLink -Path "${OriginalFullName}" -Target "${Payload}" | %{ "[$cmd] Bagged ${BagDir}, created link to payload: $_" | Write-Verbose }
 	        
                         # Set file attributes to ReadOnly -- bagged copies should remain immutable
-                        Set-ItemProperty -LiteralPath $OriginalFullName -Name IsReadOnly -Value $true
-                        Set-ItemProperty -LiteralPath $NewFilePath -Name IsReadOnly -Value $true
+                        Set-ItemProperty -LiteralPath "${OriginalFullName}" -Name IsReadOnly -Value $true
+                        Set-ItemProperty -LiteralPath "${Payload}" -Name IsReadOnly -Value $true
 
                     }
                     Else {
