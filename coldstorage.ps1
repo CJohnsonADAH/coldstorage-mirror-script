@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0510
+@version 2021.0510-1532
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -89,7 +89,7 @@ Function Get-CSDevelopmentBranchDirName {
 Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
 
     Process {
-        $Item.Parent.FullName | Join-Path -ChildPath ( "{0}-development" -f $ScriptHomeName )
+        $Item.Parent.FullName | Join-Path -ChildPath ( "{0}-development" -f ( $Item.Name -replace "-development$","" ) )
     }
 
 }
