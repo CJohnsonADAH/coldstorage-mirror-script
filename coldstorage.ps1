@@ -2649,7 +2649,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false )
             $Item | Get-ChildItemPackages -Recurse:$Recurse |? { -Not $_.CSPackageBagged }
         }
         Else {
-            $Item | Get-ItemPackage
+            $Item
         }
     }
 
