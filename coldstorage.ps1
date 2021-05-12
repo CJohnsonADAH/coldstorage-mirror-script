@@ -1533,7 +1533,7 @@ function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch
     $BagItPy = ( $BagIt | Join-Path -ChildPath "bagit.py" )
 	$Python = Get-ExeForPython
 
-    If ( -Not ( -Not ( $Skip.ToLower().Trim() | Select-String -Pattern "^bagit$" ) ) ) {
+    If ( -Not ( -Not ( ( $Skip |% { $_.ToLower().Trim() } ) | Select-String -Pattern "^bagit$" ) ) ) {
         "BagIt Validation SKIPPED for path ${DIRNAME}" | Write-Verbose -InformationAction Continue
         "OK-BagIt: ${DIRNAME} (skipped)" # > stdout
     }
