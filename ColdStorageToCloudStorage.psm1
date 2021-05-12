@@ -23,6 +23,27 @@ Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "Col
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
+Function Get-CloudStorageBucketNamePart {
+Param( [Parameter(ValueFromPipeline=$true)] $Item )
+
+    Begin { }
+
+    Process {
+        If ( $Item | Get-Member -MemberType NoteProperty -Name "FullName" ) {
+            $sItem = $Item.FullName
+        }
+        Else {
+            $sItem = ( "{0}" -f $Item )
+        }
+
+        $sItem = ( $sItem.ToLower() -replace "[^a-z0-9]+","-" )
+        $sItem = ( $sItem -replace "(^-+|-+$)","" )
+        $sItem
+    }
+
+    End { }
+}
+
 Function Get-CloudStorageBucket {
 Param( [Parameter(ValueFromPipeline=$true)] $Package, $Repository=@( ), [switch] $Force=$false )
 
@@ -53,7 +74,7 @@ Process {
                 "er-collections-${RepositorySlug}" | Write-Output
             }
             'Masters' {
-                $RepositorySlug = $sRepository.ToLower()
+                $SectionSlug = "da"
 
                 $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
 
@@ -81,10 +102,11 @@ Process {
                     $RelativePath = ( $ContainingDirectory.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location )
                 }
 
-                $DirectorySlug = ( $RelativePath.ToLower() -replace "[^a-z0-9]+","-" )
-                $DirectorySlug = ( $DirectorySlug -replace "(^-+|-+$)","" )
+                $SectionSlug = ( $SectionSlug | Get-CloudStorageBucketNamePart )
+                $RepositorySlug = ( $sRepository | Get-CloudStorageBucketNamePart )
+                $DirectorySlug = ( $RelativePath | Get-CloudStorageBucketNamePart )
 
-                "da-${RepositorySlug}-${DirectorySlug}" | Write-Output
+                ( "{0}-{1}-{2}" -f $SectionSlug,$RepositorySlug,$DirectorySlug ) |% { If ( $_.Length -lt 64 ) { $_ } Else { $_.Substring(0, 60) + "--" + $_.Substring($_.Length-1, 1)  } } |  Write-Output
             }
         }
 
@@ -372,6 +394,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
 
 }
 
+Export-ModuleMember -Function Get-CloudStorageBucketNamePart
 Export-ModuleMember -Function Get-CloudStorageBucket
 Export-ModuleMember -Function New-CloudStorageBucket
 Export-ModuleMember -Function Get-CloudStorageListing
