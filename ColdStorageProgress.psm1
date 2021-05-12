@@ -26,14 +26,18 @@ Class CSProgressMessenger {
     [String] $Stream
 
     CSProgressMessenger( ) {
-        $this.Init( $true )
+        $this.Init( $true, $false )
     }
 
     CSProgressMessenger( $Interactive ) {
-        $this.Init( $Interactive )
+        $this.Init( $Interactive, $false )
     }
 
-    [void] Init ( $Interactive ) {
+    CSProgressMessenger( $Interactive, $Batch ) {
+        $this.Init( $Interactive, $Batch )
+    }
+
+    [void] Init ( $Interactive, $Batch ) {
         $this.Id = ( ${global:gProgressNextId} + 1 )
         $global:gProgressNextId = (${global:gProgressNextId} + 1)
 
@@ -42,6 +46,9 @@ Class CSProgressMessenger {
 
         If ( $Interactive ) {
             $this.SetStream("Progress")
+        }
+        ElseIf ( $Batch ) {
+            $this.SetStream("Output")
         }
         Else {
             $this.SetStream($null)
@@ -77,14 +84,26 @@ Class CSProgressMessenger {
     }
 
     [void] Update( [String] $Status ) {
-        $this.Update($Status, 1, 0)
+        $this.Update($Status, 1, 0, "")
+    }
+
+    [void] Update( [String] $Status, [String] $LogMessage ) {
+        $this.Update($Status, 1, 0, $LogMessage)
     }
 
     [void] Update( [String] $Status, [int] $Step ) {
-        $this.Update($Status, $Step, 0)
+        $this.Update($Status, $Step, 0, "")
+    }
+
+    [void] Update( [String] $Status, [int] $Step, [String] $LogMessage ) {
+        $this.Update($Status, $Step, 0, $LogMessage)
     }
 
     [void] Update( [String] $Status, [int] $Step, [int] $N ) {
+        $this.Update($Status, $Step, $N, "")
+    }
+
+    [void] Update( [String] $Status, [int] $Step, [int] $N, [String] $LogMessage ) {
         $this.Status = $Status
 
         If ( $N -gt 0 ) {
@@ -95,6 +114,30 @@ Class CSProgressMessenger {
             $this.I = $this.I + $Step
         }
         $this.Redraw()
+
+        If ( $LogMessage )  {
+            $this.Log($LogMessage)
+        }
+    }
+
+    [void] Log ( [String] $Status ) {
+        
+        If ( $this.Stream -eq "Output" ) {
+            $Status | Write-Output
+        }
+        ElseIf ( $this.Stream -eq "Verbose" ) {
+            $Status | Write-Verbose
+        }
+        ElseIf ( $this.Stream -eq "Warning" ) {
+            $Status | Write-Warning
+        }
+        ElseIf ( $this.Stream -eq "Debug" ) {
+            $Status | Write-Debug
+        }
+        ElseIf ( $this.Stream -eq "Host" ) {
+            $Status | Write-Host
+        }
+
     }
 
     [void] Complete() {

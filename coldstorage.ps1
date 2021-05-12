@@ -969,7 +969,7 @@ Param ($From, $To, [switch] $Batch=$false, $Depth=0)
 
     ( "[mirror] Remove-MirroredFilesWhenObsolete -From:{0} -To:{1} -Batch:{2} -Depth:{3} -ProgressId:{4} -NewProgressId:{5}" -f $From, $To, $Batch, $Depth, $ProgressId, $NewProgressId ) | Write-Debug
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
     $aDirs = Get-ChildItem -LiteralPath "$To"
     $N = $aDirs.Count
@@ -1001,7 +1001,7 @@ Param ($From, $to, $DiffLevel=1, [switch] $Batch=$false, $Depth=0)
 
     $N = $aDirs.Count
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
     $Progress.Open( "Matching (mkdir): [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
@@ -1027,7 +1027,7 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0)
     }
     $N = $aFiles.Count
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
     $Progress.Open( "Matching Files (cp) [${From} => ${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
@@ -1043,20 +1043,17 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0)
         
         If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
 
-            $Progress.Update( "${BaseName}" )
-            If ( $Batch ) {
-                Write-Output "${CopyFrom} =>> ${CopyTo}"
-            }
-        
+            $Progress.Update( "${BaseName}", "${CopyFrom} =>> ${CopyTo}" )
             Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch:$Batch
+
         }
 
     }
     $Progress.Complete()
 }
 
-Function Do-Mirror-Metadata {
-Param( $From, $To, [switch] $Batch=$false )
+Function Sync-Metadata {
+Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -1064,7 +1061,7 @@ Param( $From, $To, [switch] $Batch=$false )
     }
     $N = $aFiles.Count
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
     $Progress.Open( "Synchronizing metadata [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
@@ -1075,7 +1072,7 @@ Param( $From, $To, [switch] $Batch=$false )
 
         $Progress.Update( $_.Name )
 
-        Do-Reset-Metadata -from "${CopyFrom}" -to "${CopyTo}" -Verbose:$false
+        Sync-ItemMetadata -From "${CopyFrom}" -To "${CopyTo}" -Verbose:$false -Progress:$Progress
     }
     $Progress.Complete()
 }
@@ -1100,7 +1097,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
         }
     }
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.N = 5
 
     ##################################################################################################################
@@ -1129,7 +1126,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     ##################################################################################################################
 
     $Progress.Update( "${sStatus} (meta)" )
-    Do-Mirror-Metadata -From $From -To $To -Batch:$Batch
+    Sync-Metadata -From $From -To $To -Batch:$Batch -Progress:$Progress
 
     ##################################################################################################################
     ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
@@ -1167,7 +1164,7 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
         $Pairs = $mirrors.Keys
     }
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( "Mirroring between ADAHFS servers and ColdStorage", ( "{0} {1}" -f $Pairs.Count, ( "location" | Get-PluralizedText($Pairs.Count) ) ), $Pairs.Count )
     $Pairs | ForEach {
         $Pair = $_
@@ -1727,7 +1724,7 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 
     chdir $From
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( ( "Checking {0}" -f $From ), "Files" )
     $Progress.Update( "Files", 1, 100 )
 
@@ -1832,7 +1829,7 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$
             $nValidated = 0
 
             $sValidatingCount = "Validating {0:N0} BagIt Directories{1} in {2}"
-            $Progress = [CSProgressMessenger]::new( -Not $Batch )
+            $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
             $Progress.Open( ( $sValidatingCount -f $nTotal, "", $Pair ), "...", $nTotal )
             $MapLines | % {
                 $nGlanced = $nGlanced + 1
@@ -1913,7 +1910,7 @@ Begin { }
 
 Process {
     
-    $Progress = [CSProgressMessenger]::new( -Not $Batch )
+    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( ( "Processing {0}" -f "${sArchive}" ), "Validating bagged preservation package", 5 )
 
     If ( Test-BagItFormattedDirectory -File $File ) {
