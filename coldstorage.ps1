@@ -744,70 +744,6 @@ End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedIte
 
 }
 
-Function Get-Mirror-Matched-Item {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair, [switch] $Original=$false, [switch] $Reflection=$false, $Repositories=$null )
-
-Begin { $mirrors = ( Get-ColdStorageRepositories ) }
-
-Process {
-    
-    If ( $Original ) {
-        $Range = @(0)
-    }
-    ElseIf ( $Reflection ) {
-        $Range = @(1)
-    }
-    Else {
-        $Range = @(0..1)
-    }
-
-    # get self if $File is a directory, parent if it is a leaf node
-    $oDir = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject )
-
-    If ( $Repositories.Count -eq 0 -and ( $Pair -ne $null ) ) {
-        If ( $mirrors.ContainsKey($Pair) ) {
-            $Repositories = ( $mirrors[$Pair][1..2] | Get-LocalPathFromUNC |% { $_.FullName } )
-            $Matchable = $Repositories[$Range]
-        }
-        Else {
-            Write-Warning ( "Get-Mirror-Matched-Item: Requested repository pair ({0}) does not exist." -f $Pair )
-        }
-    }
-    ElseIf ( $Pair -eq $null ) {
-        Write-Warning ( "Get-Mirror-Matched-Item: No valid Repository found for item ({0})." -f $File )
-    }
-
-    $Matched = ( $Matchable -ieq $oDir.FullName )
-    If ( $Matched ) {
-        ($Repositories -ine $oDir.FullName)
-    }
-    ElseIf ( $oDir ) {
-        
-        $Child = ( $oDir.RelativePath -join "\" )
-        $Parent = $oDir.Parent
-        $sParent = $Parent.FullName
-
-        If ( $Parent ) {
-            $sParent = ( $sParent | Get-Mirror-Matched-Item -Pair $Pair -Repositories $Repositories -Original:$Original -Reflection:$Reflection )
-            If ( $sParent.Length -gt 0 ) {
-                $oParent = ( Get-Item -Force -LiteralPath "${sParent}" )
-                $sParent = $oParent.FullName
-            }
-            ((( @($sParent) + $oDir.RelativePath ) -ne $null ) -ne "") -join "\"
-        }
-        Else {
-
-            $oDir.FullName
-
-        }
-        
-    }
-
-}
-
-End { }
-
-}
 
 #############################################################################################################
 ## ADPNET DROP SERVER FUNCTIONS #############################################################################
@@ -898,28 +834,6 @@ function Sync-ItemMetadata ($From, $To, $Progress=$null, [switch] $Verbose) {
     }
     else {
         Write-Error "Source ${from} does not seem to exist."
-    }
-}
-
-function Sync-Metadata ($from, $to, $verbose) {
-    Get-ChildItem -Recurse "$from" | ForEach-Object -Process {
-
-        $LocalFile = $_.FullName
-        $LocalSrcDir = Split-Path -Parent $LocalFile
-        $LocalSrcDirParent = Split-Path -Parent $LocalFile
-        $LocalSrcDirRelPath = ""
-        while ($LocalSrcDirParent -ne $from) {
-            $LocalSrcDirStem = Split-Path -Leaf $LocalSrcDirParent
-            $LocalSrcDirParent = Split-Path -Parent $LocalSrcDirParent
-            $LocalSrcDirRelPath = "${LocalSrcDirStem}\${LocalSrcDirRelPath}"
-        }
-
-		$Basename = Split-Path -Leaf $LocalFile
-
-        $DestinationTargetPath = "${to}\${LocalSrcDirRelPath}${Basename}"
-
-        Set-Location $LocalSrcDir
-        Do-Reset-Metadata -from $_.FullName -to $DestinationTargetPath -Verbose:$verbose
     }
 }
 
