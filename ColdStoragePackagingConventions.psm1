@@ -692,6 +692,22 @@ Process { if ( Test-ERInstanceDirectory($File) ) { $File } }
 End { }
 }
 
+Function Add-ERInstanceData {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
+
+    Begin { }
+
+    Process {
+        $ERData = $null
+        If ( Test-ERInstanceDirectory -File $File ) {
+            $ERData = ( $File | Get-ERInstanceData )
+        }
+        $File | Add-Member -MemberType NoteProperty -Name CSPackageERMeta -Value $ERData -PassThru:$PassThru -Force
+    }
+
+    End { }
+}
+
 Function Get-ERInstanceData {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
@@ -702,14 +718,14 @@ Process {
     
     $DirParts = $BaseName.Split("_")
 
-    $ERMeta = @{
+    $ERMeta = [PSCustomObject] @{
         CURNAME=( $DirParts[0] )
         ERType=( $DirParts[1] )
         ERCreator=( $DirParts[2] )
         ERCreatorInstance=( $DirParts[3] )
         Slug=( $DirParts[4] )
     }
-    $ERMeta.ERCode = ( "{0}-{1}-{2}" -f $ERMeta.ERType, $ERMeta.ERCreator, $ERMeta.ERCreatorInstance )
+    $ERMeta | Add-Member -MemberType NoteProperty -Name ERCode -Value ( "{0}-{1}-{2}" -f $ERMeta.ERType, $ERMeta.ERCreator, $ERMeta.ERCreatorInstance )
 
     $ERMeta
 }
@@ -913,6 +929,7 @@ Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
 Export-ModuleMember -Function Undo-CSBagPackage
 Export-ModuleMember -Function Test-ERInstanceDirectory
 Export-ModuleMember -Function Select-ERInstanceDirectories
+Export-ModuleMember -Function Add-ERInstanceData
 Export-ModuleMember -Function Get-ERInstanceData
 Export-ModuleMember -Function Get-ItemPackage
 Export-ModuleMember -Function Get-ChildItemPackages

@@ -398,17 +398,30 @@ End {
 ## BagIt PACKAGING CONVENTIONS ##############################################################################
 #############################################################################################################
 
-Function Get-Bagged-Item-Notice {
-Param ( $Prefix, $FileName, $ERCode=$null, $Zip=$false, $Suffix=$null )
-    $LogMesg = "${Prefix}: " 
+Function Get-BaggedItemNoticeMessage {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Prefix, $Zip=$false, $Suffix=$null )
 
-    If ( $ERCode -ne $null ) {
-        $LogMesg += "${ERCode}, "
+    Begin { }
+
+    Process {
+
+    $oFile = ( Get-FileObject($File) | Add-ERInstanceData -PassThru )
+
+    $LogMesg = ""
+    If ( $Prefix ) {
+        $LogMesg = ( "{0}: {1}" -f $Prefix, $LogMesg ) 
     }
-    $LogMesg += $FileName
+
+    $ERCode = ( $oFile.CSPackageERMeta.ERCode )
+
+    $FileNameSlug = ( $oFile.Name )
+    If ( $ERCode -ne $null ) {
+        $FileNameSlug = ( "{0}, {1}" -f $ERCode,$FileNameSlug )
+    }
+    $LogMesg = ( "{0}{1}" -f $LogMesg,$FileNameSlug )
 
     If ( $Zip ) {
-        $sZip = $Zip.Name
+        $sZip = $oZip.Name
         $LogMesg += " (ZIP=${sZip})"
     }
 
@@ -421,18 +434,27 @@ Param ( $Prefix, $FileName, $ERCode=$null, $Zip=$false, $Suffix=$null )
     }
 
     $LogMesg
+
+    }
+
+    End { }
+
 }
 
-Function Write-Bagged-Item-Notice {
-Param( $FileName, $Item=$null, $ERCode=$null, $Status=$null, $Message=$null, $Zip=$false, [switch] $Quiet=$false, [switch] $Verbose=$false, [switch] $ReturnObject=$false, $Line=$null )
+Function Write-BaggedItemNoticeMessage {
+Param( $File, $Item=$null, $Status=$null, $Message=$null, [switch] $Zip=$false, [switch] $Quiet=$false, [switch] $Verbose=$false, [switch] $ReturnObject=$false, $Line=$null )
 
     $Prefix = "BAGGED"
     If ( $Status -ne $null ) {
         $Prefix = $Status
     }
 
+    If ( $Zip ) {
+        $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
+    }
+
     If ( $Prefix -like "BAG*" ) {
-        If ( $Zip ) {
+        If ( $oZip ) {
             $Prefix = "BAG/ZIP"
         }
     }
@@ -441,9 +463,9 @@ Param( $FileName, $Item=$null, $ERCode=$null, $Status=$null, $Message=$null, $Zi
         $Prefix = "${Prefix}:${Line}"
     }
 
-    $LogMesg = (Get-Bagged-Item-Notice -Prefix $Prefix -FileName $FileName -ERCode $ERCode -Zip $Zip -Suffix $Message)
+    $LogMesg = ($File | Get-BaggedItemNoticeMessage -Prefix $Prefix -Zip $Zip -Suffix $Message)
 
-    If ( $Zip -eq $null ) { # a ZIP package was expected, but was not found.
+    If ( $Zip -and ( $oZip -eq $null ) ) { # a ZIP package was expected, but was not found.
         Write-Warning $LogMesg
     }
     ElseIf ( $Verbose ) {
@@ -453,7 +475,7 @@ Param( $FileName, $Item=$null, $ERCode=$null, $Status=$null, $Message=$null, $Zi
     If ( ( $ReturnObject ) -and ( $Status -ne "SKIPPED" ) ) {
         Write-Output $Item
     }
-    ElseIf ( $Zip -eq $null ) {
+    ElseIf ( $Zip -and ( $oZip -ne $null ) ) {
         # NOOP
     }
     ElseIf ( $Verbose ) {
@@ -466,7 +488,7 @@ Param( $FileName, $Item=$null, $ERCode=$null, $Status=$null, $Message=$null, $Zi
 }
 
 Function Write-Unbagged-Item-Notice {
-Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
+Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
 
     $Prefix = "UNBAGGED"
     If ( $Status -ne $null ) {
@@ -476,7 +498,7 @@ Param( $FileName, $ERCode=$null, $Status=$null, $Message=$null, [switch] $Quiet=
         $Prefix = "${Prefix}:${Line}"
     }
 
-    $LogMesg = (Get-Bagged-Item-Notice -Prefix $Prefix -FileName $FileName -ERCode $ERCode -Suffix $Message)
+    $LogMesg = ($File | Get-BaggedItemNoticeMessage -Prefix $Prefix -Suffix $Message)
 
     If ( $Verbose ) {
         Write-Verbose $LogMesg
@@ -493,7 +515,7 @@ Function Out-BagItFormattedDirectory {
 
     [CmdletBinding()]
 
-Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false )
+Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false, $Progress=$null )
 
     Begin { }
 
@@ -506,6 +528,10 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false 
 
         "PS ${PWD}> bagit.py ." | Write-Verbose
     
+        If ( $Progress ) {
+            $Progress.Update( ( "Bagging {0}" -f $BagDir ), 0, ( "OK-BagIt: {0}" -f $BagDir ) )
+        }
+
         $BagItPy = ( Get-PathToBagIt | Join-Path -ChildPath "bagit.py" )
 	    $Python = Get-ExeForPython
         $Output = ( & $( Get-ExeForPython ) "${BagItPy}" . 2>&1 )
@@ -524,6 +550,10 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false 
             If ( $PassThru ) {
                 Get-FileObject -File $BagDir | Write-Output
             }
+            ElseIf ( $Progress ) {
+                $Progress.Update( ( "Bagged {0}" -f $BagDir ), ( "OK-BagIt: {0}" -f $BagDir ) )
+            }
+
 
         }
 
@@ -539,7 +569,7 @@ Function Out-BaggedPackage {
 
     [CmdletBinding()]
 
-Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$false )
+Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$false, $Progress=$null )
 
     Begin { $cmd = ( Get-Command-With-Verb ) }
 
@@ -567,7 +597,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
                 Move-Item -LiteralPath $Item -Destination $BagDir
 
                 # Now rewrite the counterpart directory as a BagIt-formatted preservation package
-                $BagDir | Out-BagItFormattedDirectory -PassThru:$PassThru
+                $BagDir | Out-BagItFormattedDirectory -PassThru:$PassThru -Progress:$Progress
                 If ( $LastExitCode -eq 0 ) {
 
                     # If all went well, then hardlink a reference at the loose file's old location to the new BagIt directory payload
@@ -599,7 +629,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
 
         # If this is a directory, then we run BagIt directly over the directory.
         ElseIf ( Test-Path -LiteralPath $Item.FullName -PathType Container ) {
-            $LiteralPath | Out-BagItFormattedDirectory -Verbose:$Verbose -PassThru:$PassThru
+            $LiteralPath | Out-BagItFormattedDirectory -Verbose:$Verbose -PassThru:$PassThru -Progress:$Progress
         }
 
         Else {
@@ -1148,6 +1178,9 @@ param (
     [switch]
     $PassThru=$false,
 
+    [switch]
+    $Batch=$false,
+
     [Parameter(ValueFromPipeline=$true)]
     $File
 )
@@ -1156,6 +1189,10 @@ param (
         if ( $Exclude.Length -eq 0 ) {
             $Exclude = "^$"
         }
+
+        $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+        $Progress.Open( "{0}" -f $global:gCSCommandWithVerb, "Bagging preservation packages" )
+
     }
 
     Process {
@@ -1163,14 +1200,6 @@ param (
 
         $DirName = $File.FullName
         $BaseName = $File.Name
-
-        If ( Test-ERInstanceDirectory($File) ) {
-            $ERMeta = ( $File | Get-ERInstanceData )
-            $ERCode = $ERMeta.ERCode
-        }
-        Else {
-            $ERCode = $null
-        }
 
         If ( $Bundle ) {
             If ( Test-Path -LiteralPath $DirName -PathType Container ) {
@@ -1183,7 +1212,7 @@ param (
         }
 
         If ( Test-BagItFormattedDirectory($File) ) {
-            Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "BagIt formatted directory" -ERCode:$ERCode -Verbose -Line ( Get-CurrentLine )
+            Write-BaggedItemNoticeMessage -File $File -Item:$File -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
             If ( $Rebag ) {
                 $Payload = ( $File | Select-BagItPayloadDirectory )
                 $Bag = ( $Payload.Parent )
@@ -1191,8 +1220,7 @@ param (
                 $OldManifest = "bagged-${Date}"
                 Write-Verbose "We'll have to rebag it, I spose."
 
-                $Anchor = $PWD
-                Set-Location $Bag.FullName
+                Push-Location $Bag.FullName
                 
                 $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
                 $sDate = ($Dates[0])
@@ -1215,18 +1243,19 @@ param (
 
                 Move-Item $Payload -Destination "rebag-data" -Verbose
                 
-                Set-Location "rebag-data"
+                Push-Location "rebag-data"
 
-                $PWD | Out-BagItFormattedDirectory
+                $PWD | Out-BagItFormattedDirectory -PassThru:$PassThru -Progress:$Progress
                 
                 Get-ChildItem -LiteralPath . |% {
                     Move-Item $_.FullName -Destination $Bag.FullName -Verbose
                 }
 
-                Set-Location $Bag.FullName
+                Pop-Location
+
                 Remove-Item "rebag-data"
 
-                Set-Location $Anchor
+                Pop-Location $Anchor
 
                 Write-Verbose ( $Bag ).FullName
 
@@ -1240,29 +1269,28 @@ param (
         }
         ElseIf ( Test-ERInstanceDirectory($File) ) {
             If ( -not ( $BaseName -match $Exclude ) ) {
-                $ERMeta = ( $File | Get-ERInstanceData )
-                $ERCode = $ERMeta.ERCode
 
-                chdir $DirName
+                Push-Location $DirName
 
                 if ( Test-BagItFormattedDirectory($File) ) {
-                    Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                    Write-BaggedItemNoticeMessage -File $File -Item:$File -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
                 else {
-                    Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+                    Write-Unbagged-Item-Notice -File $File -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
                     
                     $NotOK = ( $DirName | Do-Scan-ERInstance )
                     If ( $NotOK | Shall-We-Continue ) {
-                        Out-BagItFormattedDirectory -DIRNAME $DirName -PassThru:$PassThru
+                        Out-BagItFormattedDirectory -DIRNAME $DirName -PassThru:$PassThru -Progress:$Progress
                     }
 
                 }
+
+                Pop-Location
             }
             Else {
-                Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                Write-BaggedItemNoticeMessage -Status "SKIPPED" -File $File -Item:$File -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
 
-            chdir $Anchor
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
             #$ToScanAndBag += , [PSCustomObject] @{
@@ -1270,35 +1298,37 @@ param (
             #    "File"=$File.FullName;
             #    "Method"="Out-BagItFormattedDirectory"
             #}
-            Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
+            Write-Unbagged-Item-Notice -File $File -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
             If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                $File | Out-BaggedPackage -PassThru:$PassThru
+                $File | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
             }
         }
         Else {
             Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
-                If ( Test-UnbaggedLooseFile($_) ) {
-                    $LooseFile = $_.Name
+                $ChildItem = $_
+                If ( Test-UnbaggedLooseFile($ChildItem) ) {
+                    $LooseFile = $ChildItem.Name
                     #$ToScanAndBag += , [PSCustomObject] @{
                     #    "Message"=@{ "FileName"=$File.Name; "Message"="loose file. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
                     #    "File"=$File.FullName;
                     #    "Method"="Out-BaggedPackage"
                     #}
 
-                    Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
+                    Write-Unbagged-Item-Notice -File $ChildItem -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
-                    if ( $_ | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                        $_ | Out-BaggedPackage -PassThru:$PassThru
+                    if ( $ChildItem | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
+                        $ChildItem | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
                     }
                 }
                 Else {
-                    Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
+                    Write-BaggedItemNoticeMessage -File $ChildItem -Item:$File -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
                 }
             }
         }
     }
 
     End {
+        $Progress.Complete()
     }
 }
 
@@ -1313,13 +1343,13 @@ param (
     $Exclude="^$",
 
     [ScriptBlock]
-    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; $oZip = ( Get-ZippedBagOfUnzippedBag -File $BagDir ); Write-Bagged-Item-Notice -FileName $File.FullName -Item:$File -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip $oZip -Verbose -Quiet:$Quiet },
+    $OnBagged={ Param($File, $Payload, $BagDir, $Quiet); $PayloadPath = $Payload.FullName; Write-BaggedItemNoticeMessage -File $File -Item:$File -Message " = ${PayloadPath}" -Line ( Get-CurrentLine ) -Zip -Verbose -Quiet:$Quiet },
 
     [ScriptBlock]
     $OnDiff={ Param($File, $Payload, $Quiet); Write-Warning ( "DIFF: {0}, {1}" -f ( $File,$Payload ) ) },
 
     [ScriptBlock]
-    $OnUnbagged={ Param($File, $Quiet); Write-Unbagged-Item-Notice -FileName $File.FullName -Line ( Get-CurrentLine ) -Quiet:$Quiet },
+    $OnUnbagged={ Param($File, $Quiet); Write-Unbagged-Item-Notice -File $File -Line ( Get-CurrentLine ) -Quiet:$Quiet },
 
     [ScriptBlock]
     $OnZipped={ Param($File, $Quiet); $FilePath = $File.FullName; If ( -Not $Quiet )  { Write-Verbose "ZIP: ${FilePath}" } },
@@ -1338,10 +1368,9 @@ param (
     }
 
     Process {
-        $Anchor = $PWD
         
         $Parent = $File.Directory
-        chdir $Parent
+        Push-Location $Parent
 
         $FileName = $File.Name
         $FilePath = $File.FullName
@@ -1374,7 +1403,8 @@ param (
             $OnUnbagged.Invoke($File, $Quiet)
         }
 
-        chdir $Anchor
+        Pop-Location
+
     }
 
     End {
@@ -1445,45 +1475,48 @@ param (
             $Progress.Update( ( "Check DIR: {0} ... {0}" -f ( $File.Parent, $BaseName ) ), 60, 100 )
         }
 
+        If ( $File | Test-ColdStoragePropsDirectory ) {
+        # Is this a props directory?
+
+            # NOOP
+
+        }
+        ElseIf ( Test-ERInstanceDirectory($File) ) {
         # Is this an ER Instance directory?
-        If ( Test-ERInstanceDirectory($File) ) {
             
-            chdir $DirName
-            $ERMeta = ($File | Get-ERInstanceData)
-            $ERCode = $ERMeta.ERCode
+            Push-Location $DirName
 
             If ( -not ( $BaseName -match $Exclude ) ) {
 
                 if ( Test-BagItFormattedDirectory($File) ) {
-                    $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
-                    Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Zip $oZip -Quiet:$Quiet -Line ( Get-CurrentLine )
+                    Write-BaggedItemNoticeMessage -File $File -Item:$File -Zip -Quiet:$Quiet -Line ( Get-CurrentLine )
 
                 } else {
-                    Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                    Write-Unbagged-Item-Notice -File $File -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
             }
             Else {
-                Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                Write-BaggedItemNoticeMessage -Status "SKIPPED" -File $File -Item:$File -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
 
-            chdir $Anchor
+            Pop-Location
 
         }
         ElseIf ( Test-BagItFormattedDirectory($File) ) {
-            $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
-            Write-Bagged-Item-Notice -FileName $DirName -Item:$File -Zip $oZip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+            Write-BaggedItemNoticeMessage -File:$File -Item:$File -Zip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
-            Write-Unbagged-Item-Notice -FileName $DirName -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
+            Write-Unbagged-Item-Notice -File $File -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
         }
         Else {
 
-            chdir $DirName
+            Push-Location $DirName
             
-            dir -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-File-For-Bags -Progress:$Progress -Quiet:$Quiet
-            dir -Directory | Select-Unbagged-Dirs | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-Dir-For-Bags -Progress:$Progress -Quiet:$Quiet
+            Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-File-For-Bags -Progress:$Progress -Quiet:$Quiet
+            Get-ChildItem -Directory | Select-Unbagged-Dirs | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-Dir-For-Bags -Progress:$Progress -Quiet:$Quiet
 
-            chdir $Anchor
+            Pop-Location
+
         }
     }
 
@@ -1610,15 +1643,15 @@ End {
 
 # Invoke-BagChildDirectories: Given a parent directory (typically a repository root), loop through each child directory and do a clear-and-bag
 # Formerly known as: Do-Bag-Repo-Dirs
-Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false) {
+Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
     Push-Location $From
-    Get-ChildItem -Directory | Out-BagItFormattedDirectoryWhenCleared -Quiet -Exclude $null -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
+    Get-ChildItem -Directory | Out-BagItFormattedDirectoryWhenCleared -Quiet -Exclude $null -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
     Pop-Location
 }
 
 # Invoke-ColdStorageRepositoryBag
 # Formerly known as: Do-Bag
-function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false ) {
+function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     if ( $Pairs.Count -lt 1 ) {
@@ -1635,7 +1668,7 @@ function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $For
         $src = $locations[2]
         $dest = $locations[1]
 
-        Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
+        Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
         $i = $i + 1
     }
 }
@@ -1643,23 +1676,22 @@ function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $For
 function Invoke-ColdStorageDirectoryCheck {
 Param ($Pair, $From, $To, [switch] $Batch=$false)
 
-    $Anchor = $PWD
-
-    chdir $From
+    Push-Location $From
 
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( ( "Checking {0}" -f $From ), "Files" )
     $Progress.Update( "Files", 1, 100 )
 
-    dir -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-File-For-Bags -Progress:$Progress -Quiet:$Quiet
+    Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-File-For-Bags -Progress:$Progress -Quiet:$Quiet
 
     $Progress.Update( "Directories", 51, 100 )
 
-    dir -Directory | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-Dir-For-Bags -Progress:$Progress -Quiet:$Quiet -Exclude $null
+    Get-ChildItem -Directory | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-Dir-For-Bags -Progress:$Progress -Quiet:$Quiet -Exclude $null
 
     $Progress.Completed()
 
-    chdir $Anchor
+    Pop-Location
+
 }
 
 Function Invoke-ColdStorageRepositoryCheck {
@@ -2766,10 +2798,10 @@ Else {
         }
 
         If ( $Items ) {
-            $allObjects | Get-FileObject |% { ( "[{0}] CHECK: {1}{2}" -f $sCommandWithVerb,$_.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Verbose; $_ } | Get-CSPackagesToBag -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
+            $allObjects | Get-FileObject |% { ( "[{0}] CHECK: {1}{2}" -f $sCommandWithVerb,$_.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Verbose; $_ } | Get-CSPackagesToBag -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
         }
         Else {
-            Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
+            Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
         }
 
     }
