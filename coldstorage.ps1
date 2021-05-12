@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0510-1639
+@version 2021.0511
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -36,6 +36,7 @@ param (
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $NoScan = $false,
+    [switch] $NoValidate = $false,
     [switch] $Bucket = $false,
     [switch] $Make = $false,
     [switch] $Halt = $false, 
@@ -857,7 +858,7 @@ Function Do-Copy-Snapshot-File ($from, $to, $direction="over", [switch] $Batch=$
     }
 }
 
-function Do-Reset-Metadata ($from, $to, [switch] $Verbose) {
+function Sync-ItemMetadata ($From, $To, $Progress=$null, [switch] $Verbose) {
     
     if (Test-Path -LiteralPath $from) {
         $oFrom = (Get-Item -Force -LiteralPath $from)
@@ -883,8 +884,10 @@ function Do-Reset-Metadata ($from, $to, [switch] $Verbose) {
             $Acl = Get-Acl -LiteralPath $oTo.FullName
             $acl.SetOwner($oOwner)
 
-            if ($altered -or $verbse) {
-                Write-Output "meta:${oFrom} => meta:${oTo}"
+            If ($altered -or $verbose) {
+                If ( $Progress ) {
+                    $Progress.Log("meta:${oFrom} => meta:${oTo}")
+                }
             }
         }
         else {
@@ -1608,16 +1611,21 @@ param (
     End { }
 }
 
-function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
+function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false) {
 
-    $Anchor = $PWD
-    chdir $DIRNAME
+    Push-Location $DIRNAME
 
     $BagIt = Get-PathToBagIt
+    $BagItPy = ( $BagIt | Join-Path -ChildPath "bagit.py" )
 	$Python = Get-ExeForPython
-    If ( $Verbose ) {
+
+    If ( -Not ( -Not ( $Skip.ToLower().Trim() | Select-String -Pattern "^bagit$" ) ) ) {
+        "BagIt Validation SKIPPED for path ${DIRNAME}" | Write-Verbose -InformationAction Continue
+        "OK-BagIt: ${DIRNAME} (skipped)" # > stdout
+    }
+    ElseIf ( $Verbose ) {
         "bagit.py --validate ${DIRNAME}" | Write-Verbose
-        & $( Get-ExeForPython ) "${BagIt}\bagit.py" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
+        & $( Get-ExeForPython ) "${BagItPy}" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
         $NotOK = $LastExitCode
 
         if ( $NotOK -gt 0 ) {
@@ -1632,7 +1640,7 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
 
     }
     Else {
-        $Output = ( & $( Get-ExeForPython ) "${BagIt}\bagit.py" --validate . 2>&1 )
+        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" --validate . 2>&1 )
         $NotOK = $LastExitCode
         if ( $NotOK -gt 0 ) {
             $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
@@ -1646,7 +1654,8 @@ function Do-Validate-Bag ($DIRNAME, [switch] $Verbose = $false) {
         }
     }
 
-    chdir $Anchor
+    Pop-Location
+
 }
 
 Function Do-Validate-Item {
@@ -1664,10 +1673,10 @@ Process {
 
         $Validated = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
-            $Validated = ( Do-Validate-Bag -DIRNAME $_ -Verbose:$Verbose  )
+            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose  )
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
-            $Validated = ( $_ | Test-ZippedBagIntegrity )
+            $Validated = ( $_ | Test-ZippedBagIntegrity  )
         }
 
         $nChecked = $nChecked + 1
@@ -1903,8 +1912,8 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$
 
 }
 
-Function Do-Zip-Bagged-Directory {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Batch = $false )
+Function Compress-CSBaggedPackage {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Batch = $false, [String[]] $Skip=@() )
 
 Begin { }
 
@@ -1917,7 +1926,7 @@ Process {
         $oFile = Get-FileObject -File $File
         $sFile = Get-FileLiteralPath -File $File
 
-        $Validated = ( Do-Validate-Bag -DIRNAME $sFile )
+        $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip )
 
         $Progress.Update( "Validated bagged preservation package" )
         
@@ -1972,7 +1981,7 @@ Process {
             $Progress.Update( "Testing zip file integrity" )
 
             If ( $Result -ne $null ) {
-                $Result | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed )
+                $Result | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed -Skip:$Skip )
                 $Result | Write-Output
             }
 
@@ -2716,6 +2725,23 @@ Param ( [String] $Output="" )
 
 }
 
+Function Get-CSPackagesToBag {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false )
+
+    Begin { }
+
+    Process {
+        If ( $Recurse ) {
+            $Item | Get-ChildItemPackages -Recurse:$Recurse |? { -Not $_.CSPackageBagged }
+        }
+        Else {
+            $Item | Get-ItemPackage
+        }
+    }
+
+    End {
+    }
+}
 
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
@@ -2826,12 +2852,7 @@ Else {
         }
 
         If ( $Items ) {
-            If ( $Recurse ) {
-                $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; Get-Unbagged-ChildItem -LiteralPath $_.FullName } | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
-            }
-            Else {
-                $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
-            }
+            $allObjects | Get-FileObject |% { ( "[{0}] CHECK: {1}{2}" -f $sCommandWithVerb,$_.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Verbose; $_ } | Get-CSPackagesToBag -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
         }
         Else {
             Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru
@@ -2854,22 +2875,27 @@ Else {
     }
     ElseIf ( $Verb -eq "zip" ) {
 
+        $SkipScan = @( )
+        If ( $NoScan ) {
+            $SkipScan = @( "clamav", "bagit", "zip" )
+        }
+
         $allObjects |% {
             $sFile = Get-FileLiteralPath -File $_
             If ( Test-BagItFormattedDirectory -File $sFile ) {
-                $_ | Do-Zip-Bagged-Directory
+                $_ | Compress-CSBaggedPackage -Skip:$SkipScan
             }
             ElseIf ( Test-LooseFile -File $_ ) {
                 $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
                 If ($oBag) {
-                    $oBag | Do-Zip-Bagged-Directory
+                    $oBag | Compress-CSBaggedPackage -Skip:$SkipScan
                 }
                 Else {
                     Write-Warning "${sFile} is a loose file not a BagIt-formatted directory."
                 }
             }
             Else {
-                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Do-Zip-Bagged-Directory
+                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Compress-CSBaggedPackage -Skip:$SkipScan
             }
         }
 

@@ -26,7 +26,7 @@ Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchiv
 ######################################################################################################
 
 Function Test-ZippedBagIntegrity {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [String[]] $Skip=@() )
 
 Begin { }
 
@@ -34,19 +34,24 @@ Process {
 
     $oFile = Get-FileObject -File $File
     $sFileName = $oFile.Name
-    $Algorithm = "MD5"
+    If ( -Not ( $Skip | Select-String -Pattern "^zip$" ) ) {
+        $Algorithm = "MD5"
 
-    $OldMD5 = ($File | Get-ZippedBagProfessedMD5 )
-    $oChecksum = ( Get-FileHash -LiteralPath $oFile.FullName -Algorithm MD5 )
-    $NewMD5 = $oChecksum.hash
+        $OldMD5 = ($File | Get-ZippedBagProfessedMD5 )
+        $oChecksum = ( Get-FileHash -LiteralPath $oFile.FullName -Algorithm MD5 )
+        $NewMD5 = $oChecksum.hash
 
-    If ( $OldMD5 -ieq $NewMD5 ) {
-        "OK-Zip/${Algorithm}: ${sFileName}" | Write-Output
+        If ( $OldMD5 -ieq $NewMD5 ) {
+            "OK-Zip/${Algorithm}: ${sFileName}" | Write-Output
+        }
+        Else {
+            "ERR-Zip/${Algorithm}: ${sFileName} with checksum ${NewMD5}" | Write-Warning
+        }
     }
     Else {
-        "ERR-Zip/${Algorithm}: ${sFileName} with checksum ${NewMD5}" | Write-Warning
+        $Algorithm = "SKIPPED"
+        "OK-Zip/${Algorithm}: ${sFileName}" | Write-Output
     }
-
 }
 
 End { }
