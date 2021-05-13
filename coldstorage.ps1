@@ -2164,10 +2164,13 @@ Param (
 
     Process {
         $oContext = ( Get-FileObject $Context )
-        Push-Location $oContext.FullName
+
+        Push-Location ( $oContext | Get-ItemFileSystemLocation ).FullName
+
         $sFullName = $Package.FullName
         $sRelName = ( Resolve-Path -Relative -LiteralPath $Package.FullName )
         $sTheName = $( If ( $FullName ) { $sFullName } Else { $sRelName } )
+
         Pop-Location
 
         $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )

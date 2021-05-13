@@ -299,7 +299,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [Parameter(Position=0)
 
     Process {
         # We do this in PROCESS not in BEGIN/END because otherwise we can FUBAR relative paths used earlier in the pipeline.
-        Push-Location ( Get-FileLiteralPath($Base) )
+        Push-Location ( Get-FileObject( $Base ) | Get-ItemFileSystemLocation ).FullName
 
         $LiteralPath = $( If ( $LiteralPath -is [String] ) { $LiteralPath } Else { Get-FileObject($LiteralPath) |% { $_.FullName } } )
         $LiteralPath | Resolve-Path -Relative
