@@ -792,34 +792,47 @@ Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false )
     }
 }
 
-Function Do-Copy-Snapshot-File ($from, $to, $direction="over", [switch] $Batch=$false, [switch] $ReadOnly=$false) {
-    $o1 = ( Get-Item -Force -LiteralPath "${from}" )
+Function Copy-MirroredFile {
+Param ( $From, $To, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnly=$false, $Progress=$null )
+
+    $o1 = ( Get-Item -Force -LiteralPath "${From}" )
+
+    If ( $Progress ) {
+        $I0 = $Progress.I
+        $Progress.Update( ( "Copying: #{0}/{1}. {2}" -f ( ( $Progress.I - $I0 + 1), ( $Progress.N - $I0 + 1), $o1.Name ) ), 0, "${CopyFrom} =>> ${CopyTo}" )
+    }
+    Else {
+        $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+        $Progress.Open( ( "Copying Mirrored File [{0}]" -f ( ( Get-FileSystemLocation $o1 ).FullName | Resolve-Path -Relative ) ),  ( "Copying: {0}" -f ( $o1.Name ) ), 1 )
+    }
 
     If ( $o1.Count -gt 0 ) {
         If ( $Batch ) {
-            Copy-Item -LiteralPath "${from}" -Destination "${to}"
+            Copy-Item -LiteralPath "${From}" -Destination "${To}"
         }
         Else {
             Try {
-                Start-BitsTransfer -Source "${from}" -Destination "${to}" -Description "$direction to $to" -DisplayName "Copy from $from" -ErrorAction Stop
+                Start-BitsTransfer -Source "${From}" -Destination "${To}" -Description "${Direction} to ${To}" -DisplayName "Copy from ${From}" -ErrorAction Stop
             }
             Catch {
-                Write-Error "Start-BitsTransfer raised an exception"
+                "[Copy-MirroredFile] Start-BitsTransfer raised an exception ..." | Write-Error
             }
         }
     }
 
-    If ( -Not ( Test-Path -LiteralPath "${to}" ) ) {
-        Write-Error "Attempting to fall back to Copy-Item"
-        Copy-Item -LiteralPath "${from}" -Destination "${to}"
+    If ( -Not ( Test-Path -LiteralPath "${To}" ) ) {
+        "[Copy-MirroredFile] ... attempting to fall back to Copy-Item" | Write-Warning
+        Copy-Item -LiteralPath "${From}" -Destination "${To}"
     }
 
-    if ( $ReadOnly ) {
+    $Progress.Update( ( "Copied: #{0}/{1}. {2}" -f ( ( $Progress.I - $I0 + 1 ), ( $Progress.N - $I0 + 1 ), $o1.Name ) ), 1 )
+
+    If ( $ReadOnly ) {
 	    Try {
 	    	Set-ItemProperty -Path "$to" -Name IsReadOnly -Value $true
 	    }
 	    Catch {
-		    Write-Error "setting read-only failed: $to"
+		    "[Copy-MirroredFile] setting read-only failed: ${To}" | Write-Error
 	    }
     }
 }
@@ -965,8 +978,8 @@ Param ($From, $to, $DiffLevel=1, [switch] $Batch=$false, $Depth=0)
     $Progress.Complete()
 }
 
-Function Do-Mirror-Files {
-Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0)
+Function Copy-MirroredFiles {
+Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$null)
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -974,25 +987,41 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0)
     }
     $N = $aFiles.Count
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+    $newProgress = $false
+    If ( $Progress -eq $null ) {
+        $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+        $newProgress = $true
+    }
+
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
-    $Progress.Open( "Matching Files (cp) [${From} => ${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
-
-    $aFiles = ( $aFiles | Get-Unmatched-Items -Exclude "Thumbs[.]db" -Match "${To}" -DiffLevel $DiffLevel -Progress:$Progress )
+    If ( $newProgress ) {
+        $matchingProgress = $Progress
+    }
+    Else {
+        $matchingProgress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+    }
+    
+    $matchingProgress.Open( "Matching Files (cp) [${From} => ${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    $aFiles = ( $aFiles | Get-Unmatched-Items -Exclude "Thumbs[.]db" -Match "${To}" -DiffLevel $DiffLevel -Progress:$matchingProgress )
     $N = $aFiles.Count
+    $matchingProgress.Complete()
 
-    $Progress.Open( "Copying Unmatched Files [${From} => ${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    If ( $newProgress ) {
+        $Progress.Open( ( "Copying Unmatched {0} [{1} => {2}]" -f $sFiles, $From, $To ), ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    }
+    Else {
+        $Progress.InsertSegment( $N )
+        $Progress.Redraw()    
+    }
+
     $aFiles | ForEach {
         $BaseName = $_.Name
         $CopyFrom = $_.FullName
         $CopyTo = ($_ | Rebase-File -To "${To}")
         
         If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
-
-            $Progress.Update( "${BaseName}", "${CopyFrom} =>> ${CopyTo}" )
-            Do-Copy-Snapshot-File "${CopyFrom}" "${CopyTo}" -Batch:$Batch
-
+            Copy-MirroredFile -From:${CopyFrom} -To:${CopyTo} -Batch:${Batch} -Progress:${Progress}
         }
 
     }
@@ -1007,17 +1036,23 @@ Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
         $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" -DiffLevel 0 )
     }
     $N = $aFiles.Count
-
-    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
-
     $sFiles = ( "file" | Get-PluralizedText($N) )
-    $Progress.Open( "Synchronizing metadata [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
 
+    If ( $Progress -eq $null ) {
+        $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+        $Progress.Open( "Synchronizing metadata [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    }
+    Else {
+        $Progress.InsertSegment( $N + 1 )
+        $Progress.Update( ( "Synchronizing metadata: {0:N0} {1} [${From}]" -f $N, $sFiles ) )
+    }
+
+    $I0 = $Progress.I
     $aFiles | ForEach  {
         $CopyFrom = $_.FullName
         $CopyTo = ($_ | Rebase-File -To "${To}")
 
-        $Progress.Update( $_.Name )
+        $Progress.Update( ( "Meta: #{0:N0}/{1:N0}. {2}" -f ( ( $Progress.I - $I0 + 1 ), $N, $_.Name ) ) )
 
         Sync-ItemMetadata -From "${CopyFrom}" -To "${CopyTo}" -Verbose:$false -Progress:$Progress
     }
@@ -1044,14 +1079,23 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
         }
     }
 
+    $Steps = @(
+        "Remove-MirroredFilesWhenObsolete"
+        "Sync-MirroredDirectories"
+        "Copy-MirroredFiles"
+        "Sync-Metadata"
+        "recurse"
+    )
+    $nSteps = $Steps.Count
+
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
-    $Progress.N = 5
+    $Progress.Open( $sActScanning, "${sStatus} (sync)", $nSteps + 1 )
 
     ##################################################################################################################
     ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
     ##################################################################################################################
 
-    $Progress.Open( $sActScanning, "${sStatus} (rm)" )
+    $Progress.Update( $sActScanning, "${sStatus} (rm)" )
     Remove-MirroredFilesWhenObsolete -From $From -To $To -Batch:$Batch -Depth $Depth
 
     ##################################################################################################################
@@ -1066,20 +1110,18 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     ##################################################################################################################
 
     $Progress.Update( "${sStatus} (cp)" )
-    Do-Mirror-Files -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth
+    Copy-MirroredFiles -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth # -Progress:$Progress
 
     ##################################################################################################################
     ## METADATA: Synchronize source file system meta-data to destination #############################################
     ##################################################################################################################
 
     $Progress.Update( "${sStatus} (meta)" )
-    Sync-Metadata -From $From -To $To -Batch:$Batch -Progress:$Progress
+    Sync-Metadata -From $From -To $To -Batch:$Batch # -Progress:$Progress
 
     ##################################################################################################################
     ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
     ##################################################################################################################
-
-    $Progress.Update( "${sStatus} (chdir)" )
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -1087,16 +1129,19 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     }
     $N = $aFiles.Count
     
+    $Progress.InsertSegment( $N )
+    $Progress.Redraw()
+
     $sFiles = ( "file" | Get-PluralizedText($N) )
-    $Progress.Open( "Recursing into subdirectories [${From}]", ( "{0:N0} {1}" -f $N,$sFiles ), $N )
     $aFiles | ForEach {
         $BaseName = $_.Name
         $MirrorFrom = $_.FullName
         $MirrorTo = ($_ | Rebase-File -To "${To}")
 
-        $Progress.Update( ( "{0:N0}/{1:N0}: {2}" -f @($Progress.I, $Progress.N, "${BaseName}") ), 0 )
+        $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
+        $Progress.Update( $Mesg, 0 )
         Sync-MirroredFiles -From "${MirrorFrom}" -To "${MirrorTo}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch
-        $Progress.Update( ( "{0:N0}/{1:N0}: {2}" -f @($Progress.I, $Progress.N, "${BaseName}") ) )
+        $Progress.Update( $Mesg )
     }
     $Progress.Complete()
 }
@@ -1332,7 +1377,8 @@ param (
     }
 }
 
-function Do-Scan-File-For-Bags {
+Function Invoke-ColdStorageCheckFile {
+
     [CmdletBinding()]
 
 param (
@@ -1415,30 +1461,7 @@ param (
 
 }
 
-function Select-Unbagged-Dirs () {
-
-    [CmdletBinding()]
-
-    param (
-        [Parameter(ValueFromPipeline=$true)]
-        $File
-    )
-
-    Begin { }
-
-    Process {
-        $BaseName = $File.Name
-        if ( -Not ( $BaseName -match "_bagged_[0-9]+$" ) ) {
-            $BaseName
-        }
-    }
-
-    End { }
-
-}
-
-
-function Do-Scan-Dir-For-Bags {
+Function Invoke-ColdStorageCheckFolder {
 
     [CmdletBinding()]
 
@@ -1512,8 +1535,8 @@ param (
 
             Push-Location $DirName
             
-            Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-File-For-Bags -Progress:$Progress -Quiet:$Quiet
-            Get-ChildItem -Directory | Select-Unbagged-Dirs | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Do-Scan-Dir-For-Bags -Progress:$Progress -Quiet:$Quiet
+            Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Invoke-ColdStorageCheckFile -Progress:$Progress -Quiet:$Quiet
+            Get-ChildItem -Directory |? { -Not ( $_ | Test-BaggedCopyOfLooseFile ) } | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Invoke-ColdStorageCheckFolder -Progress:$Progress -Quiet:$Quiet
 
             Pop-Location
 
@@ -1605,7 +1628,7 @@ function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch
 
 }
 
-Function Do-Validate-Item {
+Function Get-CSItemValidation {
 
 Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true )
 
@@ -1682,11 +1705,11 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
     $Progress.Open( ( "Checking {0}" -f $From ), "Files" )
     $Progress.Update( "Files", 1, 100 )
 
-    Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-File-For-Bags -Progress:$Progress -Quiet:$Quiet
+    Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Invoke-ColdStorageCheckFile -Progress:$Progress -Quiet:$Quiet
 
     $Progress.Update( "Directories", 51, 100 )
 
-    Get-ChildItem -Directory | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Do-Scan-Dir-For-Bags -Progress:$Progress -Quiet:$Quiet -Exclude $null
+    Get-ChildItem -Directory |? { -Not ( $_ | Test-BaggedCopyOfLooseFile ) } | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue $From -PassThru | Invoke-ColdStorageCheckFolder -Progress:$Progress -Quiet:$Quiet -Exclude $null
 
     $Progress.Completed()
 
@@ -1739,7 +1762,7 @@ Param ( $Pairs=$null )
 
 }
 
-Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false) {
+Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     If ( $Pairs.Count -lt 1 ) {
@@ -1757,8 +1780,8 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$
             $src = $locations[2]
             $dest = $locations[1]
 
-            $MapFile = "${src}\validate-bags.map.txt"
-            $BookmarkFile = "${src}\validate-bags.bookmark.txt"
+            $MapFile = ( "${src}" | Join-Path -ChildPath "validate-bags.map.txt" )
+            $BookmarkFile = ( "${src}" | Join-Path -ChildPath "validate-bags.bookmark.txt" )
 
             If ( -Not ( Test-Path -LiteralPath $MapFile ) ) {
                 Do-Make-Bagged-ChildItem-Map $src -Zipped:$Zipped > $MapFile
@@ -1808,7 +1831,7 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$
                         $BagPath = Get-FileLiteralPath -File $_
                         $Progress.Update( ( "#{0:N0}. Validating: {1}" -f $Progress.I, $BagPathLeaf ), 0 )
 
-                        $Validated = ( $BagPath | Do-Validate-Item -Verbose:$Verbose -Summary:$false )
+                        $Validated = ( $BagPath | Get-CSItemValidation -Verbose:$Verbose -Summary:$false )
                         
                         $nChecked = $nChecked + 1
                         $nValidated = $nValidated + $Validated.Count
@@ -1849,7 +1872,7 @@ Function Do-Validate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Do-Validate -Pairs $recurseInto -Verbose:$Verbose -Zipped:$Zipped
+                Invoke-ColdStorageValidate -Pairs $recurseInto -Verbose:$Verbose -Zipped:$Zipped
             }
         } # if
 
@@ -2781,13 +2804,11 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "validate" ) {
-        $N = ( $Words.Count )
-
         If ( $Items ) {
-            $Words | Do-Validate-Item -Verbose:$Verbose
+            $allObjects | Get-CSItemValidation -Verbose:$Verbose
         }
         Else {
-            Do-Validate -Pairs $Words -Verbose:$Verbose -Zipped
+            Invoke-ColdStorageValidate -Pairs $Words -Verbose:$Verbose -Zipped
         }
     }
     ElseIf ( $Verb -eq "bag" ) {
@@ -2926,7 +2947,6 @@ Else {
 
                 If ( Test-Path -LiteralPath $File.FullName -PathType Leaf ) {
                     If ( $File | Test-CSScriptAllowed -As:$User -From:$Location ) { 
-                        Write-Warning ( "HELLO HELLO: {0}" -f $File.FullName )
                         $File
                     }
                 }
