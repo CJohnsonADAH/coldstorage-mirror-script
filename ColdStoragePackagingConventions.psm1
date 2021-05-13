@@ -548,6 +548,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         }
 
         $bBagged = ( Test-BagItFormattedDirectory -File $File )
+        $oBagLocation = $null
         $aZipped = $false
         $aContents = @( )
         $aWarnings = @( )
@@ -559,8 +560,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         }
         ElseIf ( Test-ERInstanceDirectory -File $File ) {
             $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
-            If ( $bBagged -and $CheckZipped ) {
-                $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+            If ( $bBagged ) {
+                $oBagLocation = $File
+                If ( $CheckZipped ) {
+                    $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+                }
             }
         }
         ElseIf ( Test-IndexedDirectory -File $File ) {
@@ -568,24 +572,31 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         }
         ElseIf ( Test-BaggedCopyOfLooseFile -File $File -DiffLevel 1 ) {
             $aWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $File.FullName )
+            $oBagLocation = $File
         }
         ElseIf ( Test-BaggedIndexedDirectory -File $File ) {
             $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
-            If ( $bBagged -and $CheckZipped ) {
-                $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+            If ( $bBagged ) {
+                $oBagLocation = $File
+                If ( $CheckZipped ) {
+                    $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+                }
             }
         }
         ElseIf ( Test-BagItFormattedDirectory -File $File ) {
             $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
-            If ( $bBagged -and $CheckZipped ) {
-                $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+            If ( $bBagged ) {
+                $oBagLocation = $File
+                If ( $CheckZipped ) {
+                    $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+                }
             }
         }
         ElseIf ( Test-LooseFile -File $File ) {
-            $oBaggedCopy = ( Get-BaggedCopyOfLooseFile -File $File )
-            $bBagged = $( If ( $oBaggedCopy ) { $true } Else { $false } )
+            $oBagLocation = ( Get-BaggedCopyOfLooseFile -File $File )
+            $bBagged = $( If ( $oBagLocation ) { $true } Else { $false } )
             If ( $bBagged -and $CheckZipped ) {
-                $aZipped = ( $oBaggedCopy | Get-ZippedBagOfUnzippedBag )
+                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
             }
             $aContents = @( $File )
         }
@@ -620,11 +631,12 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             $mContents = ( $aContents | Measure-Object -Sum Length )
             #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
                 
-            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
-            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
-            Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $oBagLocation -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
             If ( $aZipped -ne $false ) {
-                Add-Member -InputObject $Package -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
             }
             $Package | Write-Output
         }

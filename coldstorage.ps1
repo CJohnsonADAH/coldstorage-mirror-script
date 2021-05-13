@@ -2189,7 +2189,8 @@ Param (
         $nFileSize = ( $Package.CSPackageFileSize )
         $sFileSize = ( "{0:N0}" -f $Package.CSPackageFileSize )
         $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
-                
+        $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
+
         If ( $Report ) {
             If ( "CSV" -ieq $Output ) {
 
@@ -2214,7 +2215,7 @@ Param (
                 $sBagged = ( " ({0})" -f $sBaggedFlag )
                 $sZipped = $( If ( $sZippedFlag -ne $null ) { ( " ({0})" -f $sZippedFlag ) } Else { "" } )
 
-                ( "{0}{1}{2}, {3}, {4}" -f $sTheName,$sBagged,$sZipped,$sContents,$sFileSizeReadable )
+                ( "{0}{1}{2}, {3}, {4}{5}" -f $sTheName,$sBagged,$sZipped,$sContents,$sFileSizeReadable,$sBaggedLocation )
             
             }
         }
