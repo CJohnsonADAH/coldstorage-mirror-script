@@ -2899,11 +2899,18 @@ Else {
     ElseIf ( $Verb -eq "bucket" ) {
         $allObjects = ( $allObjects | ColdStorage-Command-Line -Default ( ( Get-Location ).Path ) )
 
-        If ( $Make ) {
-            $allObjects | Get-CloudStorageBucket -Force:$Force | New-CloudStorageBucket
+        $asBuckets = ( $allObjects | Get-CloudStorageBucket -Force:$Force )
+
+        If ( ( -Not $Make ) -And ( -Not $Report ) ) {
+            $asBuckets | Write-Output
         }
-        Else {
-            $allObjects | Get-CloudStorageBucket -Force:$Force
+
+        If ( $Make ) {
+            $asBuckets | New-CloudStorageBucket
+        }
+
+        If ( $Report ) {
+            $asBuckets | Get-CloudStorageBucketProperties
         }
 
     }

@@ -197,6 +197,60 @@ Param( [Parameter(ValueFromPipeline=$true)] $Bucket )
 
 }
 
+Function Get-CloudStorageBucketProperties {
+Param( [Parameter(ValueFromPipeline=$true)] $Bucket )
+
+    Begin { $AWS = Get-ExeForAWSCLI }
+
+    Process {
+        If ( $AWS ) {
+            If ( $Bucket ) {
+
+                $errAWSMesg = $( $JSON = ( & "${AWS}" s3api get-bucket-versioning --bucket "${Bucket}" ) ) 2>&1
+                $errAWS = $LastExitCode
+
+                If ( $errAWS -eq 0 ) {
+            
+                    $hBucketResults = @{
+                        "URI"=( "s3://{0}" -f "${Bucket}" )
+                        "Versioning"=( $JSON | ConvertFrom-Json )
+                    }
+
+                    $oBucketResult = ( $JSON | ConvertFrom-Json )
+                    $hBucketResults["Versioning"] = $oBucketResult.Status
+
+                    $JSON = ( & "${AWS}" s3api get-public-access-block --bucket "${Bucket}" )
+                    $errAWS = $LastExitCode
+
+                    If ( $errAWS -eq 0 ) {
+                        $oBucketResult = ( $JSON | ConvertFrom-Json )
+                        If ( $oBucketResult ) {
+                            $bBlockPublicAcls = $oBucketResult.PublicAccessBlockConfiguration.BlockPublicAcls
+                            $hBucketResults["PublicAccess"] = $( If ( $bBlockPublicAcls ) { "Blocked" } Else { "Not Blocked" } )
+                        }                                
+                    }
+                    Else {
+                        Write-Warning "[Get-CloudStorageBucketProperties] Failed to get public access block on bucket '${Bucket}': ${JSON}"
+                    }
+
+                    [PSCustomObject] $hBucketResults | Write-Output
+
+                }
+                Else {
+                    Write-Warning "[Get-CloudStorageBucketProperties] No such bucket as '${Bucket}' in AWS: ${errAWSMesg} [JSON=${JSON}]"
+                }
+
+            }
+
+        }
+
+    }
+
+    End { If ( -Not $AWS ) { Write-Error "[New-CloudStorageBucket] aws CLI tool not found!" } }
+
+}
+
+
 Function Get-CloudStorageListing {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [string] $Context="Get-CloudStorageListing" )
 
@@ -394,6 +448,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
 Export-ModuleMember -Function Get-CloudStorageBucketNamePart
 Export-ModuleMember -Function Get-CloudStorageBucket
 Export-ModuleMember -Function New-CloudStorageBucket
+Export-ModuleMember -Function Get-CloudStorageBucketProperties
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket
