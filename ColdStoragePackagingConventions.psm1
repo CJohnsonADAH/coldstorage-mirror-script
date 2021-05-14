@@ -286,7 +286,10 @@ Function Test-LooseFile ( $File ) {
             $Context = $oFile.Directory
             $sContext = $Context.FullName
 
-            If ( Test-IndexedDirectory($sContext) ) {
+            If ( $Context | Test-ColdStoragePropsDirectory -NoPackageTest ) {
+                $result = $false
+            }
+            ElseIf ( Test-IndexedDirectory($sContext) ) {
                 $result = $false
             }
             ElseIf  ( Test-BaggedIndexedDirectory($sContext) ) {
@@ -552,7 +555,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         $aZipped = $false
         $aContents = @( )
         $aWarnings = @( )
-        If ( $File | Test-ColdStorageRepositoryPropsDirectory ) {
+        
+        If ( $File | Get-ItemFileSystemLocation | Test-ColdStorageRepositoryPropsDirectory ) {
+            $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $File.FullName )
+        }
+        ElseIf ( $File | Get-ItemFileSystemLocation | Test-ColdStoragePropsDirectory -NoPackageTest ) {
             $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $File.FullName )
         }
         ElseIf ( Test-ZippedBag -LiteralPath $File.FullName ) {

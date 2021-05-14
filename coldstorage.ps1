@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0511
+@version 2021.0514
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -2137,7 +2137,11 @@ Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Reposito
         Switch ( $Destination ) {
             "cloud" { 
                 $aSide = ( $Side |% { $_ -split "," } )
-                $aItems = $( If ( $Items ) { $What } Else { ( Get-ZippedBagsContainer -Repository:$What ) } )
+                If ( $Items ) {
+                    $aItems = $What
+                } Else {
+                    $aItems = ( Get-ZippedBagsContainer -Repository:$What )
+                }
 
                 $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -Recurse:$true -Context:("{0} {1}" -f $global:gCSCommandWithVerb,$Destination ) -ReturnObject | Select-CSFileInfo -FullName:$FullName -ReturnObject:$PassThru
             }
@@ -2909,7 +2913,8 @@ Else {
         Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
-        $Object, $Words = $Words
+        $Object, $Remainder = $Words
+        $Words = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
         Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
     }
     ElseIf ( $Verb -eq "cloud" ) {

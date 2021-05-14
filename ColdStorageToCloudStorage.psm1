@@ -205,14 +205,11 @@ Begin { $bucketFiles = @{ } }
 Process {
 
     $oFile = $null
-    Get-FileObject($File) | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:$Context |% {
+    $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:$Context |% {
         $oFile = $_
         $sFile = $oFile.FullName
         $Bucket = ($sFile | Get-CloudStorageBucket)
 
-    #$oFile = Get-FileObject -File $File
-    #$sFile = $oFile.FullName
-    #$Bucket = ($sFile | Get-CloudStorageBucket)
         If ( $Bucket -eq $null ) {
             Write-Warning ( "Get-CloudStorageListing: could not determine bucket for {0}" -f $sFile )
         }
@@ -344,7 +341,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, $S
     Begin { }
 
     Process {
-        $Items = ( Get-FileObject -File $File | Get-ItemPackageZippedBag -Recurse:$Recurse )
+        $Items = ( $File | Get-ItemPackageZippedBag -Recurse:$Recurse )
         If ( $Items ) {
             $Items
         }
