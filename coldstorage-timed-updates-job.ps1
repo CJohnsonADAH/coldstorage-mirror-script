@@ -20,7 +20,8 @@ $ScriptParent = ( Split-Path -Parent $ScriptPath )
 $ColdStorageScript = "${ScriptPath}\coldstorage.ps1"
 $bin="${ScriptParent}"
 
-$LogFile = "${HOME}\Desktop\coldstorage-timed-updates${RepositorySlug}-log.txt"
+$MyLogDir = "${HOME}\Desktop\ColdStorage-Logs"
+$LogFile = ( $MyLogDir | Join-Path -ChildPath "coldstorage-timed-updates${RepositorySlug}-log.txt" )
 $ShareLogFile = "${bin}\coldstorage-timed-updates${RepositorySlug}-log.txt"
 
 If ( $Batch ) {

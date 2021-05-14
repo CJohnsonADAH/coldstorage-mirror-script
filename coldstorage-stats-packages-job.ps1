@@ -30,7 +30,8 @@ $ScriptParent = ( Split-Path -Parent $ScriptPath )
 $ColdStorageScript = "${ScriptPath}\coldstorage.ps1"
 $bin="${ScriptParent}"
 
-$LogFile = "${HOME}\Desktop\coldstorage-packages${RepositorySlug}${ItemsSlug}-log.txt"
+$MyLogDir = "${HOME}\Desktop\ColdStorage-Logs"
+$LogFile = ( $MyLogDir | Join-Path -ChildPath "coldstorage-packages${RepositorySlug}${ItemsSlug}-log.txt" )
 $ShareLogFile = "${bin}\coldstorage-packages${RepositorySlug}${ItemsSlug}-log.txt"
 
 If ( $OutputFile -eq $null ) {

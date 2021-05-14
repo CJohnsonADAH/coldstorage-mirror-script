@@ -12,7 +12,8 @@ $ScriptParent = ( Split-Path -Parent $ScriptPath )
 $ColdStorageScript = "${ScriptPath}\coldstorage.ps1"
 $bin="${ScriptParent}"
 
-$LogFile = "${HOME}\Desktop\coldstorage-mirror${RepositorySlug}-log.txt"
+$MyLogDir = "${HOME}\Desktop\ColdStorage-Logs"
+$LogFile = ( $MyLogDir | Join-Path -ChildPath "coldstorage-mirror${RepositorySlug}-log.txt" )
 $ShareLogFile = "${bin}\coldstorage-mirror${RepositorySlug}-log.txt"
 
 If ( $Batch ) {

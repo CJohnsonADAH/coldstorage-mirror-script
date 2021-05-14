@@ -11,7 +11,7 @@ $LogFiles = @{
     "stderr"="${Prefix}-${Repository}-err-log.txt"
     "stdwarn"="${Prefix}-${Repository}-warn-log.txt"
 }
-$LogPaths = "${bin}", "${HOME}\Desktop"
+$LogPaths = "${bin}", "${HOME}\Desktop\ColdStorage-Logs"
 
 $StdOutLogFile = $LogPaths[0] + "\" + $LogFiles["stdout"]
 $StdErrLogFile = $LogPaths[0] + "\" + $LogFiles["stderr"]
