@@ -307,7 +307,7 @@ Function Get-CurrentLine {
 
 # Bleep Bleep Bleep Bleep Bleep Bleep -- BLOOP!
 function Do-Bleep-Bloop () {
-    Return
+    #Return
 
     [console]::beep(659,250) ##E
     [console]::beep(659,250) ##E
