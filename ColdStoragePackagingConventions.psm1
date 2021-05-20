@@ -221,11 +221,17 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] 
 
         # 3. Is this a container of a bunch of zipped packages? If so, return those packages.
         ElseIf ( $oFile | Test-ZippedBagsContainer ) {
-            $Result += ( Get-ChildItem -LiteralPath $oFile.FullName -Filter "*.zip" )
+            $Result += ( Get-ChildItem -LiteralPath $oFile.FullName -Filter "*.zip" |? { Test-ZippedBag -LiteralPath $_ } )
         }
 
-        # 4. Try to get packaging information on this item, recursing into child items if requested.
+        # 4. Exclude items in the zipped bags container if they didn't pass Test-ZippedBag
+        ElseIf ( $oFile | Get-ItemFileSystemLocation | Test-ZippedBagsContainer ) {
+            # NOOP - We should not do anything with items in the zipped bags container that failed other tests.
+        }
+
+        # 5. Try to get packaging information on this item, recursing into child items if requested.
         Else {
+
             $oPackage = ( $oFile | Get-ItemPackage -Ascend -CheckZipped )
             If ( $oPackage.Count -gt 0 ) {
                 $Result += ( $oPackage | Get-ItemPackageZippedBag )
@@ -368,6 +374,81 @@ Param ( $File )
     $result
 }
 
+Function Get-LooseFileOfBaggedCopy {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffLevel=0, [switch] $ShowWarnings=$false )
+
+    Begin { $sContext = $( If ( $Context ) { $Context } Else { "Get-LooseFileOfBaggedCopy" } ) }
+
+    Process {
+        $oFile = Get-FileObject($File)
+        If ( Test-BagItFormattedDirectory -File $oFile ) {
+            $BagDir = $oFile.FullName
+            $Payload = Get-ChildItem -LiteralPath ( $BagDir | Join-Path -ChildPath "data" ) -Force
+            
+            If ($Payload.Count -eq 1 -and ( Test-Path -LiteralPath $Payload.FullName -PathType Leaf ) ) {
+
+                $oContainer = $oFile.Parent
+                If ( $oContainer ) {
+
+                    $sContainer = $oContainer.FullName
+                    $Counterpart = ( $sContainer | Join-Path -ChildPath $Payload.Name | Get-FileObject )
+
+                    If ( $Counterpart ) {
+
+                        # We found a viable counterpart. But let's give other tests a chance to disqualify it.
+                        If ( $DiffLevel -gt 0 ) {
+
+                            If ( Test-DifferentFileContent -From $Payload -To $Counterpart -DiffLevel $DiffLevel ) {
+                                
+                                $Counterpart = $null
+
+                                If ( $ShowWarnings ) {
+
+                                    ( "[$sContext] {0} bag payload {1} matches to a loose file's name, but contents differ!" -f $oFile.FullName,$Payload.Name ) | Write-Warning                                
+
+                                }
+
+                            }
+                                                        
+                        }
+
+                        If ( $Counterpart ) {
+                            $Counterpart
+                        }
+
+                    }
+                    ElseIf ( $ShowWarnings ) {
+
+                        ( "[$sContext] {0} bag payload {1} does not match to a loose file." -f $oFile.FullName,$Payload.Name ) | Write-Warning
+
+                    }
+
+                    
+                }
+                ElseIf ( $ShowWarnings ) {
+
+                    ( "[$sContext] {0} bag does not have an identifiable parent directory." -f $oFile.FullName ) | Write-Warning
+                
+                }
+
+            }
+            ElseIf ( $ShowWarnings ) {
+
+                ( "[$sContext] {0} payload contains more than one single file." -f $oFile.FullName ) | Write-Warning
+
+            }
+        }
+        ElseIf ( $ShowWarnings ) {
+
+            ( "[$sContext] {0} is not a bagged directory." -f $oFile.FullName ) | Write-Warning
+
+        }
+        
+    }
+
+    End { }
+}
+
 Function Get-BaggedCopyOfLooseFile ( $File ) {
     $result = $null
 
@@ -391,26 +472,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context = $null, $DiffLevel
     $result = $false # innocent until proven guilty
 
     $oFile = Get-FileObject -File $File
-    if ( Test-BagItFormattedDirectory( $oFile ) ) {
-        $BagDir = $oFile.FullName
-        $payload = ( Get-ChildItem -Force -LiteralPath "${BagDir}\data" )
-
-        if ($payload.Count -eq 1 -and ( Test-Path -LiteralPath $payload.FullName -PathType Leaf ) ) {
+    If ( Test-BagItFormattedDirectory( $oFile ) ) {
+        
+        $LooseFile = ( $oFile | Get-LooseFileOfBaggedCopy -DiffLevel:$DiffLevel -Context:$Context )
+        If ( $LooseFile ) {
             $result = $true
-            If ( $DiffLevel -gt 0 ) {
-                $sCounterpart = ( "{0}\{1}" -f ( $File.Parent.FullName, $payload.Name ) )
-                $Counterpart = ( Get-FileObject -File $sCounterpart )
-
-                If ( $Counterpart -eq $null ) {
-                    $result = $false
-                }
-                ElseIf ( Test-DifferentFileContent -From $payload -To $Counterpart -DiffLevel $DiffLevel ) {
-                    $result = $false
-                }
-
-            }
-
         }
+
     }
     
     $result
@@ -578,8 +646,19 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
         }
         ElseIf ( Test-BaggedCopyOfLooseFile -File $File -DiffLevel 1 ) {
-            $aWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $File.FullName )
+
+            If ( $Ascend ) {
+                $aContents = ( $File | Get-LooseFileOfBaggedCopy )
+            }
+            Else {
+                $aWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $File.FullName )
+            }
+
             $oBagLocation = $File
+            If ( $bBagged -and $CheckZipped ) {
+                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
+            }
+
         }
         ElseIf ( Test-BaggedIndexedDirectory -File $File ) {
             $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
@@ -942,6 +1021,7 @@ Export-ModuleMember -Function Test-LooseFile
 Export-ModuleMember -Function Test-UnbaggedLooseFile
 Export-ModuleMember -Function Get-PathToBaggedCopyOfLooseFile
 Export-ModuleMember -Function Get-BaggedCopyOfLooseFile
+Export-ModuleMember -Function Get-LooseFileOfBaggedCopy
 Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
 Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
