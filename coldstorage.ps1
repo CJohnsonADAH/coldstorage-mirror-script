@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0514
+@version 2021.0520
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -509,9 +509,24 @@ Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $V
 
 }
 
-# Out-BagItFormattedDirectory: Invoke the BagIt.py external script to bag a preservation package
-# Formerly known as: Do-Bag-Directory
 Function Out-BagItFormattedDirectory {
+<#
+.SYNOPSIS
+Invoke the BagIt.py external script to bag a preservation package
+
+.DESCRIPTION
+Given a directory of digital content, enclose it within a BagIt-formatted package.
+Formerly known as: Do-Bag-Directory
+
+.PARAMETER DIRNAME
+Specifies the directory to enclose in a BagIt-formatted package.
+
+.PARAMETER PassThru
+If present, output the location of the BagIt-formatted package into the pipeline after completing the bagging.
+
+.PARAMETER Progress
+If provided, provides a [CSProgressMessenger] object to manage progress and logging output from the process.
+#>
 
     [CmdletBinding()]
 
@@ -520,6 +535,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false,
     Begin { }
 
     Process {
+    
         $BagDir = $( If ( $DIRNAME -is [String] ) { $DIRNAME } Else { Get-FileObject($DIRNAME) |% { $_.FullName } } )
 
         Push-Location ( $BagDir )
@@ -563,9 +579,29 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false,
     End { }
 }
 
-# Out-BaggedPackage
-# Formerly known as: Do-Bag-Loose-File
 Function Out-BaggedPackage {
+<#
+.SYNOPSIS
+Enclose a preservation package of digital content into a BagIt-formatted preservation package.
+
+.DESCRIPTION
+Given a loose file or a directory of digital content, enclose that within a BagIt-formatted preservation package following ADAHColdStorage packaging conventions.
+
+If the input is a directory, the output will be a directory in the same location containing BagIt manifest files and the original content enclosed in a payload directory called "data".
+
+If the input is a loose file, the output will be a BagIt-formatted directory located within the same parent container, containing a copy of the loose file enclosed in a payload directory called "data".
+
+Formerly known as: Do-Bag-Loose-File
+
+.PARAMETER LiteralPath
+Specifies the loose file or the directory to enclose within a BagIt-formatted package.
+
+.PARAMETER PassThru
+If present, output the location of the BagIt-formatted package into the pipeline after completing the bagging.
+
+.PARAMETER Progress
+If provided, provides a [CSProgressMessenger] object to manage progress and logging output from the process.
+#>
 
     [CmdletBinding()]
 
