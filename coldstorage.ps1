@@ -17,6 +17,7 @@ coldstorage to: send a preservation package or an archival unit to external pres
 coldstorage vs: compare the packages preserved locally to those stored on an external preservation site (cloud, drop, etc.)
 coldstorage check: Check for new preservation items in a repository to be packaged, and check the status of already-processed preservation packages
 coldstorage stats: Compile statistics on the preservation packages in a repository
+coldstorage packages: Output a report on the preservation packages in a repository
 coldstorage validate: Validate BagIt-formatted preservation packages or cloud storage-formatted archival units
 #>
 
