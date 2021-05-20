@@ -1365,6 +1365,9 @@ param (
                         $ChildItem | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
                     }
                 }
+                ElseIf ( $PassThru -and ( Test-LooseFile($ChildItem) ) ) {
+                    $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
+                }
                 Else {
                     Write-BaggedItemNoticeMessage -File $ChildItem -Item:$File -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
                 }
@@ -2703,13 +2706,13 @@ Param ( [String] $Output="" )
 }
 
 Function Get-CSPackagesToBag {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false, [switch] $PassThru=$false )
 
     Begin { }
 
     Process {
         If ( $Recurse ) {
-            $Item | Get-ChildItemPackages -Recurse:$Recurse |? { -Not $_.CSPackageBagged }
+            $Item | Get-ChildItemPackages -Recurse:$Recurse |? { ( ( $PassThru ) -Or ( -Not $_.CSPackageBagged ) ) }
         }
         Else {
             $Item
@@ -2827,7 +2830,7 @@ Else {
         }
 
         If ( $Items ) {
-            $allObjects | Get-FileObject |% { ( "[{0}] CHECK: {1}{2}" -f $sCommandWithVerb,$_.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Verbose; $_ } | Get-CSPackagesToBag -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
+            $allObjects | Get-FileObject |% { ( "[{0}] CHECK: {1}{2}" -f $sCommandWithVerb,$_.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Verbose; $_ } | Get-CSPackagesToBag -PassThru:$PassThru -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
         }
         Else {
             Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch

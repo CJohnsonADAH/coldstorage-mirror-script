@@ -449,7 +449,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
     End { }
 }
 
-Function Get-BaggedCopyOfLooseFile ( $File ) {
+Function Get-BaggedCopyOfLooseFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+
     $result = $null
 
     If ( Test-LooseFile($File) ) {
@@ -464,6 +470,11 @@ Function Get-BaggedCopyOfLooseFile ( $File ) {
     }
 
     $result
+
+    }
+
+    End { }
+
 }
 
 Function Test-BaggedCopyOfLooseFile {
