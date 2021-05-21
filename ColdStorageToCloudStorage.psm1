@@ -250,9 +250,59 @@ Param( [Parameter(ValueFromPipeline=$true)] $Bucket )
 
 }
 
+Function Get-CloudStorageURI {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+
+        $Key = $File
+        $Bucket = $null
+        
+        $oFile = $File
+        If ( $oFile -is [Hashtable] ) {
+            $oFile = [PSCustomObject] $oFile
+        }
+
+        If ( $oFile ) {
+
+            If ( $oFile | Get-Member -MemberType NoteProperty -Name Key ) {
+                $Key = ( $oFile.Key )
+            }
+            ElseIf ( $oFile | Get-Member -MemberType NoteProperty -Name CloudCopy ) {
+                $Key = ( $oFile.CloudCopy.Key )
+                $Bucket = ( $oFile.CloudCopy.Bucket )
+            }
+            ElseIf ( $oFile | Get-Member -MemberType Property -Name FullName ) {
+                $Key = ( $oFile.Name )
+            }
+
+            If ( $Bucket -eq $null ) {
+                If ( $oFile | Get-Member -MemberType NoteProperty -Name Bucket ) {
+                    $Bucket = ( $oFile.Bucket )
+                }
+                ElseIf ( $oFile | Get-Member -MemberType Property -Name FullName ) {
+                    $Bucket = ( $oFile | Get-CloudStorageBucket )
+                }
+            }
+
+            $Scheme = "s3"
+
+            If ( ( $Key -ne $null ) -and ( $Bucket -ne $null ) ) {
+                ( "{0}://{1}/{2}" -f $Scheme,$Bucket,$Key ) | Write-Output
+            }
+
+        }
+
+    }
+
+    End { }
+
+}
 
 Function Get-CloudStorageListing {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [string] $Context="Get-CloudStorageListing" )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $Context="Get-CloudStorageListing" )
 
 Begin { $bucketFiles = @{ } }
 
@@ -291,7 +341,7 @@ End {
         $Bucket = $_
         $Files = $bucketFiles[$Bucket]
 
-        If ( $Files.Count -ne 1 ) {
+        If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
             Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-ExeForAWSCLI ),$Bucket )
             $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
         }
@@ -335,48 +385,63 @@ End {
         If ( $isDataGood ) {
 
             $ObjectKeys = ( $oCloudContents |% { $_.Key } )
-            $ObjectObjects = ( $oCloudContents |% { $sKey = $_.Key; @{ "${sKey}"=$_ } } )
+            $ObjectObjects = ( $oCloudContents |% { $o = $_ ; $o | Add-Member -MemberType NoteProperty -Name Bucket -Value "${Bucket}" ; $sKey = $o.Key; @{ "${sKey}"=$o } } )
             $sHeader = $null
 
-            If ( $Side -ieq "local" ) {
-                Write-Debug "${sContext}Local side"
-                If ( $Unmatched -And ( $Side.Count -gt 1 ) ) {
-                    $sHeader = "`r`n=== ADAHColdStorage ==="
+            If ( $All ) {
+                
+                If ( $ReturnObject ) {
+                    $ObjectObjects
                 }
-                $Files |% {
-                    $Match = ( @( ) + @( $ObjectKeys ) ) -ieq $_.Name
-                    If ( $Unmatched -xor ( $Match.Count -gt 0 ) ) {
-                        If ( $ReturnObject ) {
-                            $CloudCopy = ( $Match |% { $sKey = $_; $ObjectObjects.$sKey } )
-                            $_ | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $CloudCopy -Force -PassThru
-                        }
-                        Else {
-                            If ( $sHeader ) { $sHeader; $sHeader = $null }
-                            $_.Name
-                        }
-                    }
+                Else {
+                    $ObjectKeys
                 }
+
             }
+            Else {
 
-            $FileNames = ( $Files | Get-ItemPropertyValue -Name "Name" ) 
+                If ( $Side -ieq "local" ) {
+                    Write-Debug "${sContext}Local side"
+                    If ( $Unmatched -And ( $Side.Count -gt 1 ) ) {
+                        $sHeader = "`r`n=== ADAHColdStorage ==="
+                    }
+                    $Files |% {
+                        $Match = ( @( ) + @( $ObjectKeys ) ) -ieq $_.Name
 
-            If ( $Unmatched -and ( $Side -ieq "cloud" ) ) {
-                "${sContext}Cloud side" | Write-Debug
-                If ( $Side.Count -gt 1 ) {
-                    $sHeader = "`r`n=== Cloud Storage (AWS) ==="
-                }
-                $oCloudContents |% {
-                    $Match = ( @( ) + @( $FileNames ) ) -ieq $_.Key
-                    If ( $Match.Count -eq 0 ) {
-                        If ( $ReturnObject ) {
-                            $_
-                        }
-                        Else {
-                            If ( $sHeader ) { $sHeader; $sHeader = $null }
-                            $_.Key
+                        If ( $Unmatched -xor ( $Match.Count -gt 0 ) ) {
+                            If ( $ReturnObject ) {
+                                $CloudCopy = ( $Match |% { $sKey = $_; $ObjectObjects.$sKey } )
+                                $_ | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $CloudCopy -Force -PassThru
+                            }
+                            Else {
+                                If ( $sHeader ) { $sHeader; $sHeader = $null }
+                                $_.Name
+                            }
                         }
                     }
                 }
+
+                $FileNames = ( $Files | Get-ItemPropertyValue -Name "Name" ) 
+
+                If ( $Unmatched -and ( $Side -ieq "cloud" ) ) {
+                    "${sContext}Cloud side" | Write-Debug
+                    If ( $Side.Count -gt 1 ) {
+                        $sHeader = "`r`n=== Cloud Storage (AWS) ==="
+                    }
+                    $oCloudContents |% {
+                        $Match = ( @( ) + @( $FileNames ) ) -ieq $_.Key
+                        If ( $Match.Count -eq 0 ) {
+                            If ( $ReturnObject ) {
+                                $_
+                            }
+                            Else {
+                                If ( $sHeader ) { $sHeader; $sHeader = $null }
+                                $_.Key
+                            }
+                        }
+                    }
+                }
+
             }
 
         }
@@ -448,6 +513,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
 Export-ModuleMember -Function Get-CloudStorageBucketNamePart
 Export-ModuleMember -Function Get-CloudStorageBucket
 Export-ModuleMember -Function New-CloudStorageBucket
+Export-ModuleMember -Function Get-CloudStorageURI
 Export-ModuleMember -Function Get-CloudStorageBucketProperties
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket

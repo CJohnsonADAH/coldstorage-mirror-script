@@ -47,6 +47,8 @@ param (
     [switch] $Unbagged = $false,
     [switch] $Unzipped = $false,
     [switch] $Zipped = $false,
+    [switch] $InCloud = $false,
+    [switch] $NotInCloud = $false,
     [switch] $PassThru = $false,
     [switch] $Report = $false,
     [switch] $ReportOnly = $false,
@@ -2214,12 +2216,14 @@ Param (
     [switch] $Report=$false,
     [string] $Output="",
     [switch] $FullName=$false,
+    [switch] $InCloud=$false,
+    [switch] $NotInCloud=$false,
     $Timestamp,
     $Context
 
 )
 
-    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ) }
+    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ); $aBucketListings = @{} }
 
     Process {
         $oContext = ( Get-FileObject $Context )
@@ -2250,38 +2254,101 @@ Param (
         $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
         $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
 
-        If ( $Report ) {
-            If ( "CSV" -ieq $Output ) {
+        $oCloudCopy = $null
+        $sCloudCopyFlag = $null
+        $nCloudCopyFlag = $null
+        If ( ( $InCloud -or $NotInCloud ) -and $sZippedFile ) {
+            
+            $sBucket = ( $Package | Get-CloudStorageBucket )
+            
+            If ( -Not $aBucketListings.ContainsKey($sBucket) ) {
+                $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
+                $aBucketListings[$sBucket] = ( $oListing | Get-TablesMerged )
+            }
 
-                @{} `
-                | Select-Object @{ n="Date"; e={ $sDate } },
-                                @{ n="Name"; e={ $sTheName } },
-                                @{ n="Bag"; e={ $sBaggedFlag } },
-                                @{ n="Bagged"; e={ $nBaggedFlag } },
-                                @{ n="ZipFile"; e={ $sZippedFile } },
-                                @{ n="Zipped"; e={ $nZippedFlag } },
-                                @{ n="Files"; e={ $nContents } },
-                                @{ n="Contents"; e={ $sContents } },
-                                @{ n="Bytes"; e={ $nFileSize } },
-                                @{ n="Size"; e={ $sFileSizeReadable  } },
-                                @{ n="Context"; e={ $oContext.FullName } } `
-                | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } )
+            If ( $aBucketListings.ContainsKey($sBucket) ) {
+                $bCloudCopy = ( $aBucketListings[$sBucket].ContainsKey($sZippedFile) )
+                If ( $bCloudCopy ) {
+                    $oCloudCopy = ( $aBucketListings[$sBucket][$sZippedFile] )
+                    $nCloudCopyFlag = 1
+                    $sCloudCopyFlag = "CLOUD"
+                }
+                Else {
+                    $oCloudCopy = $null
+                    $nCloudCopyFlag = 0
+                    $sCloudCopyFlag = "local"
+                }
 
+            }
 
+        }
+
+        $o = [PSCustomObject] @{
+            "Date"=( $sDate )
+            "Name"=( $sTheName )
+            "Bag"=( $sBaggedFlag )
+            "Bagged"=( $nBaggedFlag )
+            "ZipFile"=( $sZippedFile )
+            "Zipped"=( $nZippedFlag )
+            "InZip"=( $sZippedFlag )
+            "CloudFile"=( $oCloudCopy | Get-CloudStorageURI )
+            "CloudBacked"=( $nCloudCopyFlag )
+            "InCloud"=( $sCloudCopyFlag )
+            "Files"=( $nContents )
+            "Contents"=( $sContents )
+            "Bytes"=( $nFileSize )
+            "Size"=( $sFileSizeReadable )
+            "Context"=( $oContext.FullName )
+        }
+
+        $bFiltered = ( $NotInCloud -and ( -Not ( $o.InCloud -eq "local" ) ) )
+
+        If ( -Not $bFiltered ) {
+            If ( $Report ) {
+
+                If ( $sZippedFlag -eq $null ) {
+                    $o.PSObject.Properties.Remove("ZipFile")
+                    $o.PSObject.Properties.Remove("Zipped")
+                    $o.PSObject.Properties.Remove("InZip")
+                }
+                If ( $sCloudCopyFlag -eq $null ) {
+                    $o.PSObject.Properties.Remove("CloudFile")
+                    $o.PSObject.Properties.Remove("CloudBacked")
+                    $o.PSObject.Properties.Remove("InCloud")
+                }
+
+                If ( "CSV" -ieq $Output ) {
+                    # Fields not used in CSV columns
+                    $o.PSObject.Properties.Remove("InZip")
+                    $o.PSObject.Properties.Remove("InCloud")
+
+                    # Output
+                    $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } )
+                }
+                Else {
+
+                    # Fields formatted for text report
+                    $sRptBagged = ( " ({0})" -f $o.Bag )
+                    $sRptZipped = $( If ( $o.Zipped -ne $null ) { ( " ({0})" -f $o.InZip ) } Else { "" } )
+                    $sRptCloud = $( If ( $o.InCloud -ne $null ) { ( " ({0})" -f $o.InCloud ) } Else { "" } )
+
+                    # Output
+                    ( "{0}{1}{2}{3}, {4}, {5}{6}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
+            
+                }
             }
             Else {
-                         
-                $sBagged = ( " ({0})" -f $sBaggedFlag )
-                $sZipped = $( If ( $sZippedFlag -ne $null ) { ( " ({0})" -f $sZippedFlag ) } Else { "" } )
-
-                ( "{0}{1}{2}, {3}, {4}{5}" -f $sTheName,$sBagged,$sZipped,$sContents,$sFileSizeReadable,$sBaggedLocation )
             
+                $o = $_
+                If ( $oCloudCopy -ne $null ) {
+                    $o | Add-Member -MemberType NoteProperty -Name CloudCopy -Value $oCloudCopy
+                }
+
+                $o | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
             }
+
+            $Subsequent = $true
         }
-        Else {
-            $_ | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
-        }
-        $Subsequent = $true
     }
 
     End { }
@@ -2315,6 +2382,8 @@ Param (
     [switch] $Unbagged,
     [switch] $Unzipped,
     [switch] $Zipped,
+    [switch] $InCloud,
+    [switch] $NotInCloud,
     [switch] $FullName,
     [switch] $Report,
     [string] $Output
@@ -2326,7 +2395,7 @@ Param (
         $CheckZipped = ( $Unzipped -or $Zipped )
         $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped |
             Select-ColdStoragePackagesToReport -Unbagged:$Unbagged -Unzipped:$Unzipped |
-            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -FullName:$FullName -Context:$Location -Timestamp:$CurDate
+            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -FullName:$FullName -Context:$Location -Timestamp:$CurDate -InCloud:$InCloud -NotInCloud:$NotInCloud
     }
 
     End { }
@@ -2946,11 +3015,6 @@ Else {
             Add-LOCKSSManifestHTML -Directory $_ -Title $sTitle -Force:$Force
         }
     }
-    ElseIf ( $Verb -eq "drop" ) {
-        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-
-        $Words | Add-ADPNetAUToDropServerStagingDirectory
-    }
     ElseIf ( $Verb -eq "bucket" ) {
         $allObjects = ( $allObjects | ColdStorage-Command-Line -Default ( ( Get-Location ).Path ) )
 
@@ -2974,20 +3038,14 @@ Else {
         $Words = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
         Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
+    ElseIf ( ("cloud", "drop") -ieq $Verb ) {
+        $allObjects = ( $allObjects | ColdStorage-Command-Line -Default "${PWD}" )
+        Invoke-ColdStorageTo -Destination:$Verb -What:$allObjects -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
+    }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $Object, $Remainder = $Words
         $Words = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
         Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
-    }
-    ElseIf ( $Verb -eq "cloud" ) {
-        $aSide = ( $Side |% { $_ -split "," } )
-
-        If ( $Items ) {
-            $Words | Get-CloudStorageListing -Unmatched:$Diff -Side:($aSide)
-        }
-        Else {
-            ( Get-ZippedBagsContainer -Repository:$Words ) | Get-CloudStorageListing -Unmatched:$Diff -Side:($aSide)
-        }
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
@@ -3001,6 +3059,8 @@ Else {
             -Unbagged:$Unbagged `
             -Unzipped:$Unzipped `
             -Zipped:$Zipped `
+            -InCloud:$InCloud `
+            -NotInCloud:$NotInCloud `
             -FullName:$FullName `
             -Report:$Report `
             -Output:$Output
