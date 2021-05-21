@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0520
+@version 2021.0521
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -306,9 +306,16 @@ Function Get-CurrentLine {
     $MyInvocation.ScriptLineNumber
 }
 
-# Bleep Bleep Bleep Bleep Bleep Bleep -- BLOOP!
-function Do-Bleep-Bloop () {
-    #Return
+Function Write-BleepBloop {
+<#
+.SYNOPSIS
+Make a familiar sound through the workstation's bleep-bloop speaker.
+
+.DESCRIPTION
+Produces a notification sound through [Console]::beep
+Bleep Bleep Bleep Bleep Bleep Bleep -- BLOOP!
+Formerly known as: Do-Bleep-Bloop
+#>
 
     [console]::beep(659,250) ##E
     [console]::beep(659,250) ##E
@@ -326,30 +333,26 @@ function Do-Bleep-Bloop () {
     [console]::beep(440,275) ##a
 }
 
-Function Get-Command-With-Verb {
-    $sCommandWithVerb
+Function Get-CommandWithVerb {
+    $global:gCSCommandWithVerb
 }
 
-function Rebase-File {
+# Formerly known as: Rebase-File
+Function ConvertTo-MirroredPath {
+
     [CmdletBinding()]
 
-   param (
-    [String]
-    $To,
+Param ( [String] $To, [Parameter(ValueFromPipeline=$true)] $File )
 
-    [Parameter(ValueFromPipeline=$true)]
-    $File
-   )
+    Begin {}
 
-   Begin {}
+    Process {
+        $oFile = Get-FileObject($File)
+        ( $To | Join-Path -ChildPath $oFile.Name ) | Write-Output
+    }
 
-   Process {
-    $BaseName = $File.Name
-    $Object = $To + "\" + $BaseName
-    $Object
-   }
+    End {}
 
-   End {}
 }
 
 #############################################################################################################
@@ -608,7 +611,7 @@ If provided, provides a [CSProgressMessenger] object to manage progress and logg
 
 Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$false, $Progress=$null )
 
-    Begin { $cmd = ( Get-Command-With-Verb ) }
+    Begin { $cmd = ( Get-CommandWithVerb ) }
 
     Process {
         $Item = Get-FileObject($LiteralPath)
@@ -682,24 +685,28 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
 
-function Is-Matched-File ($From, $To, $DiffLevel=0) {
+# Is-Matched-File
+Function Test-MatchedFile ($From, $To, $DiffLevel=0) {
+
     $ToPath = $To
-    if ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
+    If ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
         $ToPath = $To.FullName
     }
 
     $TreatAsMatched = ( Test-Path -LiteralPath "${ToPath}" )
-    if ( $TreatAsMatched ) {
+    If ( $TreatAsMatched ) {
         $ObjectFile = (Get-Item -Force -LiteralPath "${ToPath}")
-        if ( $DiffLevel -gt 0 ) {
+        If ( $DiffLevel -gt 0 ) {
             $TreatAsMatched = -Not ( Test-DifferentFileContent -From $From -To $ObjectFile -DiffLevel $DiffLevel )
         }
     }
     
     $TreatAsMatched
+
 }
 
-function Get-Unmatched-Items {
+# Get-Unmatched-Items
+Function Select-UnmatchedItems {
     [CmdletBinding()]
 
    param (
@@ -724,8 +731,8 @@ function Get-Unmatched-Items {
         If ( $Progress -ne $null ) { $Progress.Update( ( "{0}" -f $File.Name ) ) }
         
         If ( -Not ( $File.Name -match $Exclude ) ) { 
-            $Object = ($File | Rebase-File -To $Match)
-            if ( -Not ( Is-Matched-File -From $File -To $Object -DiffLevel $DiffLevel ) ) {
+            $Object = ($File | ConvertTo-MirroredPath -To $Match)
+            if ( -Not ( Test-MatchedFile -From $File -To $Object -DiffLevel $DiffLevel ) ) {
                 $File
             }
         }
@@ -734,34 +741,25 @@ function Get-Unmatched-Items {
    End { }
 }
 
-function Get-Matched-Items {
+# Get-Matched-Items
+Function Select-MatchedItems {
     [CmdletBinding()]
 
-   param (
-    [String]
-    $Match,
+    Param ( [String] $Match, [Int] $DiffLevel = 0, $Progress=$null, [Parameter(ValueFromPipeline=$true)] $File )
 
-    [Int]
-    $DiffLevel = 0,
+    Begin { }
 
-    $Progress=$null,
-
-    [Parameter(ValueFromPipeline=$true)]
-    $File
-   )
-
-   Begin {}
-
-   Process {
+    Process {
         If ( $Progress -ne $null ) { $Progress.Update( $File.Name ) }
 
-        $Object = ($File | Rebase-File -To $Match)
-        if ( Is-Matched-File -From $File -To $Object -DiffLevel $DiffLevel ) {
+        $Object = ($File | ConvertTo-MirroredPath -To $Match)
+        If ( Test-MatchedFile -From $File -To $Object -DiffLevel $DiffLevel ) {
             $File
         }
-   }
+    }
 
-   End {}
+    End { }
+
 }
 
 Function Test-UnmirroredDerivedItem {
@@ -810,11 +808,6 @@ Process {
 End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedItem -LiteralPath:$null -MirrorBaggedCopies:$MirrorBaggedCopies } }
 
 }
-
-
-#############################################################################################################
-## ADPNET DROP SERVER FUNCTIONS #############################################################################
-#############################################################################################################
 
 
 #############################################################################################################
@@ -974,7 +967,7 @@ Param ($From, $To, [switch] $Batch=$false, $Depth=0)
     $sFiles = ( "file" | Get-PluralizedText($N) )
     $Progress.Open( "Matching (rm): [${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
 
-    $aDirs | Get-Unmatched-Items -Match "$From" -DiffLevel 0 -Progress:$Progress | ForEach {
+    $aDirs | Select-UnmatchedItems -Match "$From" -DiffLevel 0 -Progress:$Progress | ForEach {
 
         $BaseName = $_.Name
         $MoveFrom = $_.FullName
@@ -1003,12 +996,14 @@ Param ($From, $to, $DiffLevel=1, [switch] $Batch=$false, $Depth=0)
     $sFiles = ( "file" | Get-PluralizedText($N) )
     $Progress.Open( "Matching (mkdir): [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
 
-    $aDirs | Get-Unmatched-Items -Match "${To}" -DiffLevel 0 -Progress:$Progress | ForEach {
+    $aDirs | Select-UnmatchedItems -Match "${To}" -DiffLevel 0 -Progress:$Progress | ForEach {
         If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
             $CopyFrom = $_.FullName
-            $CopyTo = ($_ | Rebase-File -To "${To}")
+            $CopyTo = ($_ | ConvertTo-MirroredPath -To "${To}")
 
-            Write-Output "${CopyFrom}\\ =>> ${CopyTo}\\"
+            If ( $Progress ) {
+                $Progress.Log( "${CopyFrom}\\ =>> ${CopyTo}\\" )
+            }
             Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
         }
     }
@@ -1040,7 +1035,7 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$nu
     }
     
     $matchingProgress.Open( "Matching Files (cp) [${From} => ${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
-    $aFiles = ( $aFiles | Get-Unmatched-Items -Exclude "Thumbs[.]db" -Match "${To}" -DiffLevel $DiffLevel -Progress:$matchingProgress )
+    $aFiles = ( $aFiles | Select-UnmatchedItems -Exclude "Thumbs[.]db" -Match "${To}" -DiffLevel $DiffLevel -Progress:$matchingProgress )
     $N = $aFiles.Count
     $matchingProgress.Complete()
 
@@ -1055,7 +1050,7 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$nu
     $aFiles | ForEach {
         $BaseName = $_.Name
         $CopyFrom = $_.FullName
-        $CopyTo = ($_ | Rebase-File -To "${To}")
+        $CopyTo = ($_ | ConvertTo-MirroredPath -To "${To}")
         
         If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
             Copy-MirroredFile -From:${CopyFrom} -To:${CopyTo} -Batch:${Batch} -Progress:${Progress}
@@ -1070,7 +1065,7 @@ Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
-        $aFiles = ( Get-ChildItem -LiteralPath "$From" | Get-Matched-Items -Match "${To}" -DiffLevel 0 )
+        $aFiles = ( Get-ChildItem -LiteralPath "$From" | Select-MatchedItems -Match "${To}" -DiffLevel 0 )
     }
     $N = $aFiles.Count
     $sFiles = ( "file" | Get-PluralizedText($N) )
@@ -1087,7 +1082,7 @@ Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
     $I0 = $Progress.I
     $aFiles | ForEach  {
         $CopyFrom = $_.FullName
-        $CopyTo = ($_ | Rebase-File -To "${To}")
+        $CopyTo = ($_ | ConvertTo-MirroredPath -To "${To}")
 
         $Progress.Update( ( "Meta: #{0:N0}/{1:N0}. {2}" -f ( ( $Progress.I - $I0 + 1 ), $N, $_.Name ) ) )
 
@@ -1162,7 +1157,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
-        $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Get-Matched-Items -Match "$To" -DiffLevel 0 )
+        $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Select-MatchedItems -Match "$To" -DiffLevel 0 )
     }
     $N = $aFiles.Count
     
@@ -1173,7 +1168,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     $aFiles | ForEach {
         $BaseName = $_.Name
         $MirrorFrom = $_.FullName
-        $MirrorTo = ($_ | Rebase-File -To "${To}")
+        $MirrorTo = ($_ | ConvertTo-MirroredPath -To "${To}")
 
         $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
         $Progress.Update( $Mesg, 0 )
@@ -1183,8 +1178,10 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     $Progress.Complete()
 }
 
-function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false) {
+# Do-Mirror-Repositories
+Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false) {
 
+    $Context = Get-CommandWithVerb
     $mirrors = ( Get-ColdStorageRepositories )
 
     $Pairs = ($Pairs | % { If ( $_.Length -gt 0 ) { $_ -split "," } })
@@ -1195,10 +1192,11 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
 
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( "Mirroring between ADAHFS servers and ColdStorage", ( "{0} {1}" -f $Pairs.Count, ( "location" | Get-PluralizedText($Pairs.Count) ) ), $Pairs.Count )
+    
     $Pairs | ForEach {
         $Pair = $_
 
-        if ( $mirrors.ContainsKey($Pair) ) {
+        If ( $mirrors.ContainsKey($Pair) ) {
             $locations = $mirrors[$Pair]
 
             $slug = $locations[0]
@@ -1208,7 +1206,8 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
             $Progress.Update(("Location: {0}" -f $Pair), 0) 
             Sync-MirroredFiles -From "${src}" -To "${dest}" -DiffLevel $DiffLevel -Batch:$Batch
             $Progress.Update(("Location: {0}" -f $Pair)) 
-        } else {
+        }
+        Else {
             $recurseInto = @( )
             $mirrors.Keys | ForEach {
                 $subPair = $_
@@ -1222,15 +1221,80 @@ function Do-Mirror-Repositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$fa
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Do-Mirror-Repositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch
+                Sync-MirroredRepositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch
             }
             Else {
-                Write-Warning "No such repository: ${Pair}."
+                ( "[{0}] No such repository: {1}." -f $Context,$Pair ) | Write-Warning 
             }
-        } # if
+        } # If
     }
+
     $Progress.Complete()
 }
+
+Function Redo-CSBagPackage {
+
+    [Cmdletbinding()]
+
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        $Payload = ( $File | Select-BagItPayloadDirectory )
+        $Bag = ( $Payload.Parent )
+                
+        $OldManifest = "bagged-${Date}"
+
+        Push-Location $Bag.FullName # 1
+
+        $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
+        $sDate = ($Dates[0])
+        $OldManifest = ".\bagged-${sDate}"
+        
+        If ( Test-Path ( $OldManifest ) ) {
+            $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMddHHmmss") } ) | Sort-Object -Descending
+            $sDate = ($Dates[0])
+            $OldManifest = ".\bagged-${sDate}"
+        }
+
+        Get-ChildItem -LiteralPath . |? { ( $_.Name -ne $Payload.Name ) } |? { -Not ( $_.Name -match "^bagged-[0-9]+$" ) } |% {
+            $Dest = ( "${OldManifest}" | Join-Path -ChildPath $_.Name )
+
+            If ( -Not ( Test-Path -LiteralPath $OldManifest ) ) {
+                New-Item -ItemType Directory -Path $OldManifest
+            }
+
+            Move-Item $_.FullName -Destination $Dest -Verbose
+        }
+
+        Move-Item $Payload -Destination "rebag-data" -Verbose
+                
+        Push-Location "rebag-data" # 2
+
+        $PWD | Out-BagItFormattedDirectory -PassThru:$PassThru -Progress:$Progress
+                
+        Get-ChildItem -LiteralPath . |% {
+            Move-Item $_.FullName -Destination $Bag.FullName -Verbose
+        }
+
+        Pop-Location # 2
+
+        Remove-Item "rebag-data"
+
+        Pop-Location # 1
+
+        Write-Verbose ( $Bag ).FullName
+
+        If ( $PassThru ) {
+            ( $Bag ) | Write-Output
+        }
+    }
+
+    End { }
+
+}
+
 
 # Out-BagItFormattedDirectoryWhenCleared: invoke a malware scanner (ClamAV) to clear preservation packages, then a bagger (BagIt.py) to bag them
 # Formerly known as: Do-Clear-And-Bag
@@ -1296,56 +1360,7 @@ param (
         If ( Test-BagItFormattedDirectory($File) ) {
             Write-BaggedItemNoticeMessage -File $File -Item:$File -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
             If ( $Rebag ) {
-                $Payload = ( $File | Select-BagItPayloadDirectory )
-                $Bag = ( $Payload.Parent )
-                
-                $OldManifest = "bagged-${Date}"
-                Write-Verbose "We'll have to rebag it, I spose."
-
-                Push-Location $Bag.FullName
-                
-                $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
-                $sDate = ($Dates[0])
-                $OldManifest = ".\bagged-${sDate}"
-                  
-                Get-ChildItem -LiteralPath . |% { If ( $_.Name -ne $Payload.Name ) {
-                    $ChildName = $_.Name
-
-                    If ( -Not ( $ChildName -match "^bagged-[0-9]+$" ) ) {
-                        $Dest = "${OldManifest}\${ChildName}"
-
-                        If ( -Not ( Test-Path -LiteralPath $OldManifest ) ) {
-                            New-Item -ItemType Directory -Path $OldManifest
-                        }
-
-                        Move-Item $_.FullName -Destination $Dest -Verbose
-                    }
-
-                } }
-
-                Move-Item $Payload -Destination "rebag-data" -Verbose
-                
-                Push-Location "rebag-data"
-
-                $PWD | Out-BagItFormattedDirectory -PassThru:$PassThru -Progress:$Progress
-                
-                Get-ChildItem -LiteralPath . |% {
-                    Move-Item $_.FullName -Destination $Bag.FullName -Verbose
-                }
-
-                Pop-Location
-
-                Remove-Item "rebag-data"
-
-                Pop-Location $Anchor
-
-                Write-Verbose ( $Bag ).FullName
-
-                If ( $PassThru ) {
-                    ( $Bag ) | Write-Output
-                }
-
-                #Move-Item -LiteralPath ( $payloadDir ).FullName -
+                $File | Redo-CSBagPackage
             }
 
         }
@@ -1495,7 +1510,7 @@ param (
 
     End {
         if ( -Not $Quiet ) {
-            Do-Bleep-Bloop
+            Write-BleepBloop
         }
     }
 
@@ -1585,7 +1600,7 @@ param (
 
     End {
         if ( $Quiet -eq $false ) {
-            Do-Bleep-Bloop
+            Write-BleepBloop
         }
     }
 }
@@ -2829,7 +2844,7 @@ Else {
             }
         }
         Else {
-            Do-Mirror-Repositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch
+            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch
         }
 
     }
@@ -3098,7 +3113,7 @@ Else {
         Invoke-ColdStorageSettle -Words:$Words -Bucket:$Bucket -Force:$Force -Batch:$Batch
     }
     ElseIf ( $Verb -eq "bleep" ) {
-        Do-Bleep-Bloop
+        Write-BleepBloop
     }
     ElseIf ( $Verb -eq "echo" ) {
         $aFlags = $MyInvocation.BoundParameters
