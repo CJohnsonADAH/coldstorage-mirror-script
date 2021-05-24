@@ -2499,19 +2499,26 @@ Param (
     End { }
 }
 
-function Do-Write-Usage ($cmd) {
+# formerly known as: Do-Write-Usage
+Function Get-CSUsageNotes {
+Param ($cmd)
+
     $mirrors = ( Get-ColdStorageRepositories )
 
     $Pairs = ( $mirrors.Keys -Join "|" )
     $PairedCmds = ("bag", "zip", "validate")
-
-    Write-Output "Usage: `t$cmd mirror [-Batch] [-Diff] [$Pairs]"
+    $ItemsCmds = ("to cloud", "to adpnet")
+    "Usage: `t$cmd mirror [-Batch] [-Diff] [$Pairs]" | Write-Output
     $PairedCmds |% {
         $verb = $_
-        Write-Output "       `t${cmd} ${verb} [$Pairs]"
+        "       `t${cmd} ${verb} [$Pairs]" | Write-Output
     }
-    Write-Output "       `t${cmd} -?"
-    Write-Output "       `t`tfor detailed documentation"
+    $ItemsCmds |% {
+        $verb = $_
+        "       `t${cmd} ${verb} [-Diff] [-Batch] -Items PATH1 [PATH2]..." | Write-Output
+    }
+    "       `t${cmd} -?" | Write-Output
+    "       `t`tfor detailed documentation" | Write-Output
 }
 
 Function Get-CSScriptVersion {
@@ -2793,7 +2800,7 @@ If ( $Verbose ) {
 }
 
 if ( $Help -eq $true ) {
-    Do-Write-Usage -cmd $MyInvocation.MyCommand
+    Get-CSUsageNotes -cmd $MyInvocation.MyCommand
 }
 ElseIf ( $Version ) {
     Get-CSScriptVersion -Verb:$Verb -Words:$Words -Flags:$MyInvocation.BoundParameters | Write-Output
@@ -3124,7 +3131,7 @@ Else {
         [PSCustomObject] $oEcho | Out-CSStream -Stream:$Output
     }
     Else {
-        Do-Write-Usage -cmd $MyInvocation.MyCommand
+        Get-CSUsageNotes -cmd $MyInvocation.MyCommand
     }
 
 
