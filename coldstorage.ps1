@@ -959,7 +959,7 @@ Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singul
 Function Remove-MirroredFilesWhenObsolete {
 Param ($From, $To, [switch] $Batch=$false, $Depth=0)
 
-    ( "[mirror] Remove-MirroredFilesWhenObsolete -From:{0} -To:{1} -Batch:{2} -Depth:{3} -ProgressId:{4} -NewProgressId:{5}" -f $From, $To, $Batch, $Depth, $ProgressId, $NewProgressId ) | Write-Debug
+    ( "[mirror] Remove-MirroredFilesWhenObsolete -From:{0} -To:{1} -Batch:{2} -Depth:{3}" -f $From, $To, $Batch, $Depth ) | Write-Debug
 
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
@@ -2161,7 +2161,7 @@ Param (
 
 )
 
-    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ); $aBucketListings = @{} }
+    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ); $aBucketListings = @{}; $jsonOut = @() }
 
     Process {
         $oContext = ( Get-FileObject $Context )
@@ -2255,13 +2255,16 @@ Param (
                     $o.PSObject.Properties.Remove("InCloud")
                 }
 
-                If ( "CSV" -ieq $Output ) {
+                If ( ("CSV","JSON") -ieq $Output ) {
                     # Fields not used in CSV columns
                     $o.PSObject.Properties.Remove("InZip")
                     $o.PSObject.Properties.Remove("InCloud")
 
                     # Output
-                    $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } )
+                    Switch ( $Output ) {
+                        "JSON" { $jsonOut += , $o }
+                        "CSV" { $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } ) }
+                    }
                 }
                 Else {
 
@@ -2289,7 +2292,7 @@ Param (
         }
     }
 
-    End { }
+    End { If ( $jsonOut ) { $jsonOut | ConvertTo-Json } }
 }
 
 Function Select-ColdStoragePackagesToReport {
