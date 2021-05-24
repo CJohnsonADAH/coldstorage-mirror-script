@@ -493,7 +493,7 @@ Param( $File, $Item=$null, $Status=$null, $Message=$null, [switch] $Zip=$false, 
 
 }
 
-Function Write-Unbagged-Item-Notice {
+Function Write-UnbaggedItemNoticeMessage {
 Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
 
     $Prefix = "UNBAGGED"
@@ -1375,7 +1375,7 @@ param (
                     Write-BaggedItemNoticeMessage -File $File -Item:$File -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
                 else {
-                    Write-Unbagged-Item-Notice -File $File -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+                    Write-UnbaggedItemNoticeMessage -File $File -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
                     
                     $NotOK = ( $DirName | Do-Scan-ERInstance )
                     If ( $NotOK | Shall-We-Continue ) {
@@ -1397,7 +1397,7 @@ param (
             #    "File"=$File.FullName;
             #    "Method"="Out-BagItFormattedDirectory"
             #}
-            Write-Unbagged-Item-Notice -File $File -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
+            Write-UnbaggedItemNoticeMessage -File $File -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
             If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                 $File | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
             }
@@ -1413,7 +1413,7 @@ param (
                     #    "Method"="Out-BaggedPackage"
                     #}
 
-                    Write-Unbagged-Item-Notice -File $ChildItem -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
+                    Write-UnbaggedItemNoticeMessage -File $ChildItem -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
                     if ( $ChildItem | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                         $ChildItem | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
@@ -1452,7 +1452,7 @@ param (
     $OnDiff={ Param($File, $Payload, $Quiet); Write-Warning ( "DIFF: {0}, {1}" -f ( $File,$Payload ) ) },
 
     [ScriptBlock]
-    $OnUnbagged={ Param($File, $Quiet); Write-Unbagged-Item-Notice -File $File -Line ( Get-CurrentLine ) -Quiet:$Quiet },
+    $OnUnbagged={ Param($File, $Quiet); Write-UnbaggedItemNoticeMessage -File $File -Line ( Get-CurrentLine ) -Quiet:$Quiet },
 
     [ScriptBlock]
     $OnZipped={ Param($File, $Quiet); $FilePath = $File.FullName; If ( -Not $Quiet )  { Write-Verbose "ZIP: ${FilePath}" } },
@@ -1572,7 +1572,7 @@ param (
                     Write-BaggedItemNoticeMessage -File $File -Item:$File -Zip -Quiet:$Quiet -Line ( Get-CurrentLine )
 
                 } else {
-                    Write-Unbagged-Item-Notice -File $File -Quiet:$Quiet -Line ( Get-CurrentLine )
+                    Write-UnbaggedItemNoticeMessage -File $File -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
             }
             Else {
@@ -1586,7 +1586,7 @@ param (
             Write-BaggedItemNoticeMessage -File:$File -Item:$File -Zip -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
-            Write-Unbagged-Item-Notice -File $File -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
+            Write-UnbaggedItemNoticeMessage -File $File -Message "indexed directory" -Quiet:$Quiet -Line ( Get-CurrentLine )
         }
         Else {
 
@@ -2343,6 +2343,32 @@ Param (
 
 }
 
+Function Sync-ClamAVDatabase {
+    $ClamAV = Get-PathToClamAV
+    $FreshClam = ( $ClamAV | Join-Path -ChildPath "freshclam.exe" )
+    
+    If ( Test-Path -LiteralPath $FreshClam -PathType Leaf ) {
+        & $FreshClam
+    }
+    Else {
+        ( "[{0}] ClamAV update command not found: {1}" -f ( Get-CommandWithVerb ), $FreshClam ) | Write-Error
+    }
+}
+
+Function Sync-ADPNetPluginsDirectory {
+    Write-Verbose "* Opening SSH session to LOCKSS box."
+    $SFTP = New-LockssBoxSession 
+    $Location = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Cache" | ConvertTo-ColdStorageSettingsFilePath )
+
+    Write-Verbose "* Transferring copies from LOCKSS box to ${Location}"
+    $oLocation = ( Get-Item -LiteralPath $Location -Force )
+    Get-ChildItem -LiteralPath $oLocation.FullName |% { Remove-Item -LiteralPath ( $_.FullName ) -Recurse  }
+    $oLocation | Sync-ADPNetPluginsPackage -Session:$SFTP
+
+    Write-Verbose "* Closing SSH session to LOCKSS box."
+    Remove-SFTPSession $SFTP >$null
+}
+
 Function Invoke-ColdStorageRepository {
 Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, [String] $Output="" )
 
@@ -3073,20 +3099,8 @@ Else {
         $Object, $Words = $Words
         
         Switch ( $Object ) {
-            "clamav" { $ClamAV = Get-PathToClamAV ; & "${ClamAV}\freshclam.exe" }
-            "plugins" {
-                Write-Verbose "* Opening SSH session to LOCKSS box."
-                $SFTP = New-LockssBoxSession 
-                $Location = ( Get-ColdStorageSettings -Name "ADPNet-Plugin-Cache" | ConvertTo-ColdStorageSettingsFilePath )
-
-                Write-Verbose "* Transferring copies from LOCKSS box to ${Location}"
-                $oLocation = ( Get-Item -LiteralPath $Location -Force )
-                Get-ChildItem -LiteralPath $oLocation.FullName |% { Remove-Item -LiteralPath ( $_.FullName ) -Recurse  }
-                $oLocation | Sync-ADPNetPluginsPackage -Session:$SFTP
-
-                Write-Verbose "* Closing SSH session to LOCKSS box."
-                Remove-SFTPSession $SFTP >$null
-            }
+            "clamav" { Sync-ClamAVDatabase }
+            "plugins" { Sync-ADPNetPluginsDirectory }
             default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
         }
 
