@@ -304,7 +304,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 Function Get-CloudStorageListing {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $Context="Get-CloudStorageListing" )
 
-Begin { $bucketFiles = @{ } }
+Begin { $bucketFiles = @{ }; $AWS = $( Get-ExeForAWSCLI ); }
 
 Process {
 
@@ -342,13 +342,13 @@ End {
         $Files = $bucketFiles[$Bucket]
 
         If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
-            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f $( Get-ExeForAWSCLI ),$Bucket )
-            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
+            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f ${AWS},$Bucket )
+            $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
         }
         Else {
             $FileName = $Files.Name
-            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f $( Get-ExeForAWSCLI ),$Bucket,$FileName )
-            $jsonReply = $( & $( Get-ExeForAWSCLI ) s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" ) ; $awsExitCode = $LastExitCode
+            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f ${AWS},$Bucket,$FileName )
+            $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" ) ; $awsExitCode = $LastExitCode
         }
 
         If ( -Not $Unmatched ) {
@@ -476,7 +476,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, $S
 Function Add-PackageToCloudStorageBucket {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [switch] $Recurse=$false )
 
-    Begin { If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
+    Begin { $AWS = $( Get-ExeForAWSCLI ); If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
 
@@ -497,7 +497,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                     $sFile = ( '\\?\{0}' -f $sFile )
                 }
 
-                & $( Get-ExeForAWSCLI ) s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
+                & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
             }
             Else {
                 Write-Warning ( "[{0} to cloud] Could not identify bucket: {1}" -f $global:gCSScriptName,$File )
@@ -510,6 +510,69 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
 
 }
 
+Function Stop-CloudStorageUploadsToBucket {
+Param ( [Parameter(ValueFromPipeline=$true)] $Bucket, [switch] $Batch=$false, [switch] $WhatIf=$false )
+
+    Begin { If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
+
+    Process {
+
+        $sMultipartUploadsJSON = ( & $( Get-ExeForAWSCLI ) s3api list-multipart-uploads --bucket "${Bucket}" )
+        $oMultipartUploads = $( $sMultipartUploadsJSON | ConvertFrom-Json )
+        $oMultipartUploads.Uploads |% {
+            $Key = $_.Key
+            $UploadId = $_.UploadId
+            If ( $Key -and $UploadId ) {
+                If ( $Batch ) {
+                    Write-Warning "ABORT {$Key}, # ${UploadId} ..."
+                    $cAbort = 'Y'
+                }
+                Else {
+                    $cAbort = ( Read-Host -Prompt "ABORT ${Key}, # ${UploadId}? (Y/N)" )
+                }
+                If ( $cAbort[0] -ieq 'Y' ) {
+                    If ( $WhatIf ) {
+                        ( "& {0} {1} {2} {3} {4} {5} {6} {7} {8}" -f $( Get-ExeForAWSCLI ),"s3api","abort-multipart-upload","--bucket","${Bucket}","--key","${Key}","--upload-id","${UploadId}" ) | Write-Output
+                    }
+                    Else {
+                        & $( Get-ExeForAWSCLI ) s3api abort-multipart-upload --bucket "${Bucket}" --key "${Key}" --upload-id "${UploadId}"
+                    }
+                }
+            }
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Stop-CloudStorageUploads {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Batch=$false, [switch] $WhatIf=$false )
+
+    Begin {
+        $Buckets = @{ }
+    }
+
+    Process {
+        If ( $Package ) {
+            $MaybeBucket = ( Get-FileObject($Package) | Get-CloudStorageBucket )
+            If ( $MaybeBucket ) {
+                $Buckets[$MaybeBucket] = $true
+            }
+        }
+        Else {
+            ( "[{0}] Could not determine cloud storage bucket for item: '{1}'" -f $global:gCSCommandWithVerb,$Package ) | Write-Warning
+        }
+    }
+
+    End {
+        $Buckets.Keys | Stop-CloudStorageUploadsToBucket -Batch:$Batch -WhatIf:$WhatIf
+    }
+
+}
+
+
 Export-ModuleMember -Function Get-CloudStorageBucketNamePart
 Export-ModuleMember -Function Get-CloudStorageBucket
 Export-ModuleMember -Function New-CloudStorageBucket
@@ -518,3 +581,5 @@ Export-ModuleMember -Function Get-CloudStorageBucketProperties
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket
+Export-ModuleMember -Function Stop-CloudStorageUploadsToBucket
+Export-ModuleMember -Function Stop-CloudStorageUploads
