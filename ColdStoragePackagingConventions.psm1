@@ -564,9 +564,17 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
                     $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
                     $sDate = ($Dates[0])
                     $OldManifest = ( $oFile.FullName | Join-Path -ChildPath "bagged-${sDate}" )
-                    $oManifest = ( New-Item -Path $OldManifest -ItemType Directory )
+                    Try {
+                        $oManifest = ( New-Item -Path $OldManifest -ItemType Directory )
+                    }
+                    Catch {
+                        $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMddHHmmSS") } ) | Sort-Object -Descending
+                        $sDate = ($Dates[0])
+                        $OldManifest = ( $oFile.FullName | Join-Path -ChildPath "bagged-${sDate}" )
+                        $oManifest = ( New-Item -Path $OldManifest -ItemType Directory )
+                    }
 
-                    Get-ChildItem -LiteralPath $oFile |% {
+                    Get-ChildItem -LiteralPath $oFile -Force |% {
                         $BagItem = $_
                         If ( $BagItem.FullName -eq $PayloadDirectory.FullName ) {
                             # 1st pass - skip
@@ -582,16 +590,18 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
 
                     }
 
-                    Get-ChildItem -LiteralPath $oFile |% {
+                    Get-ChildItem -LiteralPath $oFile -Force |% {
                         $BagItem = $_
                         If ( $BagItem.FullName -eq $PayloadDirectory.FullName ) {
                             # 2nd pass - empty payload contents into parent directory and remove data directory
                             Get-ChildItem -LiteralPath $BagItem.FullName |% {
-                                Move-Item -LiteralPath $_.FullName -Destination $oFile
+                                Move-Item -LiteralPath $_.FullName -Destination $oFile -Force
                             }
-                            Remove-Item -LiteralPath $BagItem.FullName
+                            Remove-Item -LiteralPath $BagItem.FullName -Force
                         }
                     }
+
+                    $oManifest.Attributes = ( $oManifest.Attributes -bxor [System.IO.FileAttributes]::Hidden )
 
                 }
 
