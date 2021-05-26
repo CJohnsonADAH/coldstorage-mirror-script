@@ -650,9 +650,6 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
                 }
             }
         }
-        ElseIf ( Test-IndexedDirectory -File $File ) {
-            $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
-        }
         ElseIf ( Test-BaggedCopyOfLooseFile -File $File -DiffLevel 1 ) {
 
             If ( $Ascend ) {
@@ -685,6 +682,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
                     $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
                 }
             }
+        }
+        ElseIf ( Test-IndexedDirectory -File $File ) {
+            $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
         }
         ElseIf ( Test-LooseFile -File $File ) {
             $oBagLocation = ( Get-BaggedCopyOfLooseFile -File $File )
