@@ -30,9 +30,9 @@ Param ( $File )
 
     $BagDir = $oFile.FullName
     if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
-        $PayloadDir = "${BagDir}\data"
+        $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
         if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
-            $BagItTxt = "${BagDir}\bagit.txt"
+            $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )
             if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
                 $result = $true
             }
@@ -59,8 +59,8 @@ Begin { }
 
 Process {
     If ( $File -ne $null ) {
-        $sPath = Get-FileObject($File).FullName
-        Get-Item -Force -LiteralPath "${sPath}\data"
+        $sPath = ( ( Get-FileObject($File).FullName ) | Join-Path -ChildPath "data" )
+        Get-Item -Force -LiteralPath "${sPath}"
     }
 }
 
