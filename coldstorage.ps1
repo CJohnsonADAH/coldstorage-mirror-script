@@ -1376,9 +1376,8 @@ param (
                 }
                 else {
                     Write-UnbaggedItemNoticeMessage -File $File -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
-                    
-                    $NotOK = ( $DirName | Do-Scan-ERInstance )
-                    If ( $NotOK | Shall-We-Continue ) {
+
+                    If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                         Out-BagItFormattedDirectory -DIRNAME $DirName -PassThru:$PassThru -Progress:$Progress
                     }
 
@@ -1415,7 +1414,7 @@ param (
 
                     Write-UnbaggedItemNoticeMessage -File $ChildItem -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
-                    if ( $ChildItem | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
+                    If ( $ChildItem | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
                         $ChildItem | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
                     }
                 }
@@ -1605,37 +1604,6 @@ param (
             Write-BleepBloop
         }
     }
-}
-
-function Do-Scan-ERInstance () {
-    [CmdletBinding()]
-
-param (
-    [Parameter(ValueFromPipeline=$true)]
-    $Path
-)
-
-    Begin { }
-
-    Process {
-        If ( -Not $NoScan ) {
-            "ClamAV Scan: ${Path}" | Write-Verbose -InformationAction Continue
-            $ClamAV = Get-ExeForClamAV
-            $Output = ( & "${ClamAV}" --stdout --bell --suppress-ok-results --recursive "${Path}" )
-            if ( $LastExitCode -gt 0 ) {
-                $Output | Write-Warning
-                $LastExitCode
-            }
-            Else {
-                $Output | Write-Verbose
-            }
-        }
-        Else {
-            "ClamAV Scan SKIPPED for path ${Path}" | Write-Verbose -InformationAction Continue
-        }
-    }
-
-    End { }
 }
 
 function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false) {

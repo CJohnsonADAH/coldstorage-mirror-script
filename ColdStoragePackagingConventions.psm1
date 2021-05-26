@@ -92,21 +92,17 @@ param (
                 $ERMeta = ( $File | Get-ERInstanceData )
                 $ERCode = $ERMeta.ERCode
 
-                # chdir $DirName
-
                 if ( Test-BagItFormattedDirectory($File) ) {
                     # FIXME: Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
                 }
                 else {
                     # FIXME: Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
-                    $ToScan += , $File
+                    $ToScan += , ( $File | Add-Member -MemberType NoteProperty -Name ERMeta -Value $ERMeta -PassThru )
                 }
             }
             Else {
                 # FIXME: Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
-
-            # chdir $Anchor
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
             # FIXME: Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
@@ -125,6 +121,7 @@ param (
                 }
             }
         }
+        
         $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings | Write-Output
     }
 

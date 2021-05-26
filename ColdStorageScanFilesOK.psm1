@@ -83,7 +83,7 @@ Param (
 
     Process {
         $Path `
-        | Select-CSFilesOKByClamAV -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes `
+        | Select-CSFilesOKByClamAV -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings `
         | Write-Output
     }
 
