@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0524
+@version 2021.0527
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -350,7 +350,7 @@ Param ( [String] $To, [Parameter(ValueFromPipeline=$true)] $File )
 
     Process {
         $oFile = Get-FileObject($File)
-        ( $To | Join-Path -ChildPath $oFile.Name ) | Write-Output
+        $To | Get-FileObject | Get-ItemFileSystemLocation | Get-FileLiteralPath | Join-Path -ChildPath $oFile.Name
     }
 
     End {}
@@ -1158,7 +1158,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
     ##################################################################################################################
 
     $aFiles = @( )
-    If ( Test-Path -LiteralPath "$From" ) {
+    If ( Test-Path -LiteralPath "$From" -PathType Container ) {
         $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Select-MatchedItems -Match "$To" -DiffLevel 0 )
     }
     $N = $aFiles.Count
@@ -1238,58 +1238,46 @@ Function Redo-CSBagPackage {
 
     [Cmdletbinding()]
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
 
     Begin { }
 
     Process {
         $Payload = ( $File | Select-BagItPayloadDirectory )
         $Bag = ( $Payload.Parent )
-                
-        $OldManifest = "bagged-${Date}"
 
-        Push-Location $Bag.FullName # 1
+        $oManifest = ( $Bag | New-BagItManifestContainer )
+        $OldManifest = $oManifest.FullName
 
-        $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
-        $sDate = ($Dates[0])
-        $OldManifest = ".\bagged-${sDate}"
-        
-        If ( Test-Path ( $OldManifest ) ) {
-            $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMddHHmmss") } ) | Sort-Object -Descending
-            $sDate = ($Dates[0])
-            $OldManifest = ".\bagged-${sDate}"
-        }
-
-        Get-ChildItem -LiteralPath . |? { ( $_.Name -ne $Payload.Name ) } |? { -Not ( $_.Name -match "^bagged-[0-9]+$" ) } |% {
-            $Dest = ( "${OldManifest}" | Join-Path -ChildPath $_.Name )
-
-            If ( -Not ( Test-Path -LiteralPath $OldManifest ) ) {
-                New-Item -ItemType Directory -Path $OldManifest
+        Get-ChildItem -LiteralPath $Bag.FullName |? { ( $_.Name -ne $Payload.Name ) } |? { -Not ( $_.Name -match "^bagged-[0-9]+$" ) } |% {
+            $Src = $_.FullName
+            If ( Test-Path -LiteralPath $OldManifest ) {
+                $Dest = ( "${OldManifest}" | Join-Path -ChildPath $_.Name )
+            }
+            Else {
+                $Dest = ( $Src + "~" )
             }
 
-            Move-Item $_.FullName -Destination $Dest -Verbose
+            Move-Item $Src -Destination $Dest -Verbose
         }
 
-        Move-Item $Payload -Destination "rebag-data" -Verbose
-                
-        Push-Location "rebag-data" # 2
+        $RebagData = ( $Bag.FullName | Join-Path -ChildPath ( ( "rebag-data-{0}" -f ( Get-Date -UFormat "%s" ) ) -replace "[^A-Za-z0-9]+","-" ) )
 
-        $PWD | Out-BagItFormattedDirectory -PassThru:$PassThru -Progress:$Progress
-                
-        Get-ChildItem -LiteralPath . |% {
+        # Avoid name collision with data child directory when we pop out contents
+        Move-Item $Payload -Destination $RebagData -Verbose
+        $RebagData | Out-BagItFormattedDirectory -Progress:$Progress
+
+        # Pop out contents
+        Get-ChildItem -LiteralPath $RebagData |% {
             Move-Item $_.FullName -Destination $Bag.FullName -Verbose
         }
 
-        Pop-Location # 2
+        # Get rid of temporary data container
+        Remove-Item $RebagData
 
-        Remove-Item "rebag-data"
-
-        Pop-Location # 1
-
-        Write-Verbose ( $Bag ).FullName
-
+        $Bag.FullName | Write-Verbose
         If ( $PassThru ) {
-            ( $Bag ) | Write-Output
+            $Bag | Write-Output
         }
     }
 
@@ -1362,7 +1350,7 @@ param (
         If ( Test-BagItFormattedDirectory($File) ) {
             Write-BaggedItemNoticeMessage -File $File -Item:$File -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
             If ( $Rebag ) {
-                $File | Redo-CSBagPackage
+                $File | Redo-CSBagPackage -PassThru:$PassThru
             }
 
         }
@@ -1742,6 +1730,58 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 
 }
 
+Function Invoke-ColdStorageItemMirror {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $WhatIf )
+
+    Begin { }
+
+    Process {
+        If ( $File ) {
+            $oRepository = ( Get-FileRepositoryLocation -File $File )
+            $sRepository = $oRepository.FullName
+            $RepositorySlug = ( Get-FileRepositoryName -File $File )
+
+            $Src = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
+            $Dest = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
+
+            ( "REPOSITORY: {0} - SLUG: {0}" -f $sRepository,$RepositorySlug ) | Write-Debug
+            ( "FROM:{0} -> TO:{1} [DIFF LEVEL: {0}]" -f $Src, $Dest, $DiffLevel ) | Write-Verbose
+            
+            If ( -Not $WhatIf ) {
+                Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel $DiffLevel -Batch:$Batch
+            }
+            Else {
+                Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch"
+            }
+
+        }
+    }
+
+    End { }
+
+}
+
+Function Invoke-ColdStorageItemCheck {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item )
+
+    Begin { }
+
+    Process {
+        $File = Get-FileObject($Item)
+        If ( $File ) {
+            $Pair = ($Item | Get-FileRepositoryName)
+            Invoke-ColdStorageDirectoryCheck -Pair:$Pair -From:$File.FullName -To:$File.FullName -Batch:$Batch
+        }
+        Else {
+            ( "[{0}] Item Not Found: {1}" -f ( Get-CommandWithVerb ), $Item ) | Write-Warning
+        }
+    }
+
+    End { }
+
+}
+
+
 Function Invoke-ColdStorageRepositoryCheck {
 Param ( $Pairs=$null )
 
@@ -2040,7 +2080,6 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
             $What | Stop-CloudStorageUploads -Batch:$Batch -WhatIf:$WhatIf
         }
         ElseIf ( $Diff ) {
-            $Anchor = $PWD
             $Candidates = ( $What | Get-ItemPackageZippedBag -ReturnContainer | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
             $Candidates | Write-Verbose
             $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
@@ -2382,7 +2421,7 @@ Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch
         $PropsFileName = "props.json"
         $DefaultProps = $null
 
-        If ( $sLocation -eq "here" ) {
+        If ( ( $sLocation -is [string] ) -and ( $sLocation -eq "here" ) ) {
             $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
         }
         Else {
@@ -2811,8 +2850,6 @@ Else {
     $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
 
     If ( $Verb -eq "mirror" ) {
-        $N = ( $Words.Count )
-
         $DiffLevel = 0
         if ($Diff) {
             $DiffLevel = 2
@@ -2822,59 +2859,18 @@ Else {
         }
 
         If ( $Items ) {
-            $Words |% {
-                $File = Get-FileObject($_)
-                If ( $File ) {
-                    $oRepository = ( Get-FileRepositoryLocation -File $File )
-                    $sRepository = $oRepository.FullName
-                    $RepositorySlug = ( Get-FileRepositoryName -File $File )
-
-                    $Src = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
-                    $Dest = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
-
-                    Write-Debug ( "REPOSITORY: {0}" -f $sRepository )
-                    Write-Debug ( "SLUG: {0}" -f $RepositorySlug )
-                    Write-Verbose ( "FROM: {0}; TO: {1}" -f $Src, $Dest )
-                    Write-Verbose ( "DIFF LEVEL: {0}" -f $DiffLevel )
-
-                    If ( -Not $WhatIf ) {
-                        Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel $DiffLevel -Batch:$Batch
-                    }
-                    Else {
-                        Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch"
-                    }
-
-                }
-
-                #$locations = $mirrors[$Pair]
-
-                #$slug = $locations[0]
-                #$src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
-                #$dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
-
-            }
+            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -WhatIf:$WhatIf
         }
         Else {
             Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch
         }
-
     }
     ElseIf ( $Verb -eq "check" ) {
-        $N = ( $Words.Count )
         If ( $Items ) {
-            $Words |% {
-                $File = Get-FileObject($_)
-                If ( $File ) {
-                    $Pair = ($_ | Get-FileRepositoryName)
-                    Invoke-ColdStorageDirectoryCheck -Pair:$Pair -From:$File.FullName -To:$File.FullName -Batch:$Batch
-                }
-                Else {
-                    ( "Item Not Found: {0}" -f $_ ) | Write-Warning
-                }
-            }
+            $allObjects | Invoke-ColdStorageItemCheck
         }
         Else {
-            Invoke-ColdStorageRepositoryCheck -Pairs $Words
+            Invoke-ColdStorageRepositoryCheck -Pairs:$Words
         }
     }
     ElseIf ( $Verb -eq "validate" ) {
@@ -2886,7 +2882,6 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "bag" ) {
-        $N = ( $Words.Count )
         $SkipScan = @( )
         If ( $NoScan ) {
             $SkipScan = @( "clamav" )
@@ -2901,17 +2896,19 @@ Else {
 
     }
     ElseIf ( $Verb -eq "rebag" ) {
-        $N = ( $Words.Count )
         If ( $Items ) {
-            $Words | Get-Item -Force |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Rebag -PassThru:$PassThru
+            $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Rebag -PassThru:$PassThru
+        }
+        Else {
+            ( "[{0}] Not currently implemented for repositories. Use: {0} -Items [File1] [File2] ..." -f $sVerbWithCommandName ) | Write-Warning
         }
     }
     ElseIf ( $Verb -eq "unbag" ) {
         If ( $Items ) {
-            $Words | Get-Item -Force | Undo-CSBagPackage
+            $allObjects | Get-FileObject | Undo-CSBagPackage -PassThru:$PassThru
         }
         Else {
-            Write-Warning "[$sVerbWithCommandName] Not currently implemented for repositories. Use -Items [File1] [File2] ..."
+            ( "[{0}] Not currently implemented for repositories. Use: {0} -Items [File1] [File2] ..." -f $sVerbWithCommandName ) | Write-Warning
         }
     }
     ElseIf ( $Verb -eq "zip" ) {
@@ -2942,8 +2939,7 @@ Else {
 
     }
     ElseIf ( ("index", "bundle") -ieq $Verb ) {
-        $Words = ( $Words | ColdStorage-Command-Line -Default "${PWD}" )
-        $Words | Add-IndexHTML -RelativeHref -Force:$Force -Context:"${global:gCSCommandWithVerb}"
+        $allObjects | ColdStorage-Command-Line -Default "${PWD}" |% { Get-FileLiteralPath $_ } | Add-IndexHTML -RelativeHref -Force:$Force -PassThru:$PassThru -Context:"${global:gCSCommandWithVerb}"
     }
     ElseIf ( $Verb -eq "manifest" ) {
 
@@ -2977,8 +2973,8 @@ Else {
     }
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Remainder = $Words
-        $Words = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
-        Invoke-ColdStorageTo -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
+        $allObjects = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
+        Invoke-ColdStorageTo -Destination:$Object -What:$allObjects -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("cloud", "drop") -ieq $Verb ) {
         $allObjects = ( $allObjects | ColdStorage-Command-Line -Default "${PWD}" )
@@ -2986,8 +2982,8 @@ Else {
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $Object, $Remainder = $Words
-        $Words = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
-        Invoke-ColdStorageInVs -Destination:$Object -What:$Words -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
+        $allObjects = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
+        Invoke-ColdStorageInVs -Destination:$Object -What:$allObjects -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
@@ -2995,7 +2991,7 @@ Else {
     }
     ElseIf ( $Verb -eq "packages" ) {
 
-        $Locations = $( If ($Items) { $Words } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
+        $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
         $Locations | Invoke-ColdStoragePackagesReport -Recurse:( $Recurse -or ( -Not $Items )) `
             -ShowWarnings:$Verbose `
             -Unbagged:$Unbagged `
@@ -3047,11 +3043,10 @@ Else {
 
     }
     ElseIf ( $Verb -eq "repository" ) {
-        Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$Words -Output:$Output
+        Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$allObjects -Output:$Output
     }
     ElseIf ( $Verb -eq "zipname" ) {
-        $Words | ColdStorage-Command-Line -Default "${PWD}" | ForEach {
-            $File = Get-FileObject -File $_
+        $allObjects | ColdStorage-Command-Line -Default "${PWD}" | Get-FileObject |% {
             [PSCustomObject] @{ "File"=($File.FullName); "Prefix"=($File | Get-ZippedBagNamePrefix ); "Container"=($File | Get-ZippedBagsContainer).FullName }
         }
     }
@@ -3100,7 +3095,7 @@ Else {
 
     }
     ElseIf ( $Verb -eq "settle" ) {
-        Invoke-ColdStorageSettle -Words:$Words -Bucket:$Bucket -Force:$Force -Batch:$Batch
+        Invoke-ColdStorageSettle -Words:$allObjects -Bucket:$Bucket -Force:$Force -Batch:$Batch
     }
     ElseIf ( $Verb -eq "bleep" ) {
         Write-BleepBloop

@@ -36,30 +36,37 @@ Param( [Parameter(ValueFromPipeline=$true)] $File )
 }
 
 Function Get-FileLiteralPath {
-Param($File)
+Param( [Parameter(ValueFromPipeline=$true)] $File )
 
-	$sFile = $null
+    Begin { }
 
-	If ( $File -eq $null ) {
-		$oFile = $null
-	}
-	ElseIf ( $File -is [String] ) {
-		$oFile = Get-FileObject($File)
-    }
-	ElseIf ( -Not ( Get-Member -InputObject $File -name "FullName" -MemberType Properties ) ) {
-		$oFile = Get-FileObject($File)
-	}
-	Else {
-		$oFile = $File
-	}
+    Process {
+	    $sFile = $null
 
-	If ( $oFile -ne $null ) {
-        If ( Get-Member -InputObject $oFile -name "FullName" -MemberType Properties ) {
-		    $sFile = $oFile.FullName
+	    If ( $File -eq $null ) {
+		    $oFile = $null
+	    }
+	    ElseIf ( $File -is [String] ) {
+		    $oFile = Get-FileObject($File)
         }
-	}
+	    ElseIf ( -Not ( Get-Member -InputObject $File -name "FullName" -MemberType Properties ) ) {
+		    $oFile = Get-FileObject($File)
+	    }
+	    Else {
+		    $oFile = $File
+	    }
+
+	    If ( $oFile -ne $null ) {
+            If ( Get-Member -InputObject $oFile -name "FullName" -MemberType Properties ) {
+		        $sFile = $oFile.FullName
+            }
+	    }
 	
-	$sFile
+	    $sFile
+    }
+
+    End { }
+
 }
 
 Function Get-ItemFileSystemParent {

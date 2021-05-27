@@ -545,8 +545,44 @@ Process {
 End { }
 }
 
+Function New-BagItManifestContainer {
+Param( [Parameter(ValueFromPipeline=$true)] $Bag )
+
+    Begin { }
+
+    Process {
+        $oFile = ( $Bag | Get-FileObject | Get-ItemFileSystemLocation )
+
+        # Let's check out the contents of the BagIt top-level directory for viable creation dates.
+        $CreationTime = ( Get-ChildItem -LiteralPath $oFile.FullName |% { $_.CreationTime } ) | Sort-Object -Descending | Select-Object -First 1
+
+        # If for any reason we don't have a creation time, fall back to the current time
+        If ( $CreationTime.Count -eq 0 ) {
+            $CreationTime = Get-Date
+        }
+
+        # 1st, let's construct a short (date only) name for this path:
+        $ContainerName = ( "bagged-{0}" -f ( $CreationTime.ToString("yyyyMMdd") ) )
+        $Here = ( $oFile.FullName | Join-Path -ChildPath $ContainerName )
+        $There = ( $oFile | Select-BagItPayloadDirectory | Get-FileLiteralPath | Join-Path -ChildPath $ContainerName )
+
+        # 2nd, if there is a possible name collision in this directory or the payload directory, get more specific:
+        If ( ( Test-Path -LiteralPath $Here ) -Or ( Test-Path -LiteralPath $There ) ) {
+            $ContainerName = ( "bagged-{0}" -f ( $CreationTime.ToString("yyyyMMddHHmmss") ) )
+            $Here = ( $oFile.FullName | Join-Path -ChildPath $ContainerName )
+            $There = ( $oFile | Select-BagItPayloadDirectory | Get-FileLiteralPath | Join-Path -ChildPath $ContainerName )
+        }
+
+        # 3rd, create the container with New-Item and pass thru to output
+        New-Item -Path $Here -ItemType Directory | Write-Output
+    }
+
+    End { }
+
+}
+
 Function Undo-CSBagPackage {
-Param ( [Parameter(ValueFromPipeline=$true)] $Package )
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $PassThru=$false )
 
     Begin { }
 
@@ -558,34 +594,33 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
                 
                 $PayloadDirectory = ( $oFile | Select-BagItPayloadDirectory )
                 If ( Test-BaggedCopyOfLooseFile -File $oFile -DiffLevel 2 ) {
+                    
+                    $LooseFile = Get-LooseFileOfBaggedCopy -File $oFile -DiffLevel:0
+
                     Remove-Item -LiteralPath $oFile.FullName -Recurse -Force
-                }
-                Else {
-                    $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMdd") } ) | Sort-Object -Descending
-                    $sDate = ($Dates[0])
-                    $OldManifest = ( $oFile.FullName | Join-Path -ChildPath "bagged-${sDate}" )
-                    Try {
-                        $oManifest = ( New-Item -Path $OldManifest -ItemType Directory )
-                    }
-                    Catch {
-                        $Dates = ( Get-ChildItem -LiteralPath . |% { $_.CreationTime.ToString("yyyyMMddHHmmSS") } ) | Sort-Object -Descending
-                        $sDate = ($Dates[0])
-                        $OldManifest = ( $oFile.FullName | Join-Path -ChildPath "bagged-${sDate}" )
-                        $oManifest = ( New-Item -Path $OldManifest -ItemType Directory )
+
+                    If ( $PassThru ) {
+                        If ( Test-Path -LiteralPath $LooseFile.FullName ) {
+                            $LooseFile | Write-Output
+                        }
                     }
 
-                    Get-ChildItem -LiteralPath $oFile -Force |% {
+                }
+                Else {
+
+                    $oManifest = ( $oFile | New-BagItManifestContainer )
+
+                    Get-ChildItem -LiteralPath $oFile -Force |? { $_.FullName -ne $PayloadDirectory.FullName } |% {
                         $BagItem = $_
-                        If ( $BagItem.FullName -eq $PayloadDirectory.FullName ) {
-                            # 1st pass - skip
-                        }
-                        ElseIf ( $BagItem.FullName -eq $oManifest.FullName ) {
-                            # 1st pass - mark Hidden
-                            $BagItem.Attributes = ( $BagItem.Attributes -bor [System.IO.FileAttributes]::Hidden )
-                        }
-                        Else {
-                            # 1st pass - move to old manifest directory
-                            Move-Item -LiteralPath $_.FullName -Destination $oManifest.FullName
+                        If ( ( $BagItem.FullName -ne $oManifest.FullName ) -and ( -Not ( $BagItem.Name -like "bagged-*" ) ) ) {
+                            # 1st pass - move to old manifest directory, if available...
+                            If ( $oManifest -and ( Test-Path -LiteralPath $oManifest.FullName -PathType Container ) ) {
+                                Move-Item -LiteralPath $_.FullName -Destination $oManifest.FullName
+                            }
+                            # ... or delete, if for some reason not available.
+                            Else {
+                                Remove-Item -LiteralPath $_.FullName
+                            }
                         }
 
                     }
@@ -601,7 +636,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
                         }
                     }
 
-                    $oManifest.Attributes = ( $oManifest.Attributes -bxor [System.IO.FileAttributes]::Hidden )
+                    If ( $PassThru ) {
+                        $oFile | Write-Output
+                    }
 
                 }
 
@@ -970,7 +1007,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo=$null, [switch] $
 }
 
 Function Add-IndexHTML {
-Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false, [string] $Context=$null )
+Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$false, [switch] $Force=$false, [switch] $PassThru=$false, [string] $Context=$null )
 
     Begin { $MyCommand = $MyInvocation.MyCommand ; $sContext = $( If ( $Context ) { $Context } Else { $MyCommand } ) }
 
@@ -980,25 +1017,31 @@ Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$
         } else {
             $Path = ( $Directory )
         }
+        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
+        $indexHtmlPath = ( "${UNC}" | Join-Path -ChildPath "index.html" )
 
         If ( ( -Not $Force ) -And ( Test-MirrorMatchedItem -File "${Path}" -Reflection ) ) {
-            $originalLocation = ( "${Path}" | Get-MirrorMatchedItem -Original )
-            ( "[{0}] This is a mirror-image location. Setting Location to: {1}." -f $sContext,$originalLocation ) | Write-Warning
-            $originalLocation | Add-IndexHTML -RelativeHref:$RelativeHref -Force:$Force -Context:$Context
 
-            $originalIndexHTML = ( Get-Item -Force -LiteralPath ( $originalLocation | Join-Path -ChildPath "index.html" ) )
-            If ( $originalIndexHTML ) {
-                If ( Test-Path -LiteralPath "${Path}" -PathType Container ) {
-                    ( "[{0}] Copying HTML from {1} to {2}." -f $sContext,$originalIndexHTML,$Path ) | Write-Warning
-                    Copy-Item -Force:$Force -LiteralPath $originalIndexHTML -Destination "${Path}"
+            $originalLocation = ( "${Path}" | Get-MirrorMatchedItem -Original )
+            If ( Test-Path -LiteralPath "${originalLocation}" -PathType Container ) {
+                ( "[{0}] This is a mirror-image location. Setting Location to: {1}." -f $sContext,$originalLocation ) | Write-Warning
+                $originalLocation | Add-IndexHTML -RelativeHref:$RelativeHref -Force:$Force -Context:$Context
+
+                $originalIndexHTML = ( Get-Item -Force -LiteralPath ( $originalLocation | Join-Path -ChildPath "index.html" ) )
+                If ( $originalIndexHTML ) {
+                    If ( Test-Path -LiteralPath "${Path}" -PathType Container ) {
+                        ( "[{0}] Copying HTML from {1} to {2}." -f $sContext,$originalIndexHTML,$Path ) | Write-Warning
+                        Copy-Item -Force:$Force -LiteralPath $originalIndexHTML -Destination "${Path}"
+                    }
                 }
+            }
+            Else {
+                ( "[{0}] This seems to be a mirror-image location, but the expected original source location ({1}) does not exist!" -f $sContext,$originalLocation ) | Write-Warning
+                ( "[{0}] Use the -Force flag to force index.html to be generated locally in this directory ({1})" -f $sContext,$Path ) | Write-Warning
             }
 
         }
         ElseIf ( Test-Path -LiteralPath "${Path}" ) {
-            $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
-
-            $indexHtmlPath = ( "${UNC}" | Join-Path -ChildPath "index.html" )
 
             If ( Test-Path -LiteralPath "${indexHtmlPath}" ) {
                 If ( $Force) {
@@ -1022,6 +1065,13 @@ Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$
                 ( "[{0}] index.html already exists in {1}. To force index.html to be regenerated, use -Force flag." -f $sContext,$Directory ) | Write-Warning
             }
         }
+
+        If ( Test-Path -LiteralPath "${indexHtmlPath}" -PathType Leaf ) {
+            If ( $PassThru ) {
+                "${indexHtmlPath}" | Get-FileObject | Get-ItemFileSystemLocation
+            }
+        }
+
     }
 
     End { }
@@ -1043,6 +1093,7 @@ Export-ModuleMember -Function Get-LooseFileOfBaggedCopy
 Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
 Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
+Export-ModuleMEmber -Function New-BagItManifestContainer
 Export-ModuleMember -Function Undo-CSBagPackage
 Export-ModuleMember -Function Test-ERInstanceDirectory
 Export-ModuleMember -Function Select-ERInstanceDirectories
