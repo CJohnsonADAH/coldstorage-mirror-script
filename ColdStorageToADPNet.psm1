@@ -184,25 +184,41 @@ Param( [Parameter(ValueFromPipeline=$true)] $File )
     End { }
 }
 
-Function Add-LOCKSSManifestHTML {
-Param( $Directory, [string] $Title, [switch] $Force=$false )
+Function Get-LOCKSSManifestHTML {
+Param ( [Parameter(ValueFromPipeline=$true)] $Path, [string] $Title, [string] $TitlePrefix="" )
 
-    if ( $Directory -eq $null ) {
-        $Path = ( Get-Location )
-    } else {
-        $Path = ( $Directory )
-    }
+    Begin { }
 
-    $TitlePrefix = Get-ColdStorageSettings -Name "Institution"
+    Process {
+        $htmlOut = $null
 
-    if ( Test-Path -LiteralPath "${Path}" ) {
-        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
-        $oManifest = ( $UNC | Get-LOCKSSManifest )
-        If ( ( $oManifest ) -and ( -Not $Force ) ) {
-            Write-Warning ( "[manifest:${Directory}] manifest.html already exists for this AU ({0} bytes, created {1}). Use -Force flag to force it to be regenerated." -f $oManifest.Length, $oManifest.CreationTime )
+        $ServiceURL = Get-ColdStorageSettings -Name "Make-LOCKSS-Manifest-Service"
+
+        If ( $ServiceURL ) {
+            $AU = ( $Path | Get-ADPNetAUTable -ForService )
+
+            $oReq = Invoke-WebRequest -Uri $ServiceURL -Method "POST" -Body @{
+                institution_code = $AU['Institution Code']
+                institution_name = $AU['Institution Name']
+                au_title = $AU['AU Title']
+                au_directory = $AU['AU Directory']
+                au_file_size = $AU['File Size']
+                drop_server = $AU['Drop Server']
+                lockss_plugin = $AU['Plugin JAR']
+                lockss_plugin_id = $AU['Plugin ID']
+                lockss_plugin_name = $AU['Plugin Name']
+                lockss_plugin_version = $AU['Plugin Version']
+                display_format = "text/html"
+                CreateManifest = "CREATE FILE: manifest.html"
+            }
+            If ( $oReq ) {
+                If ( $oReq.StatusCode -eq 200 ) {
+                    $htmlOut = $oReq.Content
+                }
+            }
         }
-        Else {
 
+        If ( -Not $htmlOut ) {
             $NL = [Environment]::NewLine
 
             $htmlStartLink = ( '<a href="{0}">{1}</a>' -f $( $Path | Get-ADPNetStartURL ), $Title )
@@ -211,13 +227,13 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
 
             $htmlLOCKSSBadge = ( '<img src="{0}" alt="LOCKSS" width="108" height="108" />' -f $imgSrc )
             $htmlLOCKSSPermission = 'LOCKSS system has permission to collect, preserve, and serve this Archival Unit.'
-            
+
             $htmlBody = ( (
                 "<p>${htmlStartLink}</p>",
                 "<p>${htmlLOCKSSBadge} ${htmlLOCKSSPermission}</p>",
                 ""
             ) -Join "${NL}" )
-            
+
             $htmlTitle = ( "{0}: {1}" -f $TitlePrefix, $Title )
 
             $htmlOut = (
@@ -237,8 +253,35 @@ Param( $Directory, [string] $Title, [switch] $Force=$false )
                     ) -join "${NL}"
                 ) -f $htmlTitle, $htmlBody
             )
+        }
 
-            $htmlOut | Out-File -FilePath ( $UNC | Get-LOCKSSManifestPath ) -NoClobber:(-Not $Force) -Encoding utf8
+        $htmlOut | Write-Output
+
+    }
+
+    End { }
+
+}
+
+Function Add-LOCKSSManifestHTML {
+Param( $Directory, [string] $Title, [switch] $Force=$false )
+
+    if ( $Directory -eq $null ) {
+        $Path = ( Get-Location )
+    } else {
+        $Path = ( $Directory )
+    }
+
+    $TitlePrefix = Get-ColdStorageSettings -Name "Institution"
+
+    if ( Test-Path -LiteralPath "${Path}" ) {
+        $UNC = ( Get-Item -Force -LiteralPath "${Path}" | Get-UNCPathResolved -ReturnObject )
+        $oManifest = ( $UNC | Get-LOCKSSManifest )
+        If ( ( $oManifest ) -and ( -Not $Force ) ) {
+            Write-Warning ( "[manifest:${Directory}] manifest.html already exists for this AU ({0} bytes, created {1}). Use -Force flag to force it to be regenerated." -f $oManifest.Length, $oManifest.CreationTime )
+        }
+        Else {
+            $Path | Get-LOCKSSManifestHTML -Title:$Title -TitlePrefix:$TitlePrefix | Out-File -FilePath ( $UNC | Get-LOCKSSManifestPath ) -NoClobber:(-Not $Force) -Encoding utf8
         }
     }
 }
@@ -386,7 +429,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Block, $Key="au_start_url" )
 }
 
 Function Get-ADPNetAUTable {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ForService=$false )
 
     Begin { }
 
@@ -432,6 +475,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
                 'Plugin Version'=( $pluginParams["plugin_version"] |% { $_ } );
                 'au_name'=( $pluginParams["au_name"] |% { $_ } );
                 'au_start_url'=( $pluginParams["au_start_url"] |% { $_ } );
+            }
+
+            If ( $ForService ) {
+                $hashAU['Institution Code'] = ( Get-DropServerUser )
+                $hashAU['Institution Name'] = ( "{0} ({1})" -f $sInstitution,( $auParams['From Peer'] ) )
+                $hashAU['AU Title'] = $sAUTitle
+                $hashAU['AU Directory'] = $Book["directory"]
+                $hashAU['Drop Server'] = $Book["base_url"]
             }
 
             $pluginParams["plugin_config_props"] |% {
@@ -1375,8 +1426,8 @@ Param( [Parameter(ValueFromPipeline=$true)] $JAR )
         }
 
         $oJAR = Get-FileObject($JAR)
-        $OutputName = ( $oJAR.Name -replace "[^A-Za-z0-9]+","-" )
-        $sZip = ( "{0}\{1}" -f $Destination.FullName,$OutputName )
+        $OutputName = ( "{0}.zip" -f ( $oJAR.Name -replace "[^A-Za-z0-9]+","-" ) )
+        $sZip = ( $Destination.FullName | Join-Path -ChildPath $OutputName )
 
         # Copy the jar
         Get-ChildItem -LiteralPath $Destination.FullName |% { If ( $_.Name -like '*.zip' ) { If ( $_.Name -ne $OutputName ) { Remove-Item $_.FullName -Verbose } } }
@@ -1426,6 +1477,7 @@ Export-ModuleMember -Function Get-ADPNetStartDir
 Export-ModuleMember -Function Get-ADPNetStartURL
 Export-ModuleMember -Function Get-LOCKSSManifestPath
 Export-ModuleMember -Function Get-LOCKSSManifest
+Export-ModuleMember -Function Get-LOCKSSManifestHTML
 Export-ModuleMember -Function Add-LOCKSSManifestHTML
 
 Export-ModuleMember -Function Get-ColdStoragePasswordFile

@@ -12,6 +12,7 @@
     "ADPNet-Plugin-Jar": "http://configuration.adpn.org/overhead/takeover/plugins/AuburnDirectoryPlugin.jar",
     "ADPNet-Plugin-Package": "sftp://adpnadah.alabama.gov/cache0/adpnet-plugins/",
     "ADPNet-Plugin-Cache": "//ADAHColdStorage/Share/ADPNet-Plugins",
+    "Make-LOCKSS-Manifest-Service": "https://archives.alabama.gov/Services/ADPnet/MakeManifest/",
     "Lockss-Box-SFTP": "adahcoldstorage@adpnadah.alabama.gov",
 	"AU-Titles": {
 		"Digitization-Masters": {
