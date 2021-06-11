@@ -301,10 +301,104 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 }
 
-Function Get-CloudStorageListing {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $Context="Get-CloudStorageListing" )
+Function Get-CloudStorageTimestamp {
 
-Begin { $bucketFiles = @{ }; $AWS = $( Get-ExeForAWSCLI ); }
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+
+        $sLastModified = $null
+        
+        $oFile = $File
+        If ( $oFile -is [Hashtable] ) {
+            $oFile = [PSCustomObject] $oFile
+        }
+
+        If ( $oFile ) {
+
+            If ( $oFile | Get-Member -MemberType NoteProperty -Name CloudCopy ) {
+                $sLastModified = $oFile.CloudCopy.LastModified
+            }
+            ElseIf ( ( $oFile | Get-Member -MemberType NoteProperty -Name StorageClass ) ) {
+                If ($oFile | Get-Member -MemberType NoteProperty -Name LastModified ) {
+                    $sLastModified = $oFile.LastModified
+                }
+            }
+
+        }
+
+        If ( $sLastModified ) {
+            Get-Date ( $sLastModified ) 
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Test-CSDatedObject {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [string] $From="", [string] $To="", [string] $MemberName="", [ScriptBlock] $DatePicker={ Process { $_ } } )
+
+    Begin {
+        $tsFrom = $null
+        If ( $From ) {
+            $tsFrom = ( Get-Date $From )
+        }
+        $tsTo = $null
+        If ( $To ) {
+            $tsTo = ( Get-Date $To )
+        }
+    }
+
+    Process {
+        $vItem = ( $Item | & $DatePicker )
+
+        If ( $MemberName ) {
+            $tsThis = ( Get-Date $vItem.${MemberName} )
+        }
+        Else {
+            $tsThis = ( Get-Date $vItem )
+        }
+        
+        $ok = @( )
+        If ( $tsFrom ) { $ok += , ( $tsThis -ge $tsFrom ) }
+        If ( $tsTo ) { $ok += , ( $tsThis -le $tsTo ) }
+
+        $mTests = ( $ok | Measure-Object -Sum )
+        
+        ( $mTests.Count -eq $mTests.Sum ) # Logical product (AND)
+
+    }
+
+    End { }
+
+}
+
+Function Select-CSDatedObject {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [string] $From="", [string] $To="", [string] $MemberName="", [ScriptBlock] $DatePicker={ Process { $_ } } )
+
+    Begin { }
+
+    Process {
+        If ( $Item | Test-CSDatedObject -From:$From -To:$To -MemberName:$MemberName -DatePicker:$DatePicker ) {
+            $Item
+        }
+    }
+
+    End { }
+
+}
+
+Function Get-CloudStorageListing {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $From="", [string] $To="", [string] $Context="Get-CloudStorageListing" )
+
+Begin {
+    $bucketFiles = @{ };
+    $AWS = $( Get-ExeForAWSCLI );
+}
 
 Process {
 
@@ -365,7 +459,7 @@ End {
             $oReply = ( $jsonReply | ConvertFrom-Json )
             If ( $oReply ) {
                 If ( $oReply.Contents ) {
-                    $oCloudContents = $oReply.Contents
+                    $oCloudContents = $oReply.Contents | Select-CSDatedObject -From:$From -To:$To -MemberName:LastModified
                     $isDataGood = $true
                 }
                 Else {
@@ -572,14 +666,54 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Batch=$false, [
 
 }
 
+Function Get-CloudStorageListOfBuckets {
+Param ( [string] $Output, [string] $From, [string] $To, [switch] $PassThru=$false, [switch] $FullName=$false )
+
+    Begin {
+        $AWS = $( Get-ExeForAWSCLI ) 
+    }
+
+    Process {
+        $jsonReply = ( & "${AWS}" s3api list-buckets )
+        
+        If ( $jsonReply ) {
+            Try {
+                $oReply = ( $jsonReply | ConvertFrom-Json )
+            }
+            Catch {
+                $oReply = $null
+            }
+
+            If ( ( $oReply -ne $null ) -and ( $oReply | Get-Member -MemberType NoteProperty -Name Buckets ) ) {
+                $aBuckets = $oReply.Buckets | Select-CSDatedObject -From:$From -To:$To -MemberName:CreationDate
+                Switch ( $Output ) {
+                    "JSON" { $aBuckets | ConvertTo-Json }
+                    "CSV" { $aBuckets | ConvertTo-CSV -NoTypeInformation }
+                    default { $aBuckets |% { If ($FullName) { $_.Name } Else { $_ } } | Write-Output }
+                }
+            }
+            Else {
+                ( "[{0}] Could not interpret JSON response from AWS: '{1}'" -f $global:gCSCommandWithVerb,$jsonReply ) | Write-Warning
+            }
+        }
+
+    }
+
+    End { }
+
+}
 
 Export-ModuleMember -Function Get-CloudStorageBucketNamePart
 Export-ModuleMember -Function Get-CloudStorageBucket
 Export-ModuleMember -Function New-CloudStorageBucket
 Export-ModuleMember -Function Get-CloudStorageURI
+Export-ModuleMember -Function Get-CloudStorageTimestamp
 Export-ModuleMember -Function Get-CloudStorageBucketProperties
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket
 Export-ModuleMember -Function Stop-CloudStorageUploadsToBucket
 Export-ModuleMember -Function Stop-CloudStorageUploads
+Export-ModuleMember -Function Get-CloudStorageListOfBuckets
+Export-ModuleMember -Function Test-CSDatedObject
+Export-ModuleMember -Function Select-CSDatedObject

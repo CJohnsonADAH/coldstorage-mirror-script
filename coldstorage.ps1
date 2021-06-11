@@ -65,6 +65,8 @@ param (
     #[switch] $Debug = $false,
     [switch] $WhatIf = $false,
     [switch] $Version = $false,
+    [string] $From,
+    [string] $To,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
 )
@@ -2133,7 +2135,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [switch] $FullName, [switch] 
 }
 
 Function Invoke-ColdStorageInVs {
-Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $Recurse=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false, [switch] $PassThru=$false, [switch] $WhatIf=$false )
+Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Repository=$false, [switch] $Recurse=$false, [switch] $Report=$false, [switch] $Batch=$false, [String] $Output="", [String[]] $Side, [switch] $Unmatched=$false, [switch] $FullName=$false, [string] $From="", [string] $To="", [switch] $PassThru=$false, [switch] $WhatIf=$false )
 
         $Destinations = ("cloud", "drop", "adpnet")
         Switch ( $Destination ) {
@@ -2145,7 +2147,7 @@ Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Reposito
                     $aItems = ( Get-ZippedBagsContainer -Repository:$What )
                 }
 
-                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -Recurse:$true -Context:("{0} {1}" -f $global:gCSCommandWithVerb,$Destination ) -ReturnObject | Select-CSFileInfo -FullName:$FullName -ReturnObject:$PassThru
+                $aItems | Get-CloudStorageListing -Unmatched:$Unmatched -Side:($aSide) -Recurse:$true -Context:("{0} {1}" -f $global:gCSCommandWithVerb,$Destination ) -From:$From -To:$To -ReturnObject | Select-CSFileInfo -FullName:$FullName -ReturnObject:$PassThru
             }
             default {
                 ( "[{0} {1}] Unknown destination. Try: ({2})" -f ($global:gCSCommandWithVerb, $Destination, ( $Destinations -join ", " )) ) | Write-Warning
@@ -2237,6 +2239,7 @@ Param (
             "Zipped"=( $nZippedFlag )
             "InZip"=( $sZippedFlag )
             "CloudFile"=( $oCloudCopy | Get-CloudStorageURI )
+            "CloudTimestamp"=( $oCloudCopy | Get-CloudStorageTimestamp )
             "CloudBacked"=( $nCloudCopyFlag )
             "InCloud"=( $sCloudCopyFlag )
             "Files"=( $nContents )
@@ -2825,6 +2828,24 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false, [s
     }
 }
 
+Function Select-CSHasDate {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $InCloud, [switch] $NotInCloud, [string] $From, [string] $To )
+
+    Begin { }
+
+    Process {
+        If ( $InCloud ) {
+            $Item | Select-CSDatedObject -From:$From -To:$To -DatePicker { Process { $_.CloudCopy } } -MemberName:"LastModified"
+        }
+        Else {
+            $Item | Select-CSDatedObject -From:$From -To:$To -MemberName:"LastWriteTime"
+        }
+    }
+
+    End { }
+
+}
+
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
 
@@ -2983,7 +3004,7 @@ Else {
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $Object, $Remainder = $Words
         $allObjects = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
-        Invoke-ColdStorageInVs -Destination:$Object -What:$allObjects -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
+        Invoke-ColdStorageInVs -Destination:$Object -What:$allObjects -Items:$Items -Repository:$Repository -Recurse:$Recurse -Report:$Report -FullName:$FullName -Batch:$Batch -Output:$Output -Side:$Side -From:$From -To:$To -Unmatched:( $Verb -ieq "vs" ) -PassThru:$PassThru -WhatIf:$WhatIf
     }
     ElseIf ( $Verb -eq "stats" ) {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
@@ -3090,7 +3111,17 @@ Else {
 
         Switch ( $Object ) {
             "plugins" { $Words | Get-ADPNetPlugins }
+            "buckets" { $Words | Get-CloudStorageListOfBuckets -Output:$Output -From:$From -To:$To -PassThru:$PassThru -FullName:$FullName }
             default { Write-Warning "[coldstorage $Verb] Unknown object: $Object" }
+        }
+
+    }
+    ElseIf ( $Verb -eq "has" ) {
+        $Object, $Words = $Words
+
+        Switch ( $Object ) {
+            "date" { $Input | Select-CSHasDate -From:$From -To:$To -InCloud:$InCloud -NotInCloud:$NotInCloud }
+            default { ( "[{0}] Unknown test: has {1}" -f $global:gCSCommandWithVerb,$Object ) | Write-Warning }
         }
 
     }
