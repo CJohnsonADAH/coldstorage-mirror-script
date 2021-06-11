@@ -661,7 +661,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $PassThru=$false
 
 
 Function Get-ItemPackage {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $Ascend=$false, $AscendTop=$null, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $Ascend=$false, $AscendTop=$null, [switch] $CheckZipped=$false, [switch] $CheckCloud=$false, [switch] $ShowWarnings=$false )
 
     Begin { }
 
@@ -771,14 +771,30 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             $Package = $File
             $mContents = ( $aContents | Measure-Object -Sum Length )
             #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
-                
+
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $oBagLocation -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
+            
+            $oCloudCopy = $null
             If ( $aZipped -ne $false ) {
                 $Package | Add-Member -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
+
+                If ( $aZipped.Name -and $CheckCloud ) {
+                    $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
+                    $aListing = ( $oListing | Get-TablesMerged )
+                    $bCloudCopy = ( $aListing.ContainsKey($aZipped.Name) )
+                    If ( $bCloudCopy ) {
+                        $oCloudCopy = $aListing[$aZipped.Name]
+                    }
+                }
             }
+
+            If ( $CheckCloud ) {
+                $Package | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $oCloudCopy -Force
+            }
+
             $Package | Write-Output
         }
 
@@ -791,7 +807,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
 
 Function Get-ChildItemPackages {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $CheckZipped=$false, [switch] $ShowWarnings=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $CheckZipped=$false, [switch] $CheckCloud=$false, [switch] $ShowWarnings=$false )
 
     Begin { }
 
@@ -804,7 +820,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         }
         Else {
 
-            Get-ChildItem -LiteralPath $oFile.FullName | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
+            Get-ChildItem -LiteralPath $oFile.FullName | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
 
         }
 

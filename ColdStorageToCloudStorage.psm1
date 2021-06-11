@@ -396,8 +396,8 @@ Function Get-CloudStorageListing {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $From="", [string] $To="", [string] $Context="Get-CloudStorageListing" )
 
 Begin {
-    $bucketFiles = @{ };
-    $AWS = $( Get-ExeForAWSCLI );
+    $bucketFiles = @{ }
+    $AWS = $( Get-ExeForAWSCLI )
 }
 
 Process {
@@ -434,15 +434,45 @@ End {
     $bucketFiles.Keys |% {
         $Bucket = $_
         $Files = $bucketFiles[$Bucket]
+        
+        $sContext = ( "[{0}:{1}] " -f $global:gCSScriptName,$Bucket )
 
-        If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
-            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f ${AWS},$Bucket )
-            $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
+        If ( $global:gBucketObjects.ContainsKey($Bucket) ) {
+            $oCloudContents = $global:gBucketObjects[$Bucket]
+            $isDataGood = $true
         }
         Else {
-            $FileName = $Files.Name
-            Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f ${AWS},$Bucket,$FileName )
-            $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" --prefix "$FileName" ) ; $awsExitCode = $LastExitCode
+            If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
+                Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f ${AWS},$Bucket )
+                $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
+            }
+            Else {
+                Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f ${AWS},$Bucket,$Files.Name )
+                $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" --prefix $Files.Name ) ; $awsExitCode = $LastExitCode
+            }
+
+            If ( $jsonReply ) {
+                $oCloudContents = $null
+                $isDataGood = $false
+                $oReply = ( $jsonReply | ConvertFrom-Json )
+                If ( $oReply ) {
+                    If ( $oReply.Contents ) {
+                        $oCloudContents = $oReply.Contents
+                        $isDataGood = $true
+                    }
+                    Else {
+                        ( "${sContext}could not find contents in JSON reply: {0}; object:" -f $jsonReply ) | Write-Warning
+                        $oReply | Write-Warning
+                    }
+                }
+                Else {
+                    ( "${sContext}could not parse JSON reply: {0}" -f $jsonReply ) | Write-Warning
+                }
+            }
+            Else {
+                $oCloudContents = @( )
+                $isDataGood = ( $awsExitCode -eq 0 )
+            }
         }
 
         If ( -Not $Unmatched ) {
@@ -451,39 +481,20 @@ End {
 
         Write-Debug ( "Side(s): {0}" -f ( $Side -join ", " ) )
 
-        $sContext = ( "[{0}:{1}] " -f $global:gCSScriptName,$Bucket )
-
-        If ( $jsonReply ) {
-            $oCloudContents = $null
-            $isDataGood = $false
-            $oReply = ( $jsonReply | ConvertFrom-Json )
-            If ( $oReply ) {
-                If ( $oReply.Contents ) {
-                    $oCloudContents = $oReply.Contents | Select-CSDatedObject -From:$From -To:$To -MemberName:LastModified
-                    $isDataGood = $true
-                }
-                Else {
-                    ( "${sContext}could not find contents in JSON reply: {0}; object:" -f $jsonReply ) | Write-Warning
-                    $oReply | Write-Warning
-                }
-            }
-            Else {
-                ( "${sContext}could not parse JSON reply: {0}" -f $jsonReply ) | Write-Warning
-            }
-        }
-        Else {
-            $oCloudContents = @( )
-            $isDataGood = ( $awsExitCode -eq 0 )
-        }
-
         If ( $isDataGood ) {
 
+            If ( $All -or ( $Files.Count -ne 1 ) ) {
+                $global:gBucketObjects[$Bucket] = $oCloudContents
+            }
+
+            $oCloudContents = $oCloudContents | Select-CSDatedObject -From:$From -To:$To -MemberName:LastModified
+
             $ObjectKeys = ( $oCloudContents |% { $_.Key } )
-            $ObjectObjects = ( $oCloudContents |% { $o = $_ ; $o | Add-Member -MemberType NoteProperty -Name Bucket -Value "${Bucket}" ; $sKey = $o.Key; @{ "${sKey}"=$o } } )
+            $ObjectObjects = ( $oCloudContents |% { $o = $_ ; $o | Add-Member -MemberType NoteProperty -Name Bucket -Value "${Bucket}" -Force ; $sKey = $o.Key; @{ "${sKey}"=$o } } )
             $sHeader = $null
 
             If ( $All ) {
-                
+
                 If ( $ReturnObject ) {
                     $ObjectObjects
                 }

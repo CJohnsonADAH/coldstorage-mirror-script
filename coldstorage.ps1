@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0609
+@version 2021.0611
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -44,11 +44,13 @@ param (
     [switch] $Bundle = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
+    [switch] $Bagged = $false,
     [switch] $Unbagged = $false,
-    [switch] $Unzipped = $false,
     [switch] $Zipped = $false,
+    [switch] $Unzipped = $false,
     [switch] $InCloud = $false,
     [switch] $NotInCloud = $false,
+    [switch] $Only = $false,
     [switch] $PassThru = $false,
     [switch] $Report = $false,
     [switch] $ReportOnly = $false,
@@ -74,6 +76,7 @@ $RipeDays = 7
 
 $Verbose = ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent )
 $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
+$global:gBucketObjects = @{ }
 
 Function Test-CSDevelopmentBranchDir {
 Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
@@ -819,7 +822,7 @@ End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedIte
 #############################################################################################################
 
 Function Do-Make-Bagged-ChildItem-Map {
-Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false )
+Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false, [switch] $Only=$false )
 
     Get-BaggedChildItem -LiteralPath $LiteralPath -Path $Path -Zipped:${Zipped} | % {
         $_.FullName
@@ -2163,8 +2166,8 @@ Param (
     [switch] $Report=$false,
     [string] $Output="",
     [switch] $FullName=$false,
-    [switch] $InCloud=$false,
-    [switch] $NotInCloud=$false,
+    [switch] $CheckZipped=$false,
+    [switch] $CheckCloud=$false,
     $Timestamp,
     $Context
 
@@ -2181,11 +2184,9 @@ Param (
         $sRelName = ( Resolve-Path -Relative -LiteralPath $Package.FullName )
         $sTheName = $( If ( $FullName ) { $sFullName } Else { $sRelName } )
 
-        Pop-Location
-
         $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )
         $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
-        If ( $Package | Get-Member -MemberType NoteProperty -Name CSPackageZip ) {
+        If ( $CheckZipped ) {
             $sZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
             $nZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { 1 } Else { 0 } )
             $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
@@ -2199,33 +2200,28 @@ Param (
         $nFileSize = ( $Package.CSPackageFileSize )
         $sFileSize = ( "{0:N0}" -f $Package.CSPackageFileSize )
         $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
+        $sBagFile = $( If ( $Package.CSPackageBagLocation ) { $Package.CSPackageBagLocation.FullName | Resolve-Path -Relative } Else { "" } )
         $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
+
+        Pop-Location
 
         $oCloudCopy = $null
         $sCloudCopyFlag = $null
         $nCloudCopyFlag = $null
-        If ( ( $InCloud -or $NotInCloud ) -and $sZippedFile ) {
-            
-            $sBucket = ( $Package | Get-CloudStorageBucket )
-            
-            If ( -Not $aBucketListings.ContainsKey($sBucket) ) {
-                $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
-                $aBucketListings[$sBucket] = ( $oListing | Get-TablesMerged )
+
+        If ( $CheckCloud ) {
+
+            If ( $Package.CloudCopy -and $sZippedFile ) {
+                $bCloudCopy = $true
+                $oCloudCopy = $Package.CloudCopy
+                $nCloudCopyFlag = 1
+                $sCloudCopyFlag = "CLOUD"
             }
-
-            If ( $aBucketListings.ContainsKey($sBucket) ) {
-                $bCloudCopy = ( $aBucketListings[$sBucket].ContainsKey($sZippedFile) )
-                If ( $bCloudCopy ) {
-                    $oCloudCopy = ( $aBucketListings[$sBucket][$sZippedFile] )
-                    $nCloudCopyFlag = 1
-                    $sCloudCopyFlag = "CLOUD"
-                }
-                Else {
-                    $oCloudCopy = $null
-                    $nCloudCopyFlag = 0
-                    $sCloudCopyFlag = "local"
-                }
-
+            Else {
+                $bCloudCopy = $false
+                $oCloudCopy = $null
+                $nCloudCopyFlag = 0
+                $sCloudCopyFlag = "local"
             }
 
         }
@@ -2234,14 +2230,15 @@ Param (
             "Date"=( $sDate )
             "Name"=( $sTheName )
             "Bag"=( $sBaggedFlag )
+            "BagFile"=( $sBagFile )
             "Bagged"=( $nBaggedFlag )
             "ZipFile"=( $sZippedFile )
             "Zipped"=( $nZippedFlag )
             "InZip"=( $sZippedFlag )
             "CloudFile"=( $oCloudCopy | Get-CloudStorageURI )
             "CloudTimestamp"=( $oCloudCopy | Get-CloudStorageTimestamp )
-            "CloudBacked"=( $nCloudCopyFlag )
-            "InCloud"=( $sCloudCopyFlag )
+            "InCloud"=( $nCloudCopyFlag )
+            "Clouded"=( $sCloudCopyFlag )
             "Files"=( $nContents )
             "Contents"=( $sContents )
             "Bytes"=( $nFileSize )
@@ -2249,57 +2246,56 @@ Param (
             "Context"=( $oContext.FullName )
         }
 
-        $bFiltered = ( $NotInCloud -and ( -Not ( $o.InCloud -eq "local" ) ) )
+        If ( $Report ) {
 
-        If ( -Not $bFiltered ) {
-            If ( $Report ) {
+            If ( $sZippedFlag -eq $null ) {
+                $o.PSObject.Properties.Remove("ZipFile")
+                $o.PSObject.Properties.Remove("Zipped")
+                $o.PSObject.Properties.Remove("InZip")
+            }
+            If ( $sCloudCopyFlag -eq $null ) {
+                $o.PSObject.Properties.Remove("CloudFile")
+                $o.PSObject.Properties.Remove("CloudTimestamp")
+                $o.PSObject.Properties.Remove("CloudBacked")
+                $o.PSObject.Properties.Remove("Clouded")
+            }
 
-                If ( $sZippedFlag -eq $null ) {
-                    $o.PSObject.Properties.Remove("ZipFile")
-                    $o.PSObject.Properties.Remove("Zipped")
-                    $o.PSObject.Properties.Remove("InZip")
-                }
-                If ( $sCloudCopyFlag -eq $null ) {
-                    $o.PSObject.Properties.Remove("CloudFile")
-                    $o.PSObject.Properties.Remove("CloudBacked")
-                    $o.PSObject.Properties.Remove("InCloud")
-                }
+            If ( ("CSV","JSON") -ieq $Output ) {
+                # Fields not used in CSV columns/JSON fields
+                $o.PSObject.Properties.Remove("Bag")
+                $o.PSObject.Properties.Remove("InZip")
+                $o.PSObject.Properties.Remove("Clouded")
 
-                If ( ("CSV","JSON") -ieq $Output ) {
-                    # Fields not used in CSV columns
-                    $o.PSObject.Properties.Remove("InZip")
-                    $o.PSObject.Properties.Remove("InCloud")
-
-                    # Output
-                    Switch ( $Output ) {
-                        "JSON" { $jsonOut += , $o }
-                        "CSV" { $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } ) }
-                    }
-                }
-                Else {
-
-                    # Fields formatted for text report
-                    $sRptBagged = ( " ({0})" -f $o.Bag )
-                    $sRptZipped = $( If ( $o.Zipped -ne $null ) { ( " ({0})" -f $o.InZip ) } Else { "" } )
-                    $sRptCloud = $( If ( $o.InCloud -ne $null ) { ( " ({0})" -f $o.InCloud ) } Else { "" } )
-
-                    # Output
-                    ( "{0}{1}{2}{3}, {4}, {5}{6}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
-            
+                # Output
+                Switch ( $Output ) {
+                    "JSON" { $jsonOut += , $o }
+                    "CSV" { $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } ) }
                 }
             }
             Else {
+
+                # Fields formatted for text report
+                $sRptBagged = ( " ({0})" -f $o.Bag )
+                $sRptZipped = $( If ( $o.Zipped -ne $null ) { ( " ({0})" -f $o.InZip ) } Else { "" } )
+                $sRptCloud = $( If ( $o.Clouded -ne $null ) { ( " ({0})" -f $o.Clouded ) } Else { "" } )
+
+                # Output
+                ( "{0}{1}{2}{3}, {4}, {5}{6}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
             
-                $o = $_
-                If ( $oCloudCopy -ne $null ) {
-                    $o | Add-Member -MemberType NoteProperty -Name CloudCopy -Value $oCloudCopy
-                }
-
-                $o | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
             }
-
-            $Subsequent = $true
         }
+        Else {
+            
+            $o = $_
+            #If ( $oCloudCopy -ne $null ) {
+            #    $o | Add-Member -MemberType NoteProperty -Name CloudCopy -Value $oCloudCopy -Force
+            #}
+
+            $o | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
+        }
+
+        $Subsequent = $true
+
     }
 
     End { If ( $jsonOut ) { $jsonOut | ConvertTo-Json } }
@@ -2308,17 +2304,45 @@ Param (
 Function Select-ColdStoragePackagesToReport {
 Param (
     [Parameter(ValueFromPipeline=$true)] $Package,
+    [switch] $Bagged,
+    [switch] $Zipped,
     [switch] $Unbagged,
-    [switch] $Unzipped
+    [switch] $Unzipped,
+    [switch] $InCloud,
+    [switch] $NotInCloud,
+    [switch] $Only
 )
 
     Begin { }
 
     Process {
-        If ( -Not ( $Unbagged -and ( $Package.CSPackageBagged ) ) ) {
-            If ( -Not ( $Unzipped -and ( $Package.CSPackageZip ) ) ) {
-                $_
-            }
+        $BaggedOnly = ( $Bagged -and $Only )
+        $ZippedOnly = ( $Zipped -and $Only )
+        $InCloudOnly = ( $InCloud -and $Only )
+
+        $ok = @( )
+        If ( $BaggedOnly ) {
+            $ok += , ( $Package.CSPackageBagged )
+        }
+        If ( $Unbagged ) {
+            $ok += , ( -Not ( $Package.CSPackageBagged ) )
+        }
+        If ( $ZippedOnly ) {
+            $ok += , ( -Not ( -Not ( $Package.CSPackageZip ) ) )
+        }
+        If ( $Unzipped ) {
+            $ok += , ( -Not ( $Package.CSPackageZip ) )    
+        }
+        If ( $InCloudOnly ) {
+            $ok += , ( -Not ( -Not ( $Package.CloudCopy ) ) )
+        }
+        If ( $NotInCloud ) {
+            $ok += , ( -Not ( $Package.CloudCopy ) )
+        }
+
+        $mTests = ( $ok | Measure-Object -Sum )
+        If ( $mTests.Count -eq $mTests.Sum ) {
+            $_
         }
     }
 
@@ -2330,11 +2354,13 @@ Param (
     [Parameter(ValueFromPipeline=$true)] $Location,
     [switch] $Recurse,
     [switch] $ShowWarnings,
+    [switch] $Bagged,
     [switch] $Unbagged,
-    [switch] $Unzipped,
     [switch] $Zipped,
+    [switch] $Unzipped,
     [switch] $InCloud,
     [switch] $NotInCloud,
+    [switch] $Only,
     [switch] $FullName,
     [switch] $Report,
     [string] $Output
@@ -2344,9 +2370,10 @@ Param (
 
     Process {
         $CheckZipped = ( $Unzipped -or $Zipped )
-        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped |
-            Select-ColdStoragePackagesToReport -Unbagged:$Unbagged -Unzipped:$Unzipped |
-            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -FullName:$FullName -Context:$Location -Timestamp:$CurDate -InCloud:$InCloud -NotInCloud:$NotInCloud
+        $CheckCloud = ( $InCloud -or $NotInCloud )
+        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud |
+            Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
+            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -FullName:$FullName -Context:$Location -Timestamp:$CurDate
     }
 
     End { }
@@ -3015,11 +3042,13 @@ Else {
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
         $Locations | Invoke-ColdStoragePackagesReport -Recurse:( $Recurse -or ( -Not $Items )) `
             -ShowWarnings:$Verbose `
+            -Bagged:$Bagged `
             -Unbagged:$Unbagged `
-            -Unzipped:$Unzipped `
             -Zipped:$Zipped `
+            -Unzipped:$Unzipped `
             -InCloud:$InCloud `
             -NotInCloud:$NotInCloud `
+            -Only:$Only `
             -FullName:$FullName `
             -Report:$Report `
             -Output:$Output
