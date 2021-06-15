@@ -26,6 +26,26 @@ Param ( $Command, $File=$null )
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
+Function Get-CSCommandLine {
+Param( [Parameter(ValueFromPipeline=$true)] $Parameter, $Default=@( ) )
+
+    Begin { $N = 0 }
+
+    Process {
+        If ( $Parameter ) {
+            $N = ( $N + 1 )
+            $Parameter
+        }
+    }
+
+    End {
+        If ( $N -lt 1 ) {
+            $Default |% { $_ }
+        }
+    }
+
+}
+
 Function Get-ColdStorageSettings {
 Param([String] $Name="", [String] $Output="", [Int] $Skip=0 )
 

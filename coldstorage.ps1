@@ -175,6 +175,7 @@ $bVerboseModules = ( $Debug -eq $false )
 $bForceModules = ( ( $Debug -eq $false ) -or ( $psISE ) )
 $bForceModules = $true
 
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageInteraction.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
@@ -213,80 +214,6 @@ End { $ExitCode }
 
 }
 
-Function Test-UserApproved {
-Param ( [Parameter(ValueFromPipeline=$true)] $Candidate, [String] $Prompt, [String] $Default="N" )
-
-Begin { }
-
-Process {
-    $FormattedPrompt = $Prompt
-    If ( $Prompt -match "\{[0-9]\}" ) {
-        $FormattedPrompt = ( $Prompt -f $Candidate )
-    }
-
-    $ShouldWeContinue = ( Read-Host $FormattedPrompt )
-    If ( $ShouldWeContinue -match "^[YyNn].*" ) {
-        $ShouldWeContinue = ( $ShouldWeContinue )[0]
-    }
-    Else {
-        $ShouldWeContinue = $Default
-    }
-
-    If ( $ShouldWeContinue -eq "Y" ) {
-        $Candidate
-    }
-}
-
-End { }
-
-}
-
-Function Shall-We-Continue {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ) )
-
-Begin { $result = $true }
-
-Process {
-    $ExitCode = $null
-
-    If ( $Item | Get-Member -MemberType NoteProperty -Name CSScannedOK ) {
-        $ErrorCodes = ( $Item | Get-CSScannedFilesErrorCodes )
-    }
-    ElseIf ( ( $Item -is [Int] ) -or ( $Item -is [Long] ) -or ( $Item -is [Array] ) ) {
-    # Singleton, treat as an ExitCode, with default convention 0=OK, 1..255=Error
-        $ErrorCodes = ( $Item |% { $ExitCode=$_ ; $ok = ( $OKCodes -eq $ExitCode ) ; If ( $ok.Count -eq 0 ) { [PSCustomObject] @{ "ExitCode"=$ExitCode; "OK"=$OKCodes } } } )
-    }
-
-    $ShouldWeContinue = "Y"
-    $ErrorCodes |% {
-        $Error = $_
-        If ( $Error ) {
-            $ExitCode = $Error.ExitCode
-            $Tag = $( If ( $Error.Tag ) { "[{0}] " -f $Error.Tag } Else { "" } )
-            
-            $Mesg = ( "{0}Exit Code {1:N0}" -f $Tag, $ExitCode )
-            If ( $result ) {
-                If ( $Force ) {
-                    ( "{0}; continuing anyway due to -Force flag" -f $Mesg ) | Write-Warning
-                    $ShouldWeContinue = "Y"
-                }
-                Else {
-                    $ShouldWeContinue = ( Read-Host ( "{0}. Continue (Y/N)? " -f $Mesg ) )
-                }
-            }
-            Else {
-                ( "{0}; stopped due to user input." -f $Mesg ) | Write-Warning
-            }
-
-            $result = ( $result -and ( $ShouldWeContinue -eq "Y" ) )
-        }
-    }
-}
-
-End { $result }
-
-}
-
 Function Where-Item-Is-Ripe {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ReturnObject=$false )
 
@@ -311,33 +238,6 @@ End { }
 
 Function Get-CurrentLine {
     $MyInvocation.ScriptLineNumber
-}
-
-Function Write-BleepBloop {
-<#
-.SYNOPSIS
-Make a familiar sound through the workstation's bleep-bloop speaker.
-
-.DESCRIPTION
-Produces a notification sound through [Console]::beep
-Bleep Bleep Bleep Bleep Bleep Bleep -- BLOOP!
-Formerly known as: Do-Bleep-Bloop
-#>
-
-    [console]::beep(659,250) ##E
-    [console]::beep(659,250) ##E
-    [console]::beep(659,300) ##E
-    [console]::beep(523,250) ##C
-    [console]::beep(659,250) ##E
-    [console]::beep(784,300) ##G
-    [console]::beep(392,300) ##g
-    [console]::beep(523,275) ## C
-    [console]::beep(392,275) ##g
-    [console]::beep(330,275) ##e
-    [console]::beep(440,250) ##a
-    [console]::beep(494,250) ##b
-    [console]::beep(466,275) ##a#
-    [console]::beep(440,275) ##a
 }
 
 Function Get-CommandWithVerb {
@@ -399,11 +299,6 @@ End {
 }
 
 }
-
-#############################################################################################################
-## BagIt DIRECTORIES ########################################################################################
-#############################################################################################################
-
 
 #############################################################################################################
 ## BagIt PACKAGING CONVENTIONS ##############################################################################
@@ -1290,9 +1185,62 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
 
 }
 
+# @package coldstorage bag
+Function Select-CSPackagesToBag {
+Param( [Parameter(ValueFromPipeline=$true)] $File, [Switch] $Quiet, [String] $Exclude, $Message=$null, $Line )
+
+    Begin {
+        If ( $Exclude.Length -eq 0 ) {
+            $Exclude = "^$"
+        }
+
+        $FullMessages = @( $null, $null )
+        If ( $Message ) {
+            $FullMessages = @(
+                ( "{0}. Scan it, bag it and tag it." -f $Message )
+                ( "{0} -- already bagged." -f $Message )
+                ( "{0} -- EXCLUDED by rule." -f $Message )
+            )
+        }
+
+    }
+
+    Process {
+        
+        If ( -Not ( $BaseName -match $Exclude ) ) {
+            $sPath = Get-FileLiteralPath($File)
+            $bToBag = $true
+
+            If ( Test-Path -LiteralPath $sPath -PathType Container ) {
+                $bHasBag = Test-BagItFormattedDirectory($File)
+            }
+            Else {
+                $bHasBag = ( -Not ( Test-UnbaggedLooseFile($File) ) )
+            }
+            
+            If ( $bHasBag ) {
+                Write-BaggedItemNoticeMessage -File:$File -Item:$File -Message:($FullMessages[1]) -Quiet:$Quiet -Line:$Line
+            }
+            Else {
+                Write-UnbaggedItemNoticeMessage -File:$File -Message:($FullMessages[0]) -Quiet:$Quiet -Verbose -Line:$Line
+                $File | Write-Output
+            }
+
+        }
+        Else {
+            Write-BaggedItemNoticeMessage -Status:"SKIPPED" -File:$File -Item:$File -Message:($FullMessages[2]) -Quiet:$Quiet -Line:$Line
+        }
+
+
+    }
+
+    End { }
+
+}
 
 # Out-BagItFormattedDirectoryWhenCleared: invoke a malware scanner (ClamAV) to clear preservation packages, then a bagger (BagIt.py) to bag them
 # Formerly known as: Do-Clear-And-Bag
+# @package coldstorage bag
 Function Out-BagItFormattedDirectoryWhenCleared {
 
     [Cmdletbinding()]
@@ -1353,69 +1301,46 @@ param (
         }
 
         If ( Test-BagItFormattedDirectory($File) ) {
+
             Write-BaggedItemNoticeMessage -File $File -Item:$File -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
+
             If ( $Rebag ) {
                 $File | Redo-CSBagPackage -PassThru:$PassThru
             }
 
         }
         ElseIf ( Test-ERInstanceDirectory($File) ) {
-            If ( -not ( $BaseName -match $Exclude ) ) {
 
-                Push-Location $DirName
+            Push-Location $DirName
+            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip -ShowWarnings | Out-BagItFormattedDirectory -Progress:$Progress
+            Pop-Location
 
-                if ( Test-BagItFormattedDirectory($File) ) {
-                    Write-BaggedItemNoticeMessage -File $File -Item:$File -Quiet:$Quiet -Line ( Get-CurrentLine )
+            If ( $PassThru ) {
+                If ( Test-BagItFormattedDirectory($File) ) {
+                    $File | Write-Output
                 }
-                else {
-                    Write-UnbaggedItemNoticeMessage -File $File -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
-
-                    If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                        Out-BagItFormattedDirectory -DIRNAME $DirName -PassThru:$PassThru -Progress:$Progress
-                    }
-
-                }
-
-                Pop-Location
-            }
-            Else {
-                Write-BaggedItemNoticeMessage -Status "SKIPPED" -File $File -Item:$File -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
 
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
-            #$ToScanAndBag += , [PSCustomObject] @{
-            #    "Message"=@{ "FileName"=$File.Name; "Message"="indexed directory. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
-            #    "File"=$File.FullName;
-            #    "Method"="Out-BagItFormattedDirectory"
-            #}
-            Write-UnbaggedItemNoticeMessage -File $File -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
-            If ( $File | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                $File | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
+
+            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip -ShowWarnings | Out-BaggedPackage -Progress:$Progress
+            
+            If ( $PassThru ) {
+                If ( Test-BagItFormattedDirectory($File) ) {
+                    $File | Write-Output
+                }
             }
+
         }
         Else {
-            Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
+            Get-ChildItem -File -LiteralPath $File.FullName |% {
+                
                 $ChildItem = $_
-                If ( Test-UnbaggedLooseFile($ChildItem) ) {
-                    $LooseFile = $ChildItem.Name
-                    #$ToScanAndBag += , [PSCustomObject] @{
-                    #    "Message"=@{ "FileName"=$File.Name; "Message"="loose file. Scan it, bag it and tag it."; "Line"=( Get-CurrentLine ) };
-                    #    "File"=$File.FullName;
-                    #    "Method"="Out-BaggedPackage"
-                    #}
+                $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip -ShowWarnings | Out-BaggedPackage -Progress:$Progress
 
-                    Write-UnbaggedItemNoticeMessage -File $ChildItem -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
-
-                    If ( $ChildItem | Select-CSPackagesOK -Exclude:$Exclude -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Shall-We-Continue -Force:$Force ) {
-                        $ChildItem | Out-BaggedPackage -PassThru:$PassThru -Progress:$Progress
-                    }
-                }
-                ElseIf ( $PassThru -and ( Test-LooseFile($ChildItem) ) ) {
+                If ( $PassThru ) {
                     $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
-                }
-                Else {
-                    Write-BaggedItemNoticeMessage -File $ChildItem -Item:$File -Message "loose file -- already bagged." -Verbose -Line ( Get-CurrentLine )
                 }
             }
         }
@@ -1969,7 +1894,7 @@ Process {
 
         $Progress.Update( "Validated bagged preservation package" )
         
-        If ( $Validated | Did-It-Have-Validation-Errors | Shall-We-Continue ) {
+        If ( $Validated | Did-It-Have-Validation-Errors | Test-ShallWeContinue ) {
 
             $oZip = ( Get-ZippedBagOfUnzippedBag -File $oFile )
 
@@ -2156,227 +2081,6 @@ Param ( [string] $Destination, $What, [switch] $Items=$false, [switch] $Reposito
                 ( "[{0} {1}] Unknown destination. Try: ({2})" -f ($global:gCSCommandWithVerb, $Destination, ( $Destinations -join ", " )) ) | Write-Warning
             }
         }
-
-}
-
-
-Function Write-ColdStoragePackagesReport {
-Param (
-    [Parameter(ValueFromPipeline=$true)] $Package,
-    [switch] $Report=$false,
-    [string] $Output="",
-    [switch] $FullName=$false,
-    [switch] $CheckZipped=$false,
-    [switch] $CheckCloud=$false,
-    $Timestamp,
-    $Context
-
-)
-
-    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ); $aBucketListings = @{}; $jsonOut = @() }
-
-    Process {
-        $oContext = ( Get-FileObject $Context )
-
-        Push-Location ( $oContext | Get-ItemFileSystemLocation ).FullName
-
-        $sFullName = $Package.FullName
-        $sRelName = ( Resolve-Path -Relative -LiteralPath $Package.FullName )
-        $sTheName = $( If ( $FullName ) { $sFullName } Else { $sRelName } )
-
-        $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )
-        $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
-        If ( $CheckZipped ) {
-            $sZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
-            $nZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { 1 } Else { 0 } )
-            $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
-        }
-        Else {
-            $sZippedFlag = $null
-            $sZippedFile = $null
-        }
-        $nContents = ( $Package.CSPackageContents )
-        $sContents = ( "{0:N0} file{1}" -f $nContents, $( If ( $nContents -ne 1 ) { "s" } Else { "" } ))
-        $nFileSize = ( $Package.CSPackageFileSize )
-        $sFileSize = ( "{0:N0}" -f $Package.CSPackageFileSize )
-        $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
-        $sBagFile = $( If ( $Package.CSPackageBagLocation ) { $Package.CSPackageBagLocation.FullName | Resolve-Path -Relative } Else { "" } )
-        $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
-
-        Pop-Location
-
-        $oCloudCopy = $null
-        $sCloudCopyFlag = $null
-        $nCloudCopyFlag = $null
-
-        If ( $CheckCloud ) {
-
-            If ( $Package.CloudCopy -and $sZippedFile ) {
-                $bCloudCopy = $true
-                $oCloudCopy = $Package.CloudCopy
-                $nCloudCopyFlag = 1
-                $sCloudCopyFlag = "CLOUD"
-            }
-            Else {
-                $bCloudCopy = $false
-                $oCloudCopy = $null
-                $nCloudCopyFlag = 0
-                $sCloudCopyFlag = "local"
-            }
-
-        }
-
-        $o = [PSCustomObject] @{
-            "Date"=( $sDate )
-            "Name"=( $sTheName )
-            "Bag"=( $sBaggedFlag )
-            "BagFile"=( $sBagFile )
-            "Bagged"=( $nBaggedFlag )
-            "ZipFile"=( $sZippedFile )
-            "Zipped"=( $nZippedFlag )
-            "InZip"=( $sZippedFlag )
-            "CloudFile"=( $oCloudCopy | Get-CloudStorageURI )
-            "CloudTimestamp"=( $oCloudCopy | Get-CloudStorageTimestamp )
-            "InCloud"=( $nCloudCopyFlag )
-            "Clouded"=( $sCloudCopyFlag )
-            "Files"=( $nContents )
-            "Contents"=( $sContents )
-            "Bytes"=( $nFileSize )
-            "Size"=( $sFileSizeReadable )
-            "Context"=( $oContext.FullName )
-        }
-
-        If ( $Report ) {
-
-            If ( $sZippedFlag -eq $null ) {
-                $o.PSObject.Properties.Remove("ZipFile")
-                $o.PSObject.Properties.Remove("Zipped")
-                $o.PSObject.Properties.Remove("InZip")
-            }
-            If ( $sCloudCopyFlag -eq $null ) {
-                $o.PSObject.Properties.Remove("CloudFile")
-                $o.PSObject.Properties.Remove("CloudTimestamp")
-                $o.PSObject.Properties.Remove("CloudBacked")
-                $o.PSObject.Properties.Remove("Clouded")
-            }
-
-            If ( ("CSV","JSON") -ieq $Output ) {
-                # Fields not used in CSV columns/JSON fields
-                $o.PSObject.Properties.Remove("Bag")
-                $o.PSObject.Properties.Remove("InZip")
-                $o.PSObject.Properties.Remove("Clouded")
-
-                # Output
-                Switch ( $Output ) {
-                    "JSON" { $jsonOut += , $o }
-                    "CSV" { $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } ) }
-                }
-            }
-            Else {
-
-                # Fields formatted for text report
-                $sRptBagged = ( " ({0})" -f $o.Bag )
-                $sRptZipped = $( If ( $o.Zipped -ne $null ) { ( " ({0})" -f $o.InZip ) } Else { "" } )
-                $sRptCloud = $( If ( $o.Clouded -ne $null ) { ( " ({0})" -f $o.Clouded ) } Else { "" } )
-
-                # Output
-                ( "{0}{1}{2}{3}, {4}, {5}{6}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
-            
-            }
-        }
-        Else {
-            
-            $o = $_
-            #If ( $oCloudCopy -ne $null ) {
-            #    $o | Add-Member -MemberType NoteProperty -Name CloudCopy -Value $oCloudCopy -Force
-            #}
-
-            $o | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
-        }
-
-        $Subsequent = $true
-
-    }
-
-    End { If ( $jsonOut ) { $jsonOut | ConvertTo-Json } }
-}
-
-Function Select-ColdStoragePackagesToReport {
-Param (
-    [Parameter(ValueFromPipeline=$true)] $Package,
-    [switch] $Bagged,
-    [switch] $Zipped,
-    [switch] $Unbagged,
-    [switch] $Unzipped,
-    [switch] $InCloud,
-    [switch] $NotInCloud,
-    [switch] $Only
-)
-
-    Begin { }
-
-    Process {
-        $BaggedOnly = ( $Bagged -and $Only )
-        $ZippedOnly = ( $Zipped -and $Only )
-        $InCloudOnly = ( $InCloud -and $Only )
-
-        $ok = @( )
-        If ( $BaggedOnly ) {
-            $ok += , ( $Package.CSPackageBagged )
-        }
-        If ( $Unbagged ) {
-            $ok += , ( -Not ( $Package.CSPackageBagged ) )
-        }
-        If ( $ZippedOnly ) {
-            $ok += , ( -Not ( -Not ( $Package.CSPackageZip ) ) )
-        }
-        If ( $Unzipped ) {
-            $ok += , ( -Not ( $Package.CSPackageZip ) )    
-        }
-        If ( $InCloudOnly ) {
-            $ok += , ( -Not ( -Not ( $Package.CloudCopy ) ) )
-        }
-        If ( $NotInCloud ) {
-            $ok += , ( -Not ( $Package.CloudCopy ) )
-        }
-
-        $mTests = ( $ok | Measure-Object -Sum )
-        If ( $mTests.Count -eq $mTests.Sum ) {
-            $_
-        }
-    }
-
-    End { }
-}
-
-Function Invoke-ColdStoragePackagesReport {
-Param (
-    [Parameter(ValueFromPipeline=$true)] $Location,
-    [switch] $Recurse,
-    [switch] $ShowWarnings,
-    [switch] $Bagged,
-    [switch] $Unbagged,
-    [switch] $Zipped,
-    [switch] $Unzipped,
-    [switch] $InCloud,
-    [switch] $NotInCloud,
-    [switch] $Only,
-    [switch] $FullName,
-    [switch] $Report,
-    [string] $Output
-)
-
-    Begin { $CurDate = ( Get-Date ) }
-
-    Process {
-        $CheckZipped = ( $Unzipped -or $Zipped )
-        $CheckCloud = ( $InCloud -or $NotInCloud )
-        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud |
-            Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
-            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -FullName:$FullName -Context:$Location -Timestamp:$CurDate
-    }
-
-    End { }
 
 }
 
@@ -3040,14 +2744,13 @@ Else {
     ElseIf ( $Verb -eq "packages" ) {
 
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
-        $Locations | Invoke-ColdStoragePackagesReport -Recurse:( $Recurse -or ( -Not $Items )) `
-            -ShowWarnings:$Verbose `
-            -Bagged:$Bagged `
-            -Unbagged:$Unbagged `
-            -Zipped:$Zipped `
-            -Unzipped:$Unzipped `
-            -InCloud:$InCloud `
-            -NotInCloud:$NotInCloud `
+        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository `
+            -Recurse:$Recurse `
+            -Verbose:$Verbose `
+            -Bagged:$Bagged -Unbagged:$Unbagged `
+            -Zipped:$Zipped -Unzipped:$Unzipped `
+            -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
             -FullName:$FullName `
             -Report:$Report `

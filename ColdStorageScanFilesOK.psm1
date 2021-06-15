@@ -56,7 +56,7 @@ Param (
     End { }
 
 }
-
+                
 Function Select-CSFilesOK {
 
     [CmdletBinding()]
@@ -294,6 +294,71 @@ Param (
 
 }
 
+Function Select-WhereWeShallContinue {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ) )
+
+    Begin { }
+
+    Process {
+
+        If ( $Item | Test-ShallWeContinue -Force:$Force -OKCodes:$OKCodes ) {
+            $Item
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Test-ShallWeContinue {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ) )
+
+    Begin { $result = $true }
+
+    Process {
+        $ExitCode = $null
+
+        If ( $Item | Get-Member -MemberType NoteProperty -Name CSScannedOK ) {
+            $ErrorCodes = ( $Item | Get-CSScannedFilesErrorCodes )
+        }
+        ElseIf ( ( $Item -is [Int] ) -or ( $Item -is [Long] ) -or ( $Item -is [Array] ) ) {
+        # Singleton, treat as an ExitCode, with default convention 0=OK, 1..255=Error
+            $ErrorCodes = ( $Item |% { $ExitCode=$_ ; $ok = ( $OKCodes -eq $ExitCode ) ; If ( $ok.Count -eq 0 ) { [PSCustomObject] @{ "ExitCode"=$ExitCode; "OK"=$OKCodes } } } )
+        }
+
+        $ShouldWeContinue = "Y"
+        $ErrorCodes |% {
+            $Error = $_
+            If ( $Error ) {
+                $ExitCode = $Error.ExitCode
+                $Tag = $( If ( $Error.Tag ) { "[{0}] " -f $Error.Tag } Else { "" } )
+            
+                $Mesg = ( "{0}Exit Code {1:N0}" -f $Tag, $ExitCode )
+                If ( $result ) {
+                    If ( $Force ) {
+                        ( "{0}; continuing anyway due to -Force flag" -f $Mesg ) | Write-Warning
+                        $ShouldWeContinue = "Y"
+                    }
+                    Else {
+                        $ShouldWeContinue = ( Read-Host ( "{0}. Continue (Y/N)? " -f $Mesg ) )
+                    }
+                }
+                Else {
+                    ( "{0}; stopped due to user input." -f $Mesg ) | Write-Warning
+                }
+
+                $result = ( $result -and ( $ShouldWeContinue -eq "Y" ) )
+            }
+        }
+    }
+
+    End { $result }
+
+}
+
+Export-ModuleMember -Function Select-WhereWeShallContinue
+Export-ModuleMember -Function Test-ShallWeContinue
 
 Export-ModuleMember -Function Test-CSFilesOK
 Export-ModuleMember -Function Select-CSFilesOK

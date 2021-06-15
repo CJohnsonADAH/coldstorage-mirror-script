@@ -357,10 +357,20 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [string] $From="", [string] 
         $vItem = ( $Item | & $DatePicker )
 
         If ( $MemberName ) {
-            $tsThis = ( Get-Date $vItem.${MemberName} )
+            Try {
+                $tsThis = ( Get-Date $vItem.${MemberName} )
+            }
+            Catch {
+                $tsThis = $null
+            }
         }
         Else {
-            $tsThis = ( Get-Date $vItem )
+            Try {
+                $tsThis = ( Get-Date $vItem )
+            }
+            Catch {
+                $tsThis = $null
+            }
         }
         
         $ok = @( )

@@ -26,6 +26,22 @@ Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -
 ## PUBLIC FUNCTIONS: PIPELINE FOR PACKAGING #################################################################
 #############################################################################################################
 
+Function Select-CSPackagesOKOrApproved {
+
+    [CmdletBinding()]
+
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [Switch] $Quiet, [Switch] $Force, [Switch] $Rebag, $Skip )
+
+    Begin { }
+
+    Process {
+        $Item | Select-CSPackagesOK -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Select-WhereWeShallContinue -Force:$Force
+    }
+
+    End { }
+
+}
+
 Function Select-CSPackagesOK {
 
     [Cmdletbinding()]
@@ -33,9 +49,6 @@ Function Select-CSPackagesOK {
 param (
     [Switch]
     $Quiet,
-
-    [String]
-    $Exclude="^$",
 
     [Switch]
     $Force=$false,
@@ -59,11 +72,7 @@ param (
     $File
 )
 
-    Begin {
-        if ( $Exclude.Length -eq 0 ) {
-            $Exclude = "^$"
-        }
-    }
+    Begin { }
 
     Process {
         $ToScan = @()
@@ -88,20 +97,15 @@ param (
             If ( $Rebag ) { $ToScan += , $File }
         }
         ElseIf ( Test-ERInstanceDirectory($File) ) {
-            If ( -not ( $BaseName -match $Exclude ) ) {
-                $ERMeta = ( $File | Get-ERInstanceData )
-                $ERCode = $ERMeta.ERCode
+            $ERMeta = ( $File | Get-ERInstanceData )
+            $ERCode = $ERMeta.ERCode
 
-                if ( Test-BagItFormattedDirectory($File) ) {
-                    # FIXME: Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
-                }
-                else {
-                    # FIXME: Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
-                    $ToScan += , ( $File | Add-Member -MemberType NoteProperty -Name ERMeta -Value $ERMeta -PassThru )
-                }
+            If ( Test-BagItFormattedDirectory($File) ) {
+                # FIXME: Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
             Else {
-                # FIXME: Write-Bagged-Item-Notice -Status "SKIPPED" -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
+                # FIXME: Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
+                $ToScan += , ( $File | Add-Member -MemberType NoteProperty -Name ERMeta -Value $ERMeta -PassThru )
             }
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
@@ -1094,6 +1098,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$
 
 }
 
+Export-ModuleMember -Function Select-CSPackagesOKOrApproved
 Export-ModuleMember -Function Select-CSPackagesOK
 Export-ModuleMember -Function Test-IndexedDirectory
 Export-ModuleMember -Function Test-BaggedIndexedDirectory
