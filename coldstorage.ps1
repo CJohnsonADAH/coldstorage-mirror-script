@@ -405,6 +405,10 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
     Begin { $cmd = ( Get-CommandWithVerb ) }
 
     Process {
+        If ( -Not $LiteralPath ) {
+            Return
+        }
+
         $Item = Get-FileObject($LiteralPath)
 
         # If this is a single (loose) file, then we will create a parallel counterpart directory
@@ -1099,7 +1103,6 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [Switch] $Quiet, [String] $Ex
         If ( -Not ( $BaseName -match $Exclude ) ) {
             $sPath = Get-FileLiteralPath($File)
             $bToBag = $true
-
             If ( Test-Path -LiteralPath $sPath -PathType Container ) {
                 $bHasBag = Test-BagItFormattedDirectory($File)
             }
@@ -1108,16 +1111,16 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [Switch] $Quiet, [String] $Ex
             }
             
             If ( $bHasBag ) {
-                Write-BaggedItemNoticeMessage -File:$File -Item:$File -Message:($FullMessages[1]) -Quiet:$Quiet -Line:$Line
+                Write-BaggedItemNoticeMessage -File:$File -Item:$File -Message:($FullMessages[1]) -Verbose:( -Not $Quiet ) -Quiet -Line:$Line
             }
             Else {
-                Write-UnbaggedItemNoticeMessage -File:$File -Message:($FullMessages[0]) -Quiet:$Quiet -Verbose -Line:$Line
+                Write-UnbaggedItemNoticeMessage -File:$File -Message:($FullMessages[0]) -Quiet -Verbose:( -Not $Quiet ) -Line:$Line
                 $File | Write-Output
             }
 
         }
         Else {
-            Write-BaggedItemNoticeMessage -Status:"SKIPPED" -File:$File -Item:$File -Message:($FullMessages[2]) -Quiet:$Quiet -Line:$Line
+            Write-BaggedItemNoticeMessage -Status:"SKIPPED" -File:$File -Item:$File -Message:($FullMessages[2]) -Quiet -Verbose:( -Not $Quiet ) -Line:$Line
         }
 
 
@@ -1223,6 +1226,7 @@ param (
 
         }
         Else {
+
             Get-ChildItem -File -LiteralPath $File.FullName |% {
                 
                 $ChildItem = $_
@@ -1232,7 +1236,9 @@ param (
                     $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
                 }
             }
+
         }
+
     }
 
     End {

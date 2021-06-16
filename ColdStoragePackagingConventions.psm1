@@ -35,7 +35,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [Switch] $Quiet, [Switch] $F
     Begin { }
 
     Process {
+
         $Item | Select-CSPackagesOK -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -ContinueCodes:@( 0..255 ) -Skip:$Skip -ShowWarnings | Select-WhereWeShallContinue -Force:$Force
+
     }
 
     End { }
@@ -75,45 +77,47 @@ param (
     Begin { }
 
     Process {
+
+        If ( -Not $File ) {
+            Return
+        }
+
         $ToScan = @()
 
         $Anchor = $PWD
 
-        $DirName = $File.FullName
-        $BaseName = $File.Name
+        $oFile = Get-FileObject($File)
+        $DirName = $oFile.FullName
 
         If ( Test-ERInstanceDirectory($File) ) {
-            $ERMeta = ( $File | Get-ERInstanceData )
+            $ERMeta = ( $oFile | Get-ERInstanceData )
             $ERCode = $ERMeta.ERCode
         }
         Else {
             $ERCode = $null
         }
 
-        If ( Test-BagItFormattedDirectory($File) ) {
+        If ( Test-BagItFormattedDirectory($oFile) ) {
             #FIXME: Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "BagIt formatted directory" -ERCode:$ERCode -Verbose -Line ( Get-CurrentLine )
             
             # Pass it thru iff we have requested rebagging
-            If ( $Rebag ) { $ToScan += , $File }
+            If ( $Rebag ) { $ToScan += , $oFile }
         }
-        ElseIf ( Test-ERInstanceDirectory($File) ) {
-            $ERMeta = ( $File | Get-ERInstanceData )
-            $ERCode = $ERMeta.ERCode
-
-            If ( Test-BagItFormattedDirectory($File) ) {
+        ElseIf ( Test-ERInstanceDirectory($oFile) ) {
+            If ( Test-BagItFormattedDirectory($oFile) ) {
                 # FIXME: Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
             Else {
                 # FIXME: Write-Unbagged-Item-Notice -FileName $DirName -ERCode $ERCode -Quiet:$Quiet -Verbose -Line ( Get-CurrentLine )
-                $ToScan += , ( $File | Add-Member -MemberType NoteProperty -Name ERMeta -Value $ERMeta -PassThru )
+                $ToScan += , ( $oFile | Add-Member -MemberType NoteProperty -Name ERMeta -Value $ERMeta -PassThru )
             }
         }
-        ElseIf ( Test-IndexedDirectory($File) ) {
+        ElseIf ( Test-IndexedDirectory($oFile) ) {
             # FIXME: Write-Unbagged-Item-Notice -FileName $File.Name -Message "indexed directory. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
             $ToScan += , $File
         }
         Else {
-            Get-ChildItem -File -LiteralPath $File.FullName | ForEach {
+            Get-ChildItem -File -LiteralPath $oFile.FullName | ForEach {
                 If ( Test-UnbaggedLooseFile($_) ) {
                     $LooseFile = $_.Name
                     # FIXME: Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
@@ -127,10 +131,11 @@ param (
         }
         
         $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings | Write-Output
+
     }
 
-    End {
-    }
+    End { }
+
 }
 
 #############################################################################################################
