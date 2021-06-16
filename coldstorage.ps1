@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0611
+@version 2021.0616
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1201,7 +1201,7 @@ param (
         ElseIf ( Test-ERInstanceDirectory($File) ) {
 
             Push-Location $DirName
-            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip -ShowWarnings | Out-BagItFormattedDirectory -Progress:$Progress
+            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BagItFormattedDirectory -Progress:$Progress
             Pop-Location
 
             If ( $PassThru ) {
@@ -1213,7 +1213,7 @@ param (
         }
         ElseIf ( Test-IndexedDirectory($File) ) {
 
-            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip -ShowWarnings | Out-BaggedPackage -Progress:$Progress
+            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
             
             If ( $PassThru ) {
                 If ( Test-BagItFormattedDirectory($File) ) {
@@ -1226,7 +1226,7 @@ param (
             Get-ChildItem -File -LiteralPath $File.FullName |% {
                 
                 $ChildItem = $_
-                $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip -ShowWarnings | Out-BaggedPackage -Progress:$Progress
+                $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
 
                 If ( $PassThru ) {
                     $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
