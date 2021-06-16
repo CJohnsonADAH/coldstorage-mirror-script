@@ -7,6 +7,9 @@ $global:gColdStorageInteractionModuleCmd = $MyInvocation.MyCommand
     $modSource = ( $global:gColdStorageInteractionModuleCmd.Source | Get-Item -Force )
     $modPath = ( $modSource.Directory | Get-Item -Force )
 
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageZipArchives.psm1" )
+
 Function Get-ScriptPath {
 Param ( $Command, $File=$null )
 
@@ -79,5 +82,121 @@ End { }
 
 }
 
+Function Get-BaggedItemNoticeMessage {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Prefix, $Zip=$false, $Suffix=$null )
+
+    Begin { }
+
+    Process {
+
+    $oFile = ( Get-FileObject($File) | Add-ERInstanceData -PassThru )
+
+    $LogMesg = ""
+    If ( $Prefix ) {
+        $LogMesg = ( "{0}: {1}" -f $Prefix, $LogMesg ) 
+    }
+
+    $ERCode = ( $oFile.CSPackageERMeta.ERCode )
+
+    $FileNameSlug = ( $oFile.Name )
+    If ( $ERCode -ne $null ) {
+        $FileNameSlug = ( "{0}, {1}" -f $ERCode,$FileNameSlug )
+    }
+    $LogMesg = ( "{0}{1}" -f $LogMesg,$FileNameSlug )
+
+    If ( $Zip ) {
+        $sZip = $oZip.Name
+        $LogMesg += " (ZIP=${sZip})"
+    }
+
+    If ( $Suffix -ne $null ) {
+        If ( $Suffix -notmatch "^\s+" ) {
+            $LogMesg += ", "
+        }
+        
+        $LogMesg += $Suffix
+    }
+
+    $LogMesg
+
+    }
+
+    End { }
+
+}
+
+Function Write-BaggedItemNoticeMessage {
+Param( $File, $Item=$null, $Status=$null, $Message=$null, [switch] $Zip=$false, [switch] $Quiet=$false, [switch] $Verbose=$false, [switch] $ReturnObject=$false, $Line=$null )
+
+    $Prefix = "BAGGED"
+    If ( $Status -ne $null ) {
+        $Prefix = $Status
+    }
+
+    If ( $Zip ) {
+        $oZip = ( Get-ZippedBagOfUnzippedBag -File $File )
+    }
+
+    If ( $Prefix -like "BAG*" ) {
+        If ( $oZip ) {
+            $Prefix = "BAG/ZIP"
+        }
+    }
+
+    If ( ( $Debug ) -and ( $Line -ne $null ) ) {
+        $Prefix = "${Prefix}:${Line}"
+    }
+
+    $LogMesg = ($File | Get-BaggedItemNoticeMessage -Prefix $Prefix -Zip $Zip -Suffix $Message)
+
+    If ( $Zip -and ( $oZip -eq $null ) ) { # a ZIP package was expected, but was not found.
+        Write-Warning $LogMesg
+    }
+    ElseIf ( $Verbose ) {
+        Write-Verbose $LogMesg
+    }
+
+    If ( ( $ReturnObject ) -and ( $Status -ne "SKIPPED" ) ) {
+        Write-Output $Item
+    }
+    ElseIf ( $Zip -and ( $oZip -ne $null ) ) {
+        # NOOP
+    }
+    ElseIf ( $Verbose ) {
+        # NOOP
+    }
+    ElseIf ( $Quiet -eq $false ) {
+        Write-Output $LogMesg
+    }
+
+}
+
+Function Write-UnbaggedItemNoticeMessage {
+Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $Verbose=$false, $Line=$null )
+
+    $Prefix = "UNBAGGED"
+    If ( $Status -ne $null ) {
+        $Prefix = $Status
+    }
+    If ( $Line -ne $null ) {
+        $Prefix = "${Prefix}:${Line}"
+    }
+
+    $LogMesg = ($File | Get-BaggedItemNoticeMessage -Prefix $Prefix -Suffix $Message)
+
+    If ( $Verbose ) {
+        Write-Verbose $LogMesg
+    }
+    Else {
+        Write-Warning $LogMesg
+    }
+
+}
+
+
 Export-ModuleMember -Function Write-BleepBloop
 Export-ModuleMember -Function Select-UserApproved
+
+Export-ModuleMember -Function Get-BaggedItemNoticeMessage
+Export-ModuleMember -Function Write-BaggedItemNoticeMessage
+Export-ModuleMember -Function Write-UnbaggedItemNoticeMessage
