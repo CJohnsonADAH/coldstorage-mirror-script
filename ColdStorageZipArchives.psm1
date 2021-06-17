@@ -247,7 +247,7 @@ Begin {
 Process {
     $oFile = ( Get-FileObject $File )
     $Parent = ( $File | Get-ItemFileSystemParent | Get-UNCPathResolved )
-    $Repository = ( $File | Get-FileRepositoryLocation ).FullName
+    $Repository = ( ( $File | Get-FileRepositoryLocation ).FullName | Get-UNCPathResolved )
 
     $isNamedZIP = ( $oFile.Name -eq "ZIP" )
     $isGlobalZIP = ( ( $Parent -ieq $Repository ) -and $isNamedZIP )
