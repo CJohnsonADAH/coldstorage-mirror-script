@@ -1028,6 +1028,36 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false, [s
     }
 }
 
+Function Select-CSInCloud {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $NotInCloud, [string] $From, [string] $To )
+
+    Begin { }
+
+    Process {
+        If ( $Item | Get-Member -Name CloudCopy ) {
+        # Is this a preservation package with CloudCopy already added (either filled or nulled)? If so, use that.
+            $oPackage = $Item
+        }
+        Else {
+        # If not, then use Get-ItemPackage to get it.
+            $oPackage = ( $Item | Get-ItemPackage -CheckZipped -CheckCloud )
+        }
+        $CloudCopy = $oPackage.CloudCopy
+
+        If ( $NotInCloud ) {
+            $bTest = ( $oPackage.CloudCopy -eq $null )
+        }
+        Else {
+            $bTest = ( $oPackage.CloudCopy -ne $null )
+        }
+
+        If ( $bTest ) { $oPackage }
+    }
+
+    End { }
+
+}
+
 Function Select-CSHasDate {
 Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $InCloud, [switch] $NotInCloud, [string] $From, [string] $To )
 
@@ -1107,7 +1137,15 @@ Else {
         $Words = ( $Words | Get-CSCommandLine -Default @("Processed","Unprocessed", "Masters") )
         ( $Words | Get-RepositoryStats -Count:($Words.Count) -Verbose:$Verbose -Batch:$Batch ) | Out-CSData -Output:$Output
     }
-    ElseIf ( $Verb -eq "with" ) {
+    ElseIf ( @("in") -ieq $Verb ) {
+        $Object, $Words = $Words
+        $allObjects = ( @( $Words |? { $_ -ne $null } ) + @( $Input |? { $_ -ne $null } ) )
+        Switch ( $Object ) {
+            "cloud" { $allObjects | Select-CSInCloud -NotInCloud:$NotInCloud }
+            default { ( "[{0}] Unknown test: in {1}" -f $global:gCSCommandWithVerb,$Object ) | Write-Warning }
+        }
+    }
+    ElseIf ( @("with") -ieq $Verb ) {
         $Object, $Words = $Words
 
         Switch ( $Object ) {
