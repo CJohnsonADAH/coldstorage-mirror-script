@@ -69,7 +69,9 @@ param (
 $RipeDays = 7
 
 $Verbose = ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent )
+$Verbose = $( If ( $Verbose -eq $null ) { $false } Else { $Verbose } )
 $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
+$Debug = $( If ( $Debug -eq $null ) { $false } Else { $Debug } )
 
 $global:gBucketObjects = @{ }
 

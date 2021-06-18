@@ -753,7 +753,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         ElseIf ( $Recurse -and ( Test-Path -LiteralPath $File.FullName -PathType Container ) ) {
             ( "RECURSE INTO DIRECTORY: {0}" -f $File.FullName ) | Write-Verbose
             $aContents = @( )
-            Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
+            Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
         }
         ElseIf ( $Ascend ) {
             $aWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )

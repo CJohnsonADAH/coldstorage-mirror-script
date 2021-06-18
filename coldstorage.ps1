@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0617
+@version 2021.0618
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -75,7 +75,10 @@ param (
 $RipeDays = 7
 
 $Verbose = ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent )
+$Verbose = $( If ( $Verbose -eq $null ) { $false } Else { $Verbose } )
 $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
+$Debug = $( If ( $Debug -eq $null ) { $false } Else { $Debug } )
+
 $global:gBucketObjects = @{ }
 
 Function Test-CSDevelopmentBranchDir {
