@@ -74,6 +74,9 @@ Param (
     [switch]
     $ShowWarnings=$false,
 
+    [switch]
+    $Verbose=$false,
+
     [Parameter(ValueFromPipeline=$true)]
     $Path
 
@@ -83,7 +86,7 @@ Param (
 
     Process {
         $Path `
-        | Select-CSFilesOKByClamAV -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings `
+        | Select-CSFilesOKByClamAV -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings -Verbose:$Verbose `
         | Write-Output
     }
 
@@ -110,6 +113,9 @@ Param (
     $Path,
 
     [switch]
+    $Verbose=$false,
+
+    [switch]
     $ShowWarnings=$false
 
 )
@@ -123,7 +129,7 @@ Param (
         $iExitCode = $null
 
         # CODE
-        $scanned = ( $Path | Get-CSFilesClamAVScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes )
+        $scanned = ( $Path | Get-CSFilesClamAVScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -Verbose:$Verbose )
         $iExitCode = $scanned.CSScannedOK["clamav"].ExitCode
         $bOK = (( $OKCodes -eq $iExitCode ).Count -gt 0 )
         $bContinue = (( $ContinueCodes -eq $iExitCode ).Count -gt 0 )
@@ -157,6 +163,9 @@ Param (
     [String]
     $Tag="clamav",
 
+    [Switch]
+    $Verbose=$false,
+
     [Parameter(ValueFromPipeline=$true)]
     $Path
 
@@ -167,7 +176,7 @@ Param (
     Process {
         $exe = Get-ExeForClamAV
         $params = @( "--stdout", "--bell", "--suppress-ok-results", "--recursive", ( "{0}" -f $Path.FullName ) )
-        $Path | Get-CSFilesExeScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -Exe:$exe -ExeParams:$params -Tag:$Tag
+        $Path | Get-CSFilesExeScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -Exe:$exe -ExeParams:$params -Tag:$Tag -Verbose:$Verbose
     }
     
     End { }
@@ -193,6 +202,9 @@ Param (
 
     [String[]]
     $ExeParams,
+
+    [Switch]
+    $Verbose=$false,
 
     [String]
     $Tag=$null,
@@ -226,7 +238,8 @@ Param (
         If ( ( $Skip -ieq $tag ).Count -eq 0 ) {
             ( "[{0}] {1}: {2}" -f $tag, $Labels["Scanning"], $outPath.FullName ) | Write-Verbose -InformationAction Continue
 
-            $sStdOut = ( & "${Exe}" @ExeParams )
+            $sStdOut = ( ( & "${Exe}" @ExeParams ) |% { If ( $Verbose ) { $_ | Write-Verbose -InformationAction Continue }; $_ } )
+
             $ExeExitCode = $LastExitCode
             
             $ok[$tag] = [PSCustomObject] @{ "ExitCode"=$ExeExitCode; "Executed"=$true; "OK"=$OKCodes; "Continue"=$ContinueCodes }
@@ -235,7 +248,6 @@ Param (
 
             if ( ( $OKCodes -eq $ExeExitCode ).Count -gt 0 ) {
             # Success: At least one item of $OKCodes matches
-                $sStdOut | Write-Verbose
                 ( "[{0}] (ok) {1} of {2} returned {3:N0}" -f ( $tag, $Labels["Scan"], $outPath.FullName, $ExeExitCode ) ) | Write-Verbose
             }
             Else {

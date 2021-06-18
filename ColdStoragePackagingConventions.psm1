@@ -100,11 +100,14 @@ param (
         If ( Test-BagItFormattedDirectory($oFile) ) {
             #FIXME: Write-Bagged-Item-Notice -FileName $File.Name -Item:$File -Message "BagIt formatted directory" -ERCode:$ERCode -Verbose -Line ( Get-CurrentLine )
             
-            # Pass it thru iff we have requested rebagging
-            If ( $Rebag ) { $ToScan += , $oFile }
+            # Pass it thru iff we have requested rebagging OR we have invoked with -Force
+            If ( $Rebag -or $Force ) { $ToScan += , $oFile }
         }
         ElseIf ( Test-ERInstanceDirectory($oFile) ) {
-            If ( Test-BagItFormattedDirectory($oFile) ) {
+            If ( $Rebag -or $Force ) {
+                $ToScan += , $oFile
+            }
+            ElseIf ( Test-BagItFormattedDirectory($oFile) ) {
                 # FIXME: Write-Bagged-Item-Notice -FileName $DirName -Item:$File -ERCode $ERCode -Quiet:$Quiet -Line ( Get-CurrentLine )
             }
             Else {
@@ -118,7 +121,10 @@ param (
         }
         Else {
             Get-ChildItem -File -LiteralPath $oFile.FullName | ForEach {
-                If ( Test-UnbaggedLooseFile($_) ) {
+                If ( $Rebag -or $Force ) {
+                    $ToScan += , $_
+                }
+                ElseIf ( Test-UnbaggedLooseFile($_) ) {
                     $LooseFile = $_.Name
                     # FIXME: Write-Unbagged-Item-Notice -FileName $File.Name -Message "loose file. Scan it, bag it and tag it." -Verbose -Line ( Get-CurrentLine )
 
@@ -130,7 +136,7 @@ param (
             }
         }
         
-        $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings | Write-Output
+        $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings -Verbose:$Verbose | Write-Output
 
     }
 
