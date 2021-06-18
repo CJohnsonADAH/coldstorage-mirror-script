@@ -174,9 +174,8 @@ Import-Module -Verbose:$false BitsTransfer
 Import-Module -Verbose:$false Posh-SSH
 
 # Internal Dependencies - Modules
-$bVerboseModules = ( $Debug -eq $false )
-$bForceModules = ( ( $Debug -eq $false ) -or ( $psISE ) )
-$bForceModules = $true
+$bVerboseModules = ( $Debug -eq $true )
+$bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) )
 
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageInteraction.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
