@@ -456,7 +456,7 @@ function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch
 
 Function Get-CSItemValidation {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false )
 
 Begin {
     $nChecked = 0
@@ -470,22 +470,46 @@ Process {
         $Validated = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
             $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose  )
+            $ValidationMethod = "BagIt"
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
             $Validated = ( $_ | Test-ZippedBagIntegrity  )
+            $ValidationMethod = "ZIP/MD5"
         }
 
         $nChecked = $nChecked + 1
         $nValidated = $nValidated + $Validated.Count
 
-        $Validated # > stdout
+        If ( $PassThru ) {
+            If ( $Validated.Count -gt 0 ) {
+                $_ | Add-Member -MemberType NoteProperty -Name CSItemValidated -Value $Validated -PassThru | Add-Member -MemberType NoteProperty -Name CSItemValidationMethod -Value $ValidationMethod -PassThru
+            }
+            Else {
+                $Validated | Write-Warning
+            }
+        }
+        Else {
+            $Validated # > stdout
+        }
     }
 }
 
 End {
+
+    $sSummaryOut = "Validation: ${nValidated} / ${nChecked} validated OK."
     If ( $Summary ) {
-        "Validation: ${nValidated} / ${nChecked} validated OK." # > stdout
+        
+        If ( $PassThru ) {
+            $sSummaryOut | Write-Warning
+        }
+        Else {
+            $sSummaryOut | Write-Output
+        }
     }
+    ElseIf ( $nChecked -gt $nValidated ) {
+        $sSummaryOut | Write-Warning
+    }
+
 }
 
 }
@@ -627,7 +651,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
             $MapLines | % {
                 $nGlanced = $nGlanced + 1
                 $BagPathLeaf = (Split-Path -Leaf $_)
-                $Progress.Update( ( "#{0:N0}. Considering: {1}" -f $Progress.I + 1, $BagPathLeaf ) )
+                $Progress.Update( ( "#{0:N0}. Considering: {1}" -f ($Progress.I + 1),$BagPathLeaf ) )
 
                 If ( -Not $EnteredRange ) {
                     $EnteredRange = ( $BagRange[0] -eq $_ )
@@ -1127,10 +1151,10 @@ Else {
     }
     ElseIf ( $Verb -eq "validate" ) {
         If ( $Items ) {
-            $allObjects | Get-CSItemValidation -Verbose:$Verbose
+            $allObjects | Get-CSItemValidation -Verbose:$Verbose -Summary:$Report -PassThru:$PassThru
         }
         Else {
-            Invoke-ColdStorageValidate -Pairs $Words -Verbose:$Verbose -Zipped
+            Invoke-ColdStorageValidate -Pairs $allObjects -Verbose:$Verbose -Zipped
         }
     }
     ElseIf ( $Verb -eq "stats" ) {

@@ -136,7 +136,7 @@ param (
             }
         }
         
-        $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings -Verbose:$Verbose | Write-Output
+        $ToScan | Select-CSFilesOK -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings | Write-Output # -Verbose:$Verbose 
 
     }
 

@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0618
+@version 2021.0625
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1470,7 +1470,7 @@ function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch
 
 Function Get-CSItemValidation {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false )
 
 Begin {
     $nChecked = 0
@@ -1484,21 +1484,40 @@ Process {
         $Validated = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
             $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose  )
+            $ValidationMethod = "BagIt"
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
             $Validated = ( $_ | Test-ZippedBagIntegrity  )
+            $ValidationMethod = "ZIP/MD5"
         }
 
         $nChecked = $nChecked + 1
         $nValidated = $nValidated + $Validated.Count
 
-        $Validated # > stdout
+        If ( $PassThru ) {
+            If ( $Validated.Count -gt 0 ) {
+                $_ | Add-Member -MemberType NoteProperty -Name CSItemValidated -Value $Validated -PassThru | Add-Member -MemberType NoteProperty -Name CSItemValidationMethod -Value $ValidationMethod -PassThru
+            }
+            Else {
+                $Validated | Write-Warning
+            }
+        }
+        Else {
+            $Validated # > stdout
+        }
     }
 }
 
 End {
     If ( $Summary ) {
-        "Validation: ${nValidated} / ${nChecked} validated OK." # > stdout
+        $sSummaryOut = "Validation: ${nValidated} / ${nChecked} validated OK."
+        
+        If ( $PassThru ) {
+            $sSummaryOut | Write-Warning
+        }
+        Else {
+            $sSummaryOut | Write-Output
+        }
     }
 }
 
@@ -2522,13 +2541,20 @@ Else {
             Invoke-ColdStorageRepositoryCheck -Pairs:$Words
         }
     }
-    ElseIf ( $Verb -eq "validate" ) {
-        If ( $Items ) {
-            $allObjects | Get-CSItemValidation -Verbose:$Verbose
-        }
-        Else {
-            Invoke-ColdStorageValidate -Pairs $Words -Verbose:$Verbose -Zipped
-        }
+    ElseIf ( ("validate") -ieq $Verb ) {
+        $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words } )
+        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $Locations | & "${CSGetPackages}" "${Verb}" -Items:$Items -Repository:$Repository `
+            -Recurse:$Recurse `
+            -Verbose:$Verbose `
+            -Bagged:$Bagged -Unbagged:$Unbagged `
+            -Zipped:$Zipped -Unzipped:$Unzipped `
+            -InCloud:$InCloud -NotInCloud:$NotInCloud `
+            -Only:$Only `
+            -FullName:$FullName `
+            -Report:$Report `
+            -Output:$Output `
+            -PassThru:$PassThru
     }
     ElseIf ( $Verb -eq "bag" ) {
         $SkipScan = @( )

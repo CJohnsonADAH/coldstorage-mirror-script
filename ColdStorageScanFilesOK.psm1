@@ -74,9 +74,6 @@ Param (
     [switch]
     $ShowWarnings=$false,
 
-    [switch]
-    $Verbose=$false,
-
     [Parameter(ValueFromPipeline=$true)]
     $Path
 
@@ -86,10 +83,10 @@ Param (
 
     Process {
         $Path `
-        | Select-CSFilesOKByClamAV -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings -Verbose:$Verbose `
+        | Select-CSFilesOKByClamAV -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -ShowWarnings:$ShowWarnings `
         | Write-Output
     }
-
+    #  -Verbose:$Verbose
     End { }
 
 
@@ -113,9 +110,6 @@ Param (
     $Path,
 
     [switch]
-    $Verbose=$false,
-
-    [switch]
     $ShowWarnings=$false
 
 )
@@ -129,7 +123,7 @@ Param (
         $iExitCode = $null
 
         # CODE
-        $scanned = ( $Path | Get-CSFilesClamAVScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -Verbose:$Verbose )
+        $scanned = ( $Path | Get-CSFilesClamAVScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes ) # -Verbose:$Verbose
         $iExitCode = $scanned.CSScannedOK["clamav"].ExitCode
         $bOK = (( $OKCodes -eq $iExitCode ).Count -gt 0 )
         $bContinue = (( $ContinueCodes -eq $iExitCode ).Count -gt 0 )
@@ -162,9 +156,6 @@ Param (
 
     [String]
     $Tag="clamav",
-
-    [Switch]
-    $Verbose=$false,
 
     [Parameter(ValueFromPipeline=$true)]
     $Path
@@ -202,9 +193,6 @@ Param (
 
     [String[]]
     $ExeParams,
-
-    [Switch]
-    $Verbose=$false,
 
     [String]
     $Tag=$null,
