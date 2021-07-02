@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0625
+@version 2021.0702
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -2062,7 +2062,7 @@ Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, [String] $O
 }
 
 Function Invoke-ColdStorageSettle {
-Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch=$false )
+Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch=$false, [switch] $Zipped=$false )
 
     Begin { }
 
@@ -2109,7 +2109,10 @@ Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch
         }
 
         If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
-            $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer
+            $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer |% {
+                $_ | Write-Output
+                & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
+            }
         }
     }
 
@@ -2781,7 +2784,7 @@ Else {
 
     }
     ElseIf ( $Verb -eq "settle" ) {
-        Invoke-ColdStorageSettle -Words:$allObjects -Bucket:$Bucket -Force:$Force -Batch:$Batch
+        Invoke-ColdStorageSettle -Words:$allObjects -Bucket:$Bucket -Force:$Force -Batch:$Batch -Zipped:$Zipped
     }
     ElseIf ( $Verb -eq "bleep" ) {
         Write-BleepBloop
