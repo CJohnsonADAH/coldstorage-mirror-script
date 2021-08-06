@@ -26,8 +26,8 @@
     },
     "Repository-Mirrors": {
         "Processed": { "Original": [ "{1}/{0}", "{2}/{0}" ], "Reflection": [ "//ADAHFS3/Data/Permanent" ], "ColdStorage": "$Original", "Groups": [ "ER", "Preservation", "Packaged" ] },
-        "Unprocessed": { "Original": [ "{1}/{0}", "{2}/{0}" ], "Reflection": [ "//ADAHFS3/Data/ElectronicRecords/{0}" ], "ColdStorage": "$Original", "Groups": [ "ER", "Preservation", "Packaged" ] },
-        "Working_ER": { "Original": [ "//ADAHFS3/Data/ArchivesDiv/PermanentWorking" ], "Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ], "ColdStorage": "$Reflection", "Groups": [ "ER", "Working" ] },
+        "Unprocessed": { "Original": [ "{1}/{0}", "{2}/{0}" ], "Reflection": [ "//ADAHFS3/Data/RecordsHoldings/ElectronicRecords/{0}-Mirror" ], "ColdStorage": "$Original", "Groups": [ "ER", "Preservation", "Packaged" ] },
+        "Working_ER": { "Original": [ "//ADAHFS3/RecordsHoldings/ElectronicRecords/Working" ], "Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ], "ColdStorage": "$Reflection", "Groups": [ "ER", "Working" ] },
         "Masters": { "Original":  [ "//ADAHFS3/Data/Digital{0}" ], "Reflection": [ "{1}/{0}", "{2}/{0}" ], "ColdStorage": "$Reflection", "Groups": [ "DA", "Preservation", "Packaged" ] },
         "Access": { "Original": [ "//ADAHFS3/Data/Digital{0}" ], "Reflection": [ "{1}/{0}", "{2}/{0}" ], "ColdStorage": "$Reflection", "Groups": ["DA", "Preservation"] },
         "Working_DA": { "Original": [ "//ADAHFS3/Data/Digital{0}" ], "Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ], "ColdStorage": "$Reflection", "Groups": [ "DA", "Working" ] }        
