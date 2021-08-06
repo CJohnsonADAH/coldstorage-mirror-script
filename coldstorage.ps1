@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0702
+@version 2021.0806
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1534,6 +1534,12 @@ Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $For
 # Invoke-ColdStorageRepositoryBag
 # Formerly known as: Do-Bag
 function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
+
+    If ( $Pairs -eq "_" ) {
+        Get-ChildItem -Path . -Directory |% { & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch }
+    }
+    Else {
+
     $mirrors = ( Get-ColdStorageRepositories )
 
     if ( $Pairs.Count -lt 1 ) {
@@ -1552,6 +1558,8 @@ function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $For
 
         Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
         $i = $i + 1
+    }
+
     }
 }
 
@@ -1918,7 +1926,14 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
 
     $Destinations = ("cloud", "drop", "adpnet")
 
-    If ( -Not $Items ) {
+    If ( ( $What -eq "_" ) -and ( -not $Halt ) ) {
+        
+        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $Locations = ( "." | & "${CSGetPackages}" -Items -Recurse -Bagged -Zipped -NotInCloud )
+        Invoke-ColdStorageTo -Destination:$Destination -What:$Locations -Items -Diff:$Diff -WhatIf:$WhatIf -Report:$Report -ReportOnly:$ReportOnly -Batch:$Batch
+
+    }
+    ElseIf ( -Not $Items ) {
         Write-Warning ( "[${global:gScriptContextName}:${Destination}] Not yet implemented for repositories. Try: & coldstorage to ${Destination} -Items [File1] [File2] [...]" )
     }
     ElseIf ( $Destination -eq "cloud" ) {
