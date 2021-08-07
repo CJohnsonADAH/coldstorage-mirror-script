@@ -1537,6 +1537,7 @@ function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $For
 
     If ( $Pairs -eq "_" ) {
         Get-ChildItem -Path . -Directory |% { & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch }
+        Get-ChildItem -Path . -File |% { "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$false -PassThru:$PassThru -Batch:$Batch }
     }
     Else {
 
