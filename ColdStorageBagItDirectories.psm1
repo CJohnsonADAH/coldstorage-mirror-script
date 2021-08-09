@@ -27,19 +27,24 @@ Param ( $File )
     $result = $false # innocent until proven guilty
 
     $oFile = Get-FileObject -File $File
-
-    $BagDir = $oFile.FullName
-    if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
-        $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
-        if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
-            $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )
-            if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
-                $result = $true
+    If ( $oFile -ne $null ) {
+        $BagDir = $oFile.FullName
+        if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
+            $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
+            if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
+                $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )
+                if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
+                    $result = $true
+                }
             }
         }
+        ( "[Test-BagItFormattedDirectory] Result={0} -- File: '{1}'" -f $result,$File ) | Write-Debug
+    }
+    Else {
+        ( "[Test-BagItFormattedDirectory] Result={0} -- File Not Found: '{1}'" -f $result,$File ) | Write-Debug
     }
 
-    return $result
+    $result | Write-Output
 }
 
 Function Select-BagItFormattedDirectories {

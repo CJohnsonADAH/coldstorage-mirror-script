@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0806
+@version 2021.0809
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1184,63 +1184,70 @@ param (
         $DirName = $File.FullName
         $BaseName = $File.Name
 
-        If ( $Bundle ) {
-            If ( Test-Path -LiteralPath $DirName -PathType Container ) {
-                If ( -Not ( Test-BagItFormattedDirectory($File) ) ) {
-                    If ( -Not ( Test-IndexedDirectory($File) ) ) {
-                        $DirName | Add-IndexHTML -RelativeHref
+        If ( -Not $File ) {
+            ( "[Out-BagItFormattedDirectoryWhenCleared:{0}] File object is empty" -f ( Get-CurrentLine ) ) | Write-Warning
+        }
+        ElseIf ( $DirName -eq $null ) {
+            ( "[Out-BagItFormattedDirectoryWhenCleared:{0}] DirName string is null" -f ( Get-CurrentLine ) ) | Write-Warning
+        }
+        Else {
+            If ( $Bundle ) {
+                If ( Test-Path -LiteralPath $DirName -PathType Container ) {
+                    If ( -Not ( Test-BagItFormattedDirectory($File) ) ) {
+                        If ( -Not ( Test-IndexedDirectory($File) ) ) {
+                            $DirName | Add-IndexHTML -RelativeHref
+                        }
                     }
                 }
             }
-        }
 
-        If ( Test-BagItFormattedDirectory($File) ) {
+            If ( Test-BagItFormattedDirectory($File) ) {
 
-            Write-BaggedItemNoticeMessage -File $File -Item:$File -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
+                Write-BaggedItemNoticeMessage -File $File -Item:$File -Message "BagIt formatted directory" -Verbose -Line ( Get-CurrentLine )
 
-            If ( $Rebag ) {
-                $File | Redo-CSBagPackage -PassThru:$PassThru
-            }
-
-        }
-        ElseIf ( Test-ERInstanceDirectory($File) ) {
-
-            Push-Location $DirName
-            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BagItFormattedDirectory -Progress:$Progress
-            Pop-Location
-
-            If ( $PassThru ) {
-                If ( Test-BagItFormattedDirectory($File) ) {
-                    $File | Write-Output
+                If ( $Rebag ) {
+                    $File | Redo-CSBagPackage -PassThru:$PassThru
                 }
+
             }
+            ElseIf ( Test-ERInstanceDirectory($File) ) {
 
-        }
-        ElseIf ( Test-IndexedDirectory($File) ) {
-
-            $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
-            
-            If ( $PassThru ) {
-                If ( Test-BagItFormattedDirectory($File) ) {
-                    $File | Write-Output
-                }
-            }
-
-        }
-        Else {
-
-            Get-ChildItem -File -LiteralPath $File.FullName |% {
-                
-                $ChildItem = $_
-                $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
+                Push-Location $DirName
+                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BagItFormattedDirectory -Progress:$Progress
+                Pop-Location
 
                 If ( $PassThru ) {
-                    $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
+                    If ( Test-BagItFormattedDirectory($File) ) {
+                        $File | Write-Output
+                    }
                 }
+
             }
+            ElseIf ( Test-IndexedDirectory($File) ) {
 
+                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
+            
+                If ( $PassThru ) {
+                    If ( Test-BagItFormattedDirectory($File) ) {
+                        $File | Write-Output
+                    }
+                }
+
+            }
+            Else {
+
+                Get-ChildItem -File -LiteralPath $File.FullName |% {
+                
+                    $ChildItem = $_
+                    $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
+
+                    If ( $PassThru ) {
+                        $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
+                    }
+                }
+
+            }
         }
-
     }
 
     End {
@@ -1536,8 +1543,8 @@ Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $For
 function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
 
     If ( $Pairs -eq "_" ) {
-        Get-ChildItem -Path . -Directory |% { & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch }
-        Get-ChildItem -Path . -File |% { & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$false -PassThru:$PassThru -Batch:$Batch }
+        Get-ChildItem -Path . -Directory |% { ( "PS> {0} bag -Items '{1}' {2}" -f $global:gCSScriptName,$_.FullName,$( If ($Bundle) { "-Bundle" } Else { "" } ) ) | Write-Verbose ; & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch }
+        Get-ChildItem -Path . -File |% { ( "PS> {0} bag -Items '{1}'" -f $global:gCSScriptName,$_.FullName ) | Write-Verbose ; & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$false -PassThru:$PassThru -Batch:$Batch }
     }
     Else {
 
@@ -2087,49 +2094,58 @@ Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch
         $PropsFileName = "props.json"
         $DefaultProps = $null
 
-        If ( ( $sLocation -is [string] ) -and ( $sLocation -eq "here" ) ) {
-            $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
+        If ( ( $sLocation -is [string] ) -and ( $sLocation -eq "_" ) ) {
+            & "${global:gCSScriptPath}" bag -Bundle _
+            & "${global:gCSScriptPath}" settle here -Bucket | & "${global:gCSScriptPath}" bucket -Make
         }
         Else {
-            $oFile = Get-FileObject($sLocation)
-        }
 
-        If ( $Bucket ) {
-            $sBucket, $Remainder = ( $Remainder )
+            If ( ( $sLocation -is [string] ) -and ( $sLocation -eq "here" ) ) {
+                $oFile = ( Get-Item -Force -LiteralPath $( Get-Location ) )
+            }
+            Else {
+                $oFile = Get-FileObject($sLocation)
+            }
 
-            If ( -Not $sBucket ) {
-                $DefaultBucket = $oFile.FullName | Get-CloudStorageBucket -Force 
-                $iWhich = $Host.UI.PromptForChoice("${sCommandWithVerb}", "Use default bucket name [${DefaultBucket}]?", @("&Yes", "&No"), 1)
-                If ( $iWhich -eq 0 ) {
-                    $sBucket = $DefaultBucket
+            If ( $Bucket ) {
+                $sBucket, $Remainder = ( $Remainder )
+
+                If ( -Not $sBucket ) {
+                    $DefaultBucket = $oFile.FullName | Get-CloudStorageBucket -Force 
+                    $iWhich = $Host.UI.PromptForChoice("${sCommandWithVerb}", "Use default bucket name [${DefaultBucket}]?", @("&Yes", "&No"), 1)
+                    If ( $iWhich -eq 0 ) {
+                        $sBucket = $DefaultBucket
+                    }
+                }
+
+                If ( $sBucket ) {
+                    $DefaultProps = @{ Bucket="${sBucket}" }
+                    $PropsFileName = "aws.json"
+                }
+                Else {
+                    Write-Warning "[$sCommandWithVerb] ${PropsFileName} maybe not created: No bucket name specified."
+                }
+            }
+            Else {
+                $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
+                If ( $sDomain ) {
+                    $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
+                }
+                Else {
+                    Write-Warning "[$sCommandWithVerb] ${PropsFileName} not created - expected: Domain, Repository, Prefix"
+                }
+
+            }
+
+            If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
+                $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer |% {
+                    $_ | Write-Output
+                    & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
                 }
             }
 
-            If ( $sBucket ) {
-                $DefaultProps = @{ Bucket="${sBucket}" }
-                $PropsFileName = "aws.json"
-            }
-            Else {
-                Write-Warning "[$sCommandWithVerb] ${PropsFileName} maybe not created: No bucket name specified."
-            }
-        }
-        Else {
-            $sDomain, $sRepository, $sPrefix, $Remainder = ( $Remainder )
-            If ( $sDomain ) {
-                $DefaultProps = @{ Domain="${sDomain}"; Repository="${sRepository}"; Prefix="${sPrefix}" }
-            }
-            Else {
-                Write-Warning "[$sCommandWithVerb] ${PropsFileName} not created - expected: Domain, Repository, Prefix"
-            }
-
         }
 
-        If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
-            $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer |% {
-                $_ | Write-Output
-                & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
-            }
-        }
     }
 
     End { }
@@ -2482,10 +2498,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false, [s
     Begin { }
 
     Process {
+        ( "[{0}] CHECK: {1}{2}" -f ( Get-CommandWithVerb ),$Item.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Debug
         If ( $Recurse ) {
             $Item | Get-ChildItemPackages -Recurse:$Recurse |? { ( ( $PassThru ) -Or ( -Not $_.CSPackageBagged ) ) }
         }
-        Else {
+        ElseIf ( $Item -ne $null ) {
             $Item
         }
     }
@@ -2582,7 +2599,7 @@ Else {
         }
 
         If ( $Items ) {
-            $allObjects | Get-FileObject |% { ( "[{0}] CHECK: {1}{2}" -f $sCommandWithVerb,$_.FullName,$( If ( $Recurse ) { " (recurse)" } ) ) | Write-Verbose; $_ } | Get-CSPackagesToBag -PassThru:$PassThru -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
+            $allObjects | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
         }
         Else {
             Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
