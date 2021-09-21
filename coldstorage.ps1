@@ -2532,6 +2532,29 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $InCloud, [switch] 
 
 }
 
+Function Invoke-CSDescribe {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [string] $For, [string] $Output, [switch] $PassThru=$false)
+
+    Begin { }
+
+    Process {
+        $oPackage = Get-ItemPackage $Item
+        If ( $oPackage -ne $null ) {
+            Write-Warning ( "DESCRIBE FOR: {0}" -f $For )
+            $sRepositoryName = Get-FileRepositoryName $oPackage.FullName
+            $oRepositoryLocation = Get-FileRepositoryLocation $oPackage.FullName
+            $oContainer = Get-ItemFileSystemLocation $oPackage
+            $Description = @{ "RepositoryName"=$sRepositoryName; "Location/Repository"=$oRepositoryLocation.FullName; "FullName"=$oPackage.FullName; "Package"=$oPackage }
+            Write-Warning ( $Description | ConvertTo-JSON )
+            If ( $PassThru ) {
+                $oPackage
+            }
+        }
+    }
+
+    End { }
+}
+
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
 
@@ -2654,6 +2677,28 @@ Else {
     }
     ElseIf ( ("index", "bundle") -ieq $Verb ) {
         $allObjects | ColdStorage-Command-Line -Default "${PWD}" |% { Get-FileLiteralPath $_ } | Add-IndexHTML -RelativeHref -Force:$Force -PassThru:$PassThru -Context:"${global:gCSCommandWithVerb}"
+    }
+    ElseIf ( $Verb -eq "describe" ) {
+        If ( $For ) {
+            $ForWhat = $For
+            $CSDescribeArguments  = $Words
+        }
+        Else {
+            $Preposition, $MaybeForWhat, $Remainder = $Words
+            If ( "for" -eq "${Preposition}" ) {
+                $ForWhat = $MaybeForWhat
+                $CSDescribeArguments = $Remainder
+            }
+            Else {
+                $ForWhat = $Preposition
+                $CSDescribeArguments = $MaybeForWhat, $Remainder
+            }
+        }
+        
+        $allObjects = ( @( $CSDescribeArguments | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
+
+        $allObjects | Invoke-CSDescribe -For:$ForWhat -Output:$Output -PassThru:$PassThru
+
     }
     ElseIf ( $Verb -eq "manifest" ) {
 
