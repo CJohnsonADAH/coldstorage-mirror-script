@@ -61,8 +61,20 @@ Param ( [Parameter(ValueFromPipeline=$true)] $LiteralPath )
     Begin { }
 
     Process {
-    $Listable = $false
-        If ( Test-Path -LiteralPath "${LiteralPath}" -PathType Container ) {
+        $Listable = $false
+        $IsContainer = $false
+        If ( -Not ( -Not ( $LiteralPath ) ) ) {
+            Try {
+                $IsContainer = ( Test-Path -LiteralPath "${LiteralPath}" -PathType Container -ErrorAction Stop )
+            }
+            Catch {
+                If ( $Verbose -or $Debug ) {
+                    "[Test-IsListable] DIAGNOSTIC: Windows threw an exception for Test-Path '{0}'" -f $LiteralPath | Write-Warning 
+                }
+            }
+        }
+
+        If ( $IsContainer ) {
             Try {
                 $FirstItem = ( Get-ChildItem -LiteralPath "${LiteralPath}" -ErrorAction Stop | Select-Object -First 1 )
                 $Listable = $true
