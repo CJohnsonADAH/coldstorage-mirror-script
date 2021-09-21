@@ -949,7 +949,7 @@ Param (
     Begin { $CurDate = ( Get-Date ) }
 
     Process {
-        $CheckZipped = ( $Unzipped -or $Zipped )
+        $CheckZipped = ( $Unzipped -or $Zipped -or $InCloud -or $NotInCloud )
         $CheckCloud = ( $InCloud -or $NotInCloud )
         $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud |
             Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
