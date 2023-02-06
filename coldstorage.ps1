@@ -42,6 +42,7 @@ param (
     [switch] $Make = $false,
     [switch] $Halt = $false, 
     [switch] $Bundle = $false,
+    [switch] $Manifest = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
     [String[]] $Is = @(),
@@ -1196,6 +1197,9 @@ param (
     $Bundle=$false,
 
     [switch]
+    $Manifest=$false,
+
+    [switch]
     $PassThru=$false,
 
     [switch]
@@ -1284,6 +1288,22 @@ param (
                 }
 
             }
+
+            If ( $Manifest ) {
+                If ( Test-Path -LiteralPath $DirName -PathType Container ) {
+                    If ( Test-BagItFormattedDirectory( $File )  ) {
+
+                        $Location = ( Get-Item -LiteralPath $File )
+                        $sTitle = ( $Location | Get-ADPNetAUTitle )
+                        If ( -Not $sTitle ) {
+                            $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
+                        }
+
+                        Add-LOCKSSManifestHTML -Directory $File -Title $sTitle -Force:$Force
+                    }
+                }
+            }
+
         }
     }
 
@@ -1569,15 +1589,15 @@ End {
 
 # Invoke-BagChildDirectories: Given a parent directory (typically a repository root), loop through each child directory and do a clear-and-bag
 # Formerly known as: Do-Bag-Repo-Dirs
-Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
+Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $Manifest=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
     Push-Location $From
-    Get-ChildItem -Directory | Out-BagItFormattedDirectoryWhenCleared -Quiet -Exclude $null -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
+    Get-ChildItem -Directory | Out-BagItFormattedDirectoryWhenCleared -Quiet -Exclude $null -Skip:$Skip -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
     Pop-Location
 }
 
 # Invoke-ColdStorageRepositoryBag
 # Formerly known as: Do-Bag
-function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
+function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $Manifest=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
 
     If ( $Pairs -eq "_" ) {
         Get-ChildItem -Path . -Directory |% { ( "PS> {0} bag -Items '{1}' {2}" -f $global:gCSScriptName,$_.FullName,$( If ($Bundle) { "-Bundle" } Else { "" } ) ) | Write-Verbose ; & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch }
@@ -1601,7 +1621,7 @@ function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $For
         $src = $locations[2]
         $dest = $locations[1]
 
-        Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
+        Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
         $i = $i + 1
     }
 
@@ -2580,10 +2600,10 @@ Else {
         }
 
         If ( $Items ) {
-            $allObjects | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
+            $allObjects | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
         }
         Else {
-            Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch
+            Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
         }
 
     }
