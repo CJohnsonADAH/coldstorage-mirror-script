@@ -124,6 +124,16 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                         $ToConvert = $Row.$Aspect
                     }
 
+                    # Sigh
+                    If ( $Locations.Count -le 3 ) {
+                        "WARNING: The Repository {0} does not seem to be set up correctly in settings.json !!" | Write-Warning
+                        "REPOSITORY={0}" -f $Repository | Write-Warning
+                        "_={0}" -f $_ | Write-Warning
+                        'MirrorsMeta.$Repository=',$MirrorsMeta.${Repository} | Write-Warning
+                        "LOCATIONS: " | Write-Warning
+                        $Locations |% { If ( $_ -ne $null ) { $_ | Write-Warning } Else { "(null)" | Write-Warning } }
+                    }
+
                     $Converted = ( $ToConvert |% { $_ -f $Locations | ConvertTo-ColdStorageSettingsFilePath } )
                     $Row.$Aspect = ( $Converted |% { $Path = $_ ; If ( $Path | Test-IsListable ) { $Path } } | Select-Object -First 1 )
                     
