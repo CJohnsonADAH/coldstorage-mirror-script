@@ -125,7 +125,12 @@ Process {
     If ( Test-BagItFormattedDirectory -File $oFile.FullName ) {
         $Containers = ( $oFile.FullName | Get-ZippedBagsContainer -All )
         $Prefix = ( Get-ZippedBagNamePrefix -File $oFile.FullName )
-        $SearchPaths = ( $Containers.FullName | Join-Path -ChildPath "${Prefix}_z*_md5_*.zip" )
+        If ( $Containers.FullName -ne $null ) {
+            $SearchPaths = ( $Containers.FullName | Join-Path -ChildPath "${Prefix}_z*_md5_*.zip" )
+        }
+        Else {
+            $SearchPaths = @()
+        }
         $SearchPaths |% { Get-ChildItem -Path $_ }
     }
 }
@@ -220,7 +225,7 @@ Process {
 
     If ( -Not $oZipDir ) {
         If ( -Not $NoCreate ) {
-            ( $Locations | New-ZippedBagContainer )
+            ( $Locations | New-ZippedBagsContainer )
         }
     }
 
@@ -234,6 +239,35 @@ End {
         }
     }
 }
+
+}
+
+Function New-ZippedBagContainer {
+
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ) )
+
+    Begin { }
+
+    Process {
+
+        # We have failed to find a good nearby .coldstorage\ZIP location for this repository.
+        # So let's go to PLAN B, the expected location for the big collective pool for this repository.
+        $Locations = @( $File | Get-FileRepositoryLocation )
+
+        $oZipDir = $null
+        $Locations |% {
+            $Loc = $_
+            $oZipDir = ( Get-ChildItem "ZIP" -LiteralPath $Loc.FullName )
+            If ( -Not $oZipDir ) {
+                $Candidate = ( Join-Path $Loc.FullName -ChildPath "ZIP" )
+                $oZipDir = ( New-Item -ItemType Directory $Candidate )
+            }
+            $oZipDir
+        }
+
+    }
+
+    End { }
 
 }
 

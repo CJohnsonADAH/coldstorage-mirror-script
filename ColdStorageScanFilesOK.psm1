@@ -26,6 +26,22 @@ Import-Module $( My-Script-Directory -Command $global:gScanFilesOKCmd -File "Col
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
+
+Function Test-CSOutputForValidationErrors {
+Param ( [Parameter(ValueFromPipeline=$true)] $Message )
+
+Begin { $ExitCode = 0 }
+
+Process {
+    If ( -Not ( $Message -match "^OK-" ) ) {
+        $ExitCode = $ExitCode + 1
+    }
+}
+
+End { $ExitCode }
+
+}
+
 Function Test-CSFilesOK {
 
     [CmdletBinding()]
@@ -357,6 +373,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int
 
 }
 
+Export-ModuleMember -Function Test-CSOutputForValidationErrors
 Export-ModuleMember -Function Select-WhereWeShallContinue
 Export-ModuleMember -Function Test-ShallWeContinue
 

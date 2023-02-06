@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2021.0921-1355
+@version 2022.0727-1041
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -72,6 +72,7 @@ param (
     [string] $For,
     [string] $From,
     [string] $To,
+    [switch] $Reverse = $false,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
 )
@@ -489,7 +490,10 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
 Function Test-MatchedFile ($From, $To, $DiffLevel=0) {
 
     $ToPath = $To
-    If ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
+    If ( $To -eq $null ) {
+        $ToPath = $To
+    }
+    ElseIf ( Get-Member -InputObject $To -name "FullName" -MemberType Properties ) {
         $ToPath = $To.FullName
     }
 
@@ -892,22 +896,41 @@ Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
 }
 
 Function Sync-MirroredFiles {
-Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
+Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $Force=$false )
 
     $sActScanning = "Scanning contents: [${From}]"
     $sStatus = "*.*"
 
     If ( -Not ( Test-Path -LiteralPath "${To}" ) ) {
-        $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found." -f $global:gCSSCriptName, $To )
-        Write-Error $ErrMesg
-        Return
+        If ( $Force -and ( Test-Path -PathType Container "${From}" ) ) {
+            New-Item -Type Directory "${To}"
+        }
+        Else {
+            $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found." -f $global:gCSSCriptName, $To )
+            Write-Error $ErrMesg
+            Return
+        }
     }
 
     $sTo = $To
-    If (Test-BagItFormattedDirectory -File $To) {
+    If ( Test-BagItFormattedDirectory -File $To ) {
         If ( -Not ( Test-BagItFormattedDirectory -File $From ) ) {
             $oPayload = ( Get-FileObject($To) | Select-BagItPayloadDirectory )
             $To = $oPayload.FullName
+        }
+        Else {
+
+            $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+            $Bag = ( $From | & "${CSGetPackages}" validate -Items -PassThru ); $OKBagIt = $LastExitCode
+
+            If ( $OKBagIt -gt 0 ) {
+
+                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' no longer validates and SHOULD NOT overwrite Destination '{2}' !!!" -f $global:gCSSCriptName, $From, $To )
+                Write-Error $ErrMesg
+                Return
+
+            }
+
         }
     }
 
@@ -972,14 +995,16 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false)
 
         $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
         $Progress.Update( $Mesg, 0 )
+        $Mesg | Write-Debug
         Sync-MirroredFiles -From "${MirrorFrom}" -To "${MirrorTo}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch
         $Progress.Update( $Mesg )
     }
+
     $Progress.Complete()
 }
 
 # Do-Mirror-Repositories
-Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false) {
+Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false, [switch] $Force=$false, [switch] $Reverse=$false ) {
 
     $Context = Get-CommandWithVerb
     $mirrors = ( Get-ColdStorageRepositories )
@@ -1000,11 +1025,20 @@ Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=
             $locations = $mirrors[$Pair]
 
             $slug = $locations[0]
-            $src = (Get-Item -Force -LiteralPath $locations[2] | Get-LocalPathFromUNC ).FullName
-            $dest = (Get-Item -Force -LiteralPath $locations[1] | Get-LocalPathFromUNC ).FullName
+
+            If ( -Not $Reverse ) {
+                $iSrc = 2
+                $iDest = 1
+            }
+            Else {
+                $iSrc = 1
+                $iDest = 2
+            }
+            $src = (Get-Item -Force -LiteralPath $locations[$iSrc] | Get-LocalPathFromUNC ).FullName
+            $dest = (Get-Item -Force -LiteralPath $locations[$iDest] | Get-LocalPathFromUNC ).FullName
 
             $Progress.Update(("Location: {0}" -f $Pair), 0) 
-            Sync-MirroredFiles -From "${src}" -To "${dest}" -DiffLevel $DiffLevel -Batch:$Batch
+            Sync-MirroredFiles -From "${src}" -To "${dest}" -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force
             $Progress.Update(("Location: {0}" -f $Pair)) 
         }
         Else {
@@ -1021,7 +1055,7 @@ Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Sync-MirroredRepositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch
+                Sync-MirroredRepositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch -Reverse:$Reverse
             }
             Else {
                 ( "[{0}] No such repository: {1}." -f $Context,$Pair ) | Write-Warning 
@@ -1596,7 +1630,7 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 }
 
 Function Invoke-ColdStorageItemMirror {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $WhatIf )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $Force=$false, [switch] $Reverse=$false, [switch] $WhatIf )
 
     Begin { }
 
@@ -1606,17 +1640,26 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
             $sRepository = $oRepository.FullName
             $RepositorySlug = ( Get-FileRepositoryName -File $File )
 
-            $Src = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
-            $Dest = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
+            $Original = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
+            $Reflection = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
+
+            If ( -Not $Reverse ) {
+                $Src = $Original
+                $Dest = $Reflection
+            }
+            Else {
+                $Src = $Reflection
+                $Dest = $Original
+            }
 
             ( "REPOSITORY: {0} - SLUG: {0}" -f $sRepository,$RepositorySlug ) | Write-Debug
             ( "FROM:{0} -> TO:{1} [DIFF LEVEL: {0}]" -f $Src, $Dest, $DiffLevel ) | Write-Verbose
             
             If ( -Not $WhatIf ) {
-                Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel $DiffLevel -Batch:$Batch
+                Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force
             }
             Else {
-                Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch"
+                Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force"
             }
 
         }
@@ -1808,94 +1851,6 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
 
         $i = $i + 1
     }
-
-}
-
-Function Compress-CSBaggedPackage {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Batch = $false, [String[]] $Skip=@() )
-
-Begin { }
-
-Process {
-    
-    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
-    $Progress.Open( ( "Processing {0}" -f "${sArchive}" ), "Validating bagged preservation package", 5 )
-
-    If ( Test-BagItFormattedDirectory -File $File ) {
-        $oFile = Get-FileObject -File $File
-        $sFile = Get-FileLiteralPath -File $File
-
-        $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip )
-
-        $Progress.Update( "Validated bagged preservation package" )
-        
-        If ( $Validated | Did-It-Have-Validation-Errors | Test-ShallWeContinue ) {
-
-            $oZip = ( Get-ZippedBagOfUnzippedBag -File $oFile )
-
-            $Result = $null
-
-            If ( $oZip.Count -gt 0 ) {
-                $sArchiveHashed = $oZip.FullName
-                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$false; "Validated"=$Validated; "Compressed"=$null }
-                $Progress.Update( "Located archive with MD5 Checksum", 2 )
-            }
-            Else {
-                $Progress.Update( "Compressing archive" )
-
-                $oRepository = ( $oFile | Get-ZippedBagsContainer )
-                $sRepository = $oRepository.FullName
-
-                $ts = $( Date -UFormat "%Y%m%d%H%M%S" )
-                $sZipPrefix = ( Get-ZippedBagNamePrefix -File $oFile )
-
-                $sZipName = "${sZipPrefix}_z${ts}"
-                $sArchive = ( $sRepository | Join-Path -ChildPath "${sZipName}.zip" )
-
-                $CompressResult = ( $sFile | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath ${sArchive} )
-
-                $Progress.Update( "Computing MD5 checksum" )
-                If ( -Not $WhatIf ) {
-                    $md5 = $( Get-FileHash -LiteralPath "${sArchive}" -Algorithm MD5 ).Hash.ToLower()
-                }
-                Else {
-                    $stream = [System.IO.MemoryStream]::new()
-                    $writer = [System.IO.StreamWriter]::new($stream)
-                    $writer.write($sArchive)
-                    $writer.Flush()
-                    $stream.Position = 0
-                    $md5 = $( Get-FileHash -InputStream $stream ).Hash.ToLower()
-                }
-
-                $sZipHashedName = "${sZipName}_md5_${md5}"
-                $sArchiveHashed = ( $sRepository | Join-Path -ChildPath "${sZipHashedName}.zip" )
-
-                If ( -Not $WhatIf ) {
-                    Move-Item -WhatIf:$WhatIf -LiteralPath $sArchive -Destination $sArchiveHashed
-                }
-
-                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$true; "Validated-Bag"=$Validated; "Compressed"=$CompressResult }
-            }
-            
-            $Progress.Update( "Testing zip file integrity" )
-
-            If ( $Result -ne $null ) {
-                $Result | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed -Skip:$Skip )
-                $Result | Write-Output
-            }
-
-        }
-    }
-    Else {
-        $sFile = $File.FullName
-        Write-Warning "${sFile} is not a BagIt-formatted directory."
-    }
-
-    $Progress.Complete()
-
-}
-
-End { }
 
 }
 
@@ -2589,10 +2544,10 @@ Else {
         }
 
         If ( $Items ) {
-            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -WhatIf:$WhatIf
+            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -WhatIf:$WhatIf
         }
         Else {
-            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch
+            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse
         }
     }
     ElseIf ( $Verb -eq "check" ) {
@@ -2649,30 +2604,15 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "zip" ) {
+        $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
 
         $SkipScan = @( )
         If ( $NoScan ) {
             $SkipScan = @( "clamav", "bagit", "zip" )
         }
+        $CSZipPackages = $( ColdStorage-Script-Dir -File "coldstorage-zip-packages.ps1" )
 
-        $allObjects |% {
-            $sFile = Get-FileLiteralPath -File $_
-            If ( Test-BagItFormattedDirectory -File $sFile ) {
-                $_ | Compress-CSBaggedPackage -Skip:$SkipScan
-            }
-            ElseIf ( Test-LooseFile -File $_ ) {
-                $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
-                If ($oBag) {
-                    $oBag | Compress-CSBaggedPackage -Skip:$SkipScan
-                }
-                Else {
-                    Write-Warning "${sFile} is a loose file not a BagIt-formatted directory."
-                }
-            }
-            Else {
-                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Compress-CSBaggedPackage -Skip:$SkipScan
-            }
-        }
+        $Locations | & "${CSZipPackages}" -Skip:$SkipScan 
 
     }
     ElseIf ( ("index", "bundle") -ieq $Verb ) {
@@ -2709,7 +2649,12 @@ Else {
                 $sTitle = ( Read-Host -Prompt "AU Title [${Location}]" )
             }
 
-            Add-LOCKSSManifestHTML -Directory $_ -Title $sTitle -Force:$Force
+            If ( $Report ) {
+                $_ | Get-LOCKSSManifestHTML -Title $sTitle
+            }
+            Else {
+                Add-LOCKSSManifestHTML -Directory $_ -Title $sTitle -Force:$Force
+            }
         }
     }
     ElseIf ( $Verb -eq "bucket" ) {

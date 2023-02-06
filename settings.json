@@ -1,6 +1,6 @@
 {
 	"BagIt": "//ADAHColdStorage/Share/Scripts/bagit",
-	"ClamAV": "//ADAHColdStorage/Share/Binaries/clamav-0.102.4-win-x64-portable",
+	"ClamAV": "//ADAHColdStorage/Share/Binaries/clamav-0.103.7-2-win-x64-portable",
     "7za": "//ADAHColdStorage/Share/Binaries/7z-1900/x64",
 	"Python": "//ADAHColdStorage/Share/Binaries/WinPython64/python-3.9.0rc1.amd64",
     "AWS": "//ADAHColdStorage/Share/Binaries/AWS-CLI",
@@ -12,7 +12,7 @@
     "ADPNet-Plugin-Jar": "http://configuration.adpn.org/overhead/takeover/plugins/AuburnDirectoryPlugin.jar",
     "ADPNet-Plugin-Package": "sftp://adpnadah.alabama.gov/cache0/adpnet-plugins/",
     "ADPNet-Plugin-Cache": "//ADAHColdStorage/Share/ADPNet-Plugins",
-    "Make-LOCKSS-Manifest-Service": "https://archives.alabama.gov/Services/ADPnet/MakeManifest/",
+    "Make-LOCKSS-Manifest-Service": "https://adpn.org/services/MakeManifest/",
     "Lockss-Box-SFTP": "adahcoldstorage@adpnadah.alabama.gov",
 	"AU-Titles": {
 		"Digitization-Masters": {
@@ -21,15 +21,52 @@
 		}
 	},
     "Repository-Groups": {
-        "ER": [ "//ADAHColdStorage/ADAHDATA/ElectronicRecords", "//ADAHColdStorage/ElectronicRecords", "//ADAHFS3/Data/ElectronicRecords" ],
-        "DA": [ "//ADAHColdStorage/ADAHDATA/Digitization", "//ADAHColdStorage/Digitization" ]
+        "ER": [ "//ADAHColdStorage/ADAHDATA/ElectronicRecords", "//ADAHColdStorage/ElectronicRecords", "//ADAHMainStorage_22B/ElectronicRecords" ],
+        "DA": [ "//ADAHColdStorage/ADAHDATA/Digitization", "//ADAHColdStorage/Digitization" ],
+		"NP": [ "//ADAHColdStorage/ADAHDATA", "//ADAHColdStorage" ]
     },
     "Repository-Mirrors": {
-        "Processed": { "Original": [ "{1}/{0}", "{2}/{0}" ], "Reflection": [ "//ADAHFS3/Data/Permanent" ], "ColdStorage": "$Original", "Groups": [ "ER", "Preservation", "Packaged" ] },
-        "Unprocessed": { "Original": [ "{1}/{0}", "{2}/{0}" ], "Reflection": [ "//ADAHFS3/Data/RecordsHoldings/ElectronicRecords/{0}-Mirror" ], "ColdStorage": "$Original", "Groups": [ "ER", "Preservation", "Packaged" ] },
-        "Working_ER": { "Original": [ "//ADAHFS3/RecordsHoldings/ElectronicRecords/Working" ], "Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ], "ColdStorage": "$Reflection", "Groups": [ "ER", "Working" ] },
-        "Masters": { "Original":  [ "//ADAHFS3/Data/Digital{0}" ], "Reflection": [ "{1}/{0}", "{2}/{0}" ], "ColdStorage": "$Reflection", "Groups": [ "DA", "Preservation", "Packaged" ] },
-        "Access": { "Original": [ "//ADAHFS3/Data/Digital{0}" ], "Reflection": [ "{1}/{0}", "{2}/{0}" ], "ColdStorage": "$Reflection", "Groups": ["DA", "Preservation"] },
-        "Working_DA": { "Original": [ "//ADAHFS3/Data/Digital{0}" ], "Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ], "ColdStorage": "$Reflection", "Groups": [ "DA", "Working" ] }        
+        "Processed": {
+			"Original": [ "//ADAHMainStorage_22B/ElectronicRecords/{0}" ],
+			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"ColdStorage": "$Reflection",
+			"Groups": [ "ER", "Preservation", "Packaged" ]
+		},
+        "Unprocessed": {
+			"Original": [ "//ADAHMainStorage_22B/ElectronicRecords/{0}" ],
+			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"ColdStorage": "$Reflection",
+			"Groups": [ "ER", "Preservation", "Packaged" ]
+		},
+        "Working_ER": {
+			"Original": [ "//ADAHMainStorage_22B/ER{0}" ],
+			"Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ],
+			"ColdStorage": "$Reflection",
+			"Groups": [ "ER", "Working" ]
+		},
+        "Masters": {
+			"Original":  [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"ColdStorage": "$Reflection",
+			"Groups": [ "DA", "Preservation", "Packaged" ]
+		},
+        "Access": {
+			"Original": [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"ColdStorage": "$Reflection",
+			"Groups": ["DA", "Preservation"]
+		},
+        "Working_DA": {
+			"Original": [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ],
+			"ColdStorage": "$Reflection",
+			"Groups": [ "DA", "Working" ]
+		},
+		"Received": {
+			"Original": [ "//ADAHMainStorage_22B/{0}" ],
+			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"ColdStorage": "$Reflection",
+			"Groups": [ "NP", "Working" ]
+		}
     }
 }

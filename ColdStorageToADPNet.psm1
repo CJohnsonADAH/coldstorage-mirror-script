@@ -197,7 +197,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Path, [string] $Title, [string] $T
         If ( $ServiceURL ) {
             $AU = ( $Path | Get-ADPNetAUTable -ForService )
 
-            $oReq = Invoke-WebRequest -Uri $ServiceURL -Method "POST" -Body @{
+            $oReq = Invoke-WebRequest -Uri $ServiceURL -Method "POST" -Body ( [PSCustomObject] @{
                 institution_code = $AU['Institution Code']
                 institution_name = $AU['Institution Name']
                 au_title = $AU['AU Title']
@@ -210,7 +210,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Path, [string] $Title, [string] $T
                 lockss_plugin_version = $AU['Plugin Version']
                 display_format = "text/html"
                 CreateManifest = "CREATE FILE: manifest.html"
-            }
+            } )
             If ( $oReq ) {
                 If ( $oReq.StatusCode -eq 200 ) {
                     $htmlOut = $oReq.Content
