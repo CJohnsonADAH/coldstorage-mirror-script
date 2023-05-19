@@ -240,12 +240,15 @@ Function Get-LocalPathShares {
     $global:csaShares
 }
 
+$global:csaLocalPaths = @{ }
+
 # WAS/IS: Resolve-UNC-Path-To-Local-If-Local/Get-LocalPathFromUNC
 Function Get-LocalPathFromUNC {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 Begin {
-    $sHost = $env:COMPUTERNAME
+    $asHost = $env:COMPUTERNAME, [System.Net.DNS]::GetHostName()
+    $asHostRoot = ( $asHost |% { "\\{0}" -f $_ } )
     $aShares = Get-LocalPathShares
     $sShareLocalPath = $null
     $sLocalFullName = $null
@@ -266,12 +269,25 @@ Process {
         $UNCRoot = $File.Root.FullName
         $sShareLocalPath = $null
         $sLocalFullName = $null
-        $aShares | ForEach {
-            $sSharePath = $_.Name
-            If ( $UNCRoot -eq "\\${sHost}\${sSharePath}" ) {
-                $sShareLocalPath = $_.Path
+        If ( $global:csaLocalPaths.ContainsKey( $UNCRoot ) ) {
+            $sShareLocalPath = $global:csaLocalPaths[ $UNCRoot ]
+        }
+
+        If ( $sShareLocalPath -eq $null ) {
+            $UNCHost = ( New-Object System.Uri -ArgumentList $UNCRoot ).Authority
+            If ( $UNCHost -iin $asHost ) {
+                $aShares | ForEach {
+                    $oShare = $_
+                    $sSharePath = $oShare.Name
+                    $Candidates = ( $asHostRoot | Join-Path -ChildPath $sSharePath )
+                    If ( $UNCRoot -iin $Candidates ) {
+                        $sShareLocalPath = $oShare.Path
+                        $global:csaLocalPaths[ $UNCRoot ] = $sShareLocalPath
+                    }
+                }
             }
         }
+
         If ( $sShareLocalPath -ne $null ) {
             $reUNCRoot = [Regex]::Escape($UNCRoot)
             $replaceLocalPath = ($sShareLocalPath -replace [Regex]::Escape("$"), "\$&")

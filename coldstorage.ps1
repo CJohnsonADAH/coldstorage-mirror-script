@@ -51,6 +51,8 @@ param (
     [switch] $Unbagged = $false,
     [switch] $Zipped = $false,
     [switch] $Unzipped = $false,
+    [switch] $Mirrored = $false,
+    [switch] $NotMirrored = $false,
     [switch] $InCloud = $false,
     [switch] $NotInCloud = $false,
     [switch] $Only = $false,
@@ -2586,6 +2588,7 @@ Else {
             -Verbose:$Verbose `
             -Bagged:$Bagged -Unbagged:$Unbagged `
             -Zipped:$Zipped -Unzipped:$Unzipped `
+            -Mirrored:$Mirrored -NotMirrored:$NotMirrored `
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
             -FullName:$FullName `
@@ -2722,6 +2725,7 @@ Else {
             -Verbose:$Verbose `
             -Bagged:$Bagged -Unbagged:$Unbagged `
             -Zipped:$Zipped -Unzipped:$Unzipped `
+            -Mirrored:$Mirrored -NotMirrored:$NotMirrored `
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
             -FullName:$FullName `

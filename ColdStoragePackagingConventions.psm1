@@ -676,7 +676,16 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $PassThru=$false
 
 
 Function Get-ItemPackage {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $Ascend=$false, $AscendTop=$null, [switch] $CheckZipped=$false, [switch] $CheckCloud=$false, [switch] $ShowWarnings=$false )
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File,
+    [switch] $Recurse=$false,
+    [switch] $Ascend=$false,
+    $AscendTop=$null,
+    [switch] $CheckZipped=$false,
+    [switch] $CheckMirrored=$false,
+    [switch] $CheckCloud=$false,
+    [switch] $ShowWarnings=$false
+)
 
     Begin { }
 
@@ -792,6 +801,22 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
             
+            $bMirrorCopy = $false
+            $oMirrorCopy = $null
+            $sMirrorCopy = $null
+            If ( $CheckMirrored ) {
+                # Is it mirrored at all?
+                $cold = ( $File | Get-MirrorMatchedItem -ColdStorage )
+
+                If ( $cold.Count -gt 0 ) {
+                    $bMirrorCopy = ( Test-Path -LiteralPath $cold )
+                    If ( $bMirrorCopy ) {
+                        $oMirrorCopy = ( Get-Item -Force -LiteralPath $cold )
+                        $sMirrorCopy = $oMirrorCopy.FullName
+                    }
+                }
+            }
+
             $oCloudCopy = $null
             If ( $aZipped -ne $false ) {
                 $Package | Add-Member -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
@@ -801,9 +826,15 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
                     $aListing = ( $oListing | Get-TablesMerged )
                     $bCloudCopy = ( $aListing.ContainsKey($aZipped.Name) )
                     If ( $bCloudCopy ) {
-                        $oCloudCopy = $aListing[$aZipped.Name]
+                        $oCloudCopy = $aListing[ $aZipped.Name ]
                     }
                 }
+            }
+
+            If ( $CheckMirrored ) {
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrored" -Value $bMirrorCopy -Force
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrorLocation" -Value $sMirrorCopy -Force
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrorCopy" -Value $oMirrorCopy -Force
             }
 
             If ( $CheckCloud ) {
@@ -822,7 +853,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
 
 Function Get-ChildItemPackages {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $CheckZipped=$false, [switch] $CheckCloud=$false, [switch] $ShowWarnings=$false )
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File,
+    [switch] $Recurse=$false,
+    [switch] $CheckZipped=$false,
+    [switch] $CheckMirrored=$false,
+    [switch] $CheckCloud=$false,
+    [switch] $ShowWarnings=$false
+)
 
     Begin { }
 
@@ -833,9 +871,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
         If ( $oFile -eq $null ) {
             Write-Error ( "No such item: {0}" -f $File )
         }
+        ElseIf ( Test-BagItFormattedDirectory -File $oFile ) {
+
+            Get-Item -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
+
+        }
         Else {
 
-            Get-ChildItem -LiteralPath $oFile.FullName | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
+            Get-ChildItem -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
 
         }
 

@@ -692,7 +692,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
 }
 
 Function Get-MirrorMatchedItem {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, $Repositories=$null )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, $Repositories=$null )
 
 Begin { $mirrors = ( Get-ColdStorageRepositories -Tag ) }
 
@@ -756,6 +756,7 @@ Process {
         $Container = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
 
         $There |% {
+
             $Aspect = $_.Name
             $Location =  $_.Value
             If ( Test-Path -LiteralPath $Location ) {

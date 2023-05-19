@@ -42,6 +42,8 @@ param (
     [switch] $Unbagged = $false,
     [switch] $Zipped = $false,
     [switch] $Unzipped = $false,
+    [switch] $Mirrored = $false,
+    [switch] $NotMirrored = $false,
     [switch] $InCloud = $false,
     [switch] $NotInCloud = $false,
     [switch] $Only = $false,
@@ -747,6 +749,7 @@ Param (
     [string] $Output="",
     [switch] $FullName=$false,
     [switch] $CheckZipped=$false,
+    [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
     $Timestamp,
     $Context
@@ -756,6 +759,7 @@ Param (
     Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ); $aBucketListings = @{}; $jsonOut = @() }
 
     Process {
+
         $oContext = ( Get-FileObject $Context )
 
         Push-Location ( $oContext | Get-ItemFileSystemLocation ).FullName
@@ -784,6 +788,12 @@ Param (
         $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
 
         Pop-Location
+
+        If ( $CheckMirrored ) {
+            $nMirroredFlag = $Package.CSPackageMirrored
+            $sMirroredFlag = $( If ( $nMirroredFlag ) { "MIRRORED" } Else { "unmirrored" } )
+            $sMirrorLocation = $Package.CSPackageMirrorLocation
+        }
 
         $oCloudCopy = $null
         $sCloudCopyFlag = $null
@@ -815,6 +825,9 @@ Param (
             "ZipFile"=( $sZippedFile )
             "Zipped"=( $nZippedFlag )
             "InZip"=( $sZippedFlag )
+            "Mirrored"=( $nMirroredFlag )
+            "MirrorLocation"=( $sMirrorLocation )
+            "InMirror"=( $sMirroredFlag )
             "CloudFile"=( $oCloudCopy | Get-CloudStorageURI )
             "CloudTimestamp"=( $oCloudCopy | Get-CloudStorageTimestamp )
             "InCloud"=( $nCloudCopyFlag )
@@ -857,10 +870,11 @@ Param (
                 # Fields formatted for text report
                 $sRptBagged = ( " ({0})" -f $o.Bag )
                 $sRptZipped = $( If ( $o.Zipped -ne $null ) { ( " ({0})" -f $o.InZip ) } Else { "" } )
+                $sRptMirrored = $( If ( $o.Mirrored -ne $null ) { ( " ({0})" -f $o.InMirror ) } Else { "" } )
                 $sRptCloud = $( If ( $o.Clouded -ne $null ) { ( " ({0})" -f $o.Clouded ) } Else { "" } )
 
                 # Output
-                ( "{0}{1}{2}{3}, {4}, {5}{6}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
+                ( "{0}{1}{2}{3}{4}, {5}, {6}{7}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptMirrored,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
             
             }
         }
@@ -888,6 +902,8 @@ Param (
     [switch] $Zipped,
     [switch] $Unbagged,
     [switch] $Unzipped,
+    [switch] $Mirrored,
+    [switch] $NotMirrored,
     [switch] $InCloud,
     [switch] $NotInCloud,
     [switch] $Only
@@ -898,6 +914,7 @@ Param (
     Process {
         $BaggedOnly = ( $Bagged -and $Only )
         $ZippedOnly = ( $Zipped -and $Only )
+        $MirroredOnly = ( $Mirrored -and $Only )
         $InCloudOnly = ( $InCloud -and $Only )
 
         $ok = @( )
@@ -912,6 +929,12 @@ Param (
         }
         If ( $Unzipped ) {
             $ok += , ( -Not ( $Package.CSPackageZip ) )    
+        }
+        If ( $MirroredOnly ) {
+            $ok += , ( -Not ( -Not ( $Package.CSPackageMirrored ) ) )
+        }
+        If ( $NotMirrored ) {
+            $ok += , ( -Not ( $Package.CSPackageMirrored ) )
         }
         If ( $InCloudOnly ) {
             $ok += , ( -Not ( -Not ( $Package.CloudCopy ) ) )
@@ -938,6 +961,8 @@ Param (
     [switch] $Unbagged,
     [switch] $Zipped,
     [switch] $Unzipped,
+    [switch] $Mirrored,
+    [switch] $NotMirrored,
     [switch] $InCloud,
     [switch] $NotInCloud,
     [switch] $Only,
@@ -950,10 +975,12 @@ Param (
 
     Process {
         $CheckZipped = ( $Unzipped -or $Zipped -or $InCloud -or $NotInCloud )
+        $CheckMirrored = ( $Mirrored -or $NotMirrored )
         $CheckCloud = ( $InCloud -or $NotInCloud )
-        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud |
-            Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
-            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -FullName:$FullName -Context:$Location -Timestamp:$CurDate
+
+        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud |
+            Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -Mirrored:$Mirrored -NotMirrored:$NotMirrored -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
+            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -FullName:$FullName -Context:$Location -Timestamp:$CurDate
     }
 
     End { }
@@ -1133,6 +1160,8 @@ Else {
             -Unbagged:$Unbagged `
             -Zipped:$Zipped `
             -Unzipped:$Unzipped `
+            -Mirrored:$Mirrored `
+            -NotMirrored:$NotMirrored `
             -InCloud:$InCloud `
             -NotInCloud:$NotInCloud `
             -Only:$Only `
@@ -1200,6 +1229,7 @@ Else {
             -ShowWarnings:$Verbose `
             -Bagged:$Bagged -Unbagged:$Unbagged `
             -Zipped:$Zipped -Unzipped:$Unzipped `
+            -Mirrored:$Mirrored -NotMirrored:$NotMirrored `
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
             -FullName:$FullName `
