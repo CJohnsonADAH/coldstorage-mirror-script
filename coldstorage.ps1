@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2023.0519
+@version 2023.0621
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -340,7 +340,9 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false,
 
         $BagItPy = ( Get-PathToBagIt | Join-Path -ChildPath "bagit.py" )
 	    $Python = Get-ExeForPython
-        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" . 2>&1 )
+
+        # Execute bagit.py under python interpreter; capture stderr output and send it to $Progress if we have that
+        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" . 2>&1 |% { "$_" -replace "[`r`n]","" } |% { If ( $Progress ) { $Progress.Update( ( "Bagging {0}: {1}" -f $BagDir,"$_" ), 0, $null ) } ; "$_" } )
         $NotOK = $LASTEXITCODE
 
         If ( $NotOK -gt 0 ) {
@@ -350,7 +352,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false,
         Else {
             
             # Send the bagit.py console output to Verbose stream
-            $Output 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
+            $Output 2>&1 |% { "$_" -replace "[`r`n]","" } |% { If ( $Progress ) { $Progress.Update( ( "Bagging {0}: {1}" -f $BagDir,"$_" ), 0, $null ) } ; $_ | Write-Verbose }
             
             # If requested, pass thru the successfully bagged directory to Output stream
             If ( $PassThru ) {
