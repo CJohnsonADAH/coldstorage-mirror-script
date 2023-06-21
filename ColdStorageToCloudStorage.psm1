@@ -611,7 +611,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                 If ( $sFile.Length -ge 260 ) {
                     $sFile = ( '\\?\{0}' -f $sFile )
                 }
-
+                
                 & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
             }
             Else {

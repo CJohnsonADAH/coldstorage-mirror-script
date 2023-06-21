@@ -352,6 +352,7 @@ Export-ModuleMember -Function Get-ItemColdStorageProps
 Export-ModuleMember -Function Ping-Dependency
 Export-ModuleMember -Function Ping-DependencyModule
 
+Export-ModuleMember -Function Get-PathToDependency
 Export-ModuleMember -Function Get-PathToClamAV
 Export-ModuleMember -Function Get-PathToBagIt
 Export-ModuleMember -Function Get-PathTo7z
