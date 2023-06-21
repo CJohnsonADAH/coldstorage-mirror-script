@@ -199,8 +199,9 @@ Process {
             $Result = $null
 
             If ( $oZip.Count -gt 0 ) {
-                $sArchiveHashed = $oZip.FullName
-                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$false; "Validated"=$Validated; "Compressed"=$null }
+                $asArchiveHashed = ( $oZip | Sort-Object -Property LastWriteTime -Descending |% { $oZip.FullName } )
+                $sArchiveHashed = ( $asArchiveHashed | Select-Object -First 1 )
+                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"=$sArchiveHashed; "Zips"=$asArchiveHashed; "New"=$false; "Validated"=$Validated; "Compressed"=$null }
                 $Progress.Update( "Located archive with MD5 Checksum", 2 )
             }
             Else {

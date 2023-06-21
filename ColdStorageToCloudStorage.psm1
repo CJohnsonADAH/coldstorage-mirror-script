@@ -577,7 +577,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, $S
     Process {
         $aItems = ( $File | Get-ItemPackageZippedBag -Recurse:$Recurse )
         If ( $aItems ) {
-            $aItems
+            $aItems | Sort-Object -Unique -Property Name
         }
         ElseIf ( $ShowWarnings ) {
             ( "[{0}{1}] Could not find preservation package: {2}" -f $ShowWarnings,$( If ( $Recurse ) { " -Recurse" } Else { "" } ),$File ) | Write-Warning
