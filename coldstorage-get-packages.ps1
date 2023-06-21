@@ -34,6 +34,7 @@ param (
     [switch] $Repository = $true,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
+    [switch] $At = $false,
     [switch] $NoScan = $false,
     [switch] $NoValidate = $false,
     [switch] $Force = $false,
@@ -968,6 +969,7 @@ Param (
     [switch] $Only,
     [switch] $FullName,
     [switch] $Report,
+    [switch] $At,
     [string] $Output
 )
 
@@ -978,7 +980,7 @@ Param (
         $CheckMirrored = ( $Mirrored -or $NotMirrored )
         $CheckCloud = ( $InCloud -or $NotInCloud )
 
-        $Location | Get-ChildItemPackages -Recurse:$Recurse -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud |
+        $Location | Get-ChildItemPackages -Recurse:$Recurse -At:$At -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud |
             Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -Mirrored:$Mirrored -NotMirrored:$NotMirrored -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
             Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -FullName:$FullName -Context:$Location -Timestamp:$CurDate
     }
@@ -1062,13 +1064,13 @@ Param ( [String] $Output="" )
 }
 
 Function Get-CSPackagesToBag {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false, [switch] $PassThru=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Recurse=$false, [switch] $At=$false, [switch] $PassThru=$false )
 
     Begin { }
 
     Process {
         If ( $Recurse ) {
-            $Item | Get-ChildItemPackages -Recurse:$Recurse |? { ( ( $PassThru ) -Or ( -Not $_.CSPackageBagged ) ) }
+            $Item | Get-ChildItemPackages -Recurse:$Recurse -At:$At |? { ( ( $PassThru ) -Or ( -Not $_.CSPackageBagged ) ) }
         }
         Else {
             $Item
@@ -1167,6 +1169,7 @@ Else {
             -Only:$Only `
             -FullName:$FullName `
             -Report:$true `
+            -At:$At `
             -Output:$Output
         
     }
@@ -1234,6 +1237,7 @@ Else {
             -Only:$Only `
             -FullName:$FullName `
             -Report:$Report `
+            -At:$At `
             -Output:$Output
         
 

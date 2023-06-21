@@ -36,6 +36,7 @@ param (
     [switch] $Repository = $true,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
+    [switch] $At = $false,
     [switch] $NoScan = $false,
     [switch] $NoValidate = $false,
     [switch] $Bucket = $false,

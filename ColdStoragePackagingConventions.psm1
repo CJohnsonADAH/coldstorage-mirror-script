@@ -866,6 +866,7 @@ Function Get-ChildItemPackages {
 Param (
     [Parameter(ValueFromPipeline=$true)] $File,
     [switch] $Recurse=$false,
+    [switch] $At=$false,
     [switch] $CheckZipped=$false,
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
@@ -881,8 +882,7 @@ Param (
         If ( $oFile -eq $null ) {
             Write-Error ( "No such item: {0}" -f $File )
         }
-        ElseIf ( Test-BagItFormattedDirectory -File $oFile ) {
-
+        ElseIf ( $At -or ( Test-BagItFormattedDirectory -File $oFile ) ) {
             Get-Item -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
 
         }

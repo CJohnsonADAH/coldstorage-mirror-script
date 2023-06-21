@@ -91,7 +91,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $LiteralPath )
 }
 
 Function Get-ColdStorageRepositories {
-Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false )
+Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false, [switch] $Passive=$false )
 
     Begin { 
         $GroupMeta = ( Get-ColdStorageSettings -Name "Repository-Groups" )
@@ -142,7 +142,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                 # 2. Let's fill in Trashcan if not declined
                 If ( -Not $NoTrash ) {
                     If ( $Row.Trashcan -eq $null ) {
-                        $Row | Add-Member -MemberType "NoteProperty" -Name "Trashcan" -Value ( $Repository | Get-ColdStorageTrashLocation )
+                        $Row | Add-Member -MemberType "NoteProperty" -Name "Trashcan" -Value ( $Repository | Get-ColdStorageTrashLocation -Passive:$Passive )
                     }
                 }
 
@@ -159,7 +159,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
             }
             Else {
                 
-                $taggedOut = ( $Repository | Get-ColdStorageRepositories  -Groups:$Groups -Tag -NoTrash )
+                $taggedOut = ( $Repository | Get-ColdStorageRepositories  -Groups:$Groups -Tag -NoTrash -Passive:$Passive )
                 $filteredOut = @( $taggedOut.Collection, $taggedOut.Locations.Reflection, $taggedOut.Locations.Original, $taggedOut.Locations.ColdStorage )
 
             }
@@ -177,7 +177,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                 $Intersect = ( $Groups |? { $Row.Groups -icontains $_ } )
                 If ( $Intersect ) {
                     ( "FILTERED IN ({0}): {1}" -f ($Intersect -join ", "), $Key ) | Write-Debug
-                    $Key | Get-ColdStorageRepositories -Groups:$Intersect -Tag:$Tag -NoTrash:$NoTrash
+                    $Key | Get-ColdStorageRepositories -Groups:$Intersect -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive
                 }
                 Else {
                     ( "FILTERED OUT: {0}" -f $Key) | Write-Debug
@@ -188,7 +188,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
         Else {
             $out = @{ }
             $Repositories = ( $MirrorsMeta | Get-Member -MemberType NoteProperty |% { $_.Name } )
-            $Repositories |% { $Key = $_; $out[$Key] = ( $Key | Get-ColdStorageRepositories -Groups:$Groups -Tag:$Tag -NoTrash:$NoTrash ) }
+            $Repositories |% { $Key = $_; $out[$Key] = ( $Key | Get-ColdStorageRepositories -Groups:$Groups -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive ) }
             $out | Write-Output
         }
 
@@ -282,11 +282,11 @@ Param (
 }
 
 Function Get-ColdStorageTrashLocation {
-Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=$false, $Mirrors=$null )
+Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=$false, $Mirrors=$null, [switch] $Passive=$false )
 
     Begin {
         If ( $Mirrors -eq $null ) {
-            $aMirrors = ( Get-ColdStorageRepositories -NoTrash )
+            $aMirrors = ( Get-ColdStorageRepositories -NoTrash -Passive:$Passive )
         }
         Else {
             $aMirrors = $Mirrors
@@ -309,7 +309,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=
                     $Stamp = ( Get-Date -UFormat "%Y-%m-%d" | Get-FileNameSlug -Replace "-" )
                     $TrashLocation = ( $TrashLocation | Join-Path -ChildPath $Stamp )
                     If ( -Not ( Test-Path -LiteralPath $TrashLocation ) ) {
-                        $TrashLocation = ( New-Item -ItemType Directory $TrashLocation ).FullName
+                        If ( -Not $Passive ) {
+                            $TrashLocation = ( New-Item -ItemType Directory $TrashLocation ).FullName
+                        }
                     }
                 }
 
@@ -331,7 +333,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=
 Function Get-FileRepositoryCandidates {
 Param ( $Key, [switch] $UNC=$false )
 
-    $mirrors = ( Get-ColdStorageRepositories )
+    $mirrors = ( Get-ColdStorageRepositories -Passive )
 
     $repo = $mirrors[$Key][1..2]
     $aliases = $RepositoryAliases[$Key]
@@ -357,7 +359,7 @@ Param ( $Key, [switch] $UNC=$false )
 Function Get-FileRepository {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Slug=$false )
 
-Begin { $mirrors = ( Get-ColdStorageRepositories ) }
+Begin { $mirrors = ( Get-ColdStorageRepositories -Passive ) }
 
 Process {
     
@@ -692,9 +694,9 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
 }
 
 Function Get-MirrorMatchedItem {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, $Repositories=$null )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, [switch] $Passive=$false, $Repositories=$null )
 
-Begin { $mirrors = ( Get-ColdStorageRepositories -Tag ) }
+Begin { $mirrors = ( Get-ColdStorageRepositories -NoTrash -Tag ) }
 
 Process {
     
@@ -706,6 +708,11 @@ Process {
     If ( $Trashcan ) { $Range += , "Trashcan" }
 
     If ( $Range.Count -eq 0 ) { $Range = ( "Original", "Reflection" ); $Implicit = $true }
+
+    If ( "Trashcan" -in $Range ) {
+        Write-Debug ( "[Get-MirrorMatchedItem] Traschan Location requested" )
+        $mirrors = ( Get-ColdStorageRepositories -Tag -Passive:$Passive )
+    }
 
     Write-Debug ( "[Get-MirrorMatchedItem] Match {0}" -f $( If ( $File -is [String] ) { $File } Else { $File.FullName } ) )
     $oRepository = ( $File | Get-FileRepositoryProps )
@@ -756,7 +763,7 @@ Process {
         $Container = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
 
         $There |% {
-
+            
             $Aspect = $_.Name
             $Location =  $_.Value
             If ( Test-Path -LiteralPath $Location ) {
