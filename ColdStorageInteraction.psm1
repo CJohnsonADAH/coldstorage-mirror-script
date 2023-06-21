@@ -193,6 +193,33 @@ Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $V
 
 }
 
+Function Read-YesFromHost {
+Param ( [string] $Prompt, $DefaultAction="" )
+
+        $Prompt | Write-Host -ForegroundColor Yellow
+        Do {
+            $InKey = ( Read-Host -Prompt '[Y]es [N]o (default is "Y")' )
+        } While ( ( -Not ( $InKey -match '^[YyNn].*$' ) ) -and ( -Not ( $InKey -match '^\s*$' ) ) )
+        
+        If ( $InKey -match '^\s*$' ) {
+            ( 'DEFAULT SELECTION - {0} ... (5 seconds to cancel)' -f $DefaultAction )
+            $T0 = ( Get-Date ) ; $keyinfo = $null
+            Do {
+                $TDiff = ( Get-Date ) - $T0
+                Write-Progress -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( 5.0 - $TDiff.TotalSeconds ) ) -PercentComplete ( 100 * $TDiff.TotalSeconds / 5.5 )
+                If ( [Console]::KeyAvailable ) { $keyinfo = [Console]::ReadKey($true) }
+            } While ( ( $TDiff.TotalSeconds -lt 5.5 ) -and ( $keyinfo -eq $null ) )
+                
+            If ( ( $keyinfo -ne $null ) -and ( -Not ( $keyinfo.KeyChar -match "[Yy`r`n]" ) ) ) {
+                $InKey = 'N'
+            }
+            Else {
+                $InKey = 'Y'
+            }
+        }
+
+        ( $InKey -match '^[Yy].*$' )
+}
 
 Export-ModuleMember -Function Write-BleepBloop
 Export-ModuleMember -Function Select-UserApproved
@@ -200,3 +227,5 @@ Export-ModuleMember -Function Select-UserApproved
 Export-ModuleMember -Function Get-BaggedItemNoticeMessage
 Export-ModuleMember -Function Write-BaggedItemNoticeMessage
 Export-ModuleMember -Function Write-UnbaggedItemNoticeMessage
+
+Export-ModuleMember -Function Read-YesFromHost
