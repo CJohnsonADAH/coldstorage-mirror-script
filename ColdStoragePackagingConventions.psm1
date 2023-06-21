@@ -824,9 +824,19 @@ Param (
                 If ( $aZipped.Name -and $CheckCloud ) {
                     $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
                     $aListing = ( $oListing | Get-TablesMerged )
-                    $bCloudCopy = ( $aListing.ContainsKey($aZipped.Name) )
-                    If ( $bCloudCopy ) {
-                        $oCloudCopy = $aListing[ $aZipped.Name ]
+                    
+                    $aZipped |% {
+                        $itemZipped = $_
+                        $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $itemZipped.Name ) ) )
+                        If ( $aListing.ContainsKey( $itemZipped.Name ) ) {
+                            $Copy = $aListing[ $itemZipped.Name ]
+                            If ( $oCloudCopy -eq $null ) {
+                                $oCloudCopy = $Copy
+                            }
+                            Else {
+                                $oCloudCopy = @( $oCloudCopy ) + @( $Copy )
+                            }
+                        }
                     }
                 }
             }
