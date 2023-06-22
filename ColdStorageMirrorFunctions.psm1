@@ -515,7 +515,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
 
                 If ( -Not $DoTheMove ) {
                     If ( -Not $Batch ) {
-                        $DoTheMove = ( Read-YesFromHost -Prompt ( "Move {0} contents into BagIt data payload directory?" ) )
+                        $DoTheMove = ( Read-YesFromHost -Prompt ( "Move {0} contents into BagIt data payload directory?" -f "${To}" ) )
                     }
                 }
 
