@@ -339,18 +339,20 @@ Param ( $Key, [switch] $UNC=$false )
     $aliases = $RepositoryAliases[$Key]
 
     ( $repo + $aliases) |% {
-        $sTestRepo = ( $_ ).ToString()
-        If ( $oTestRepo = Get-FileObject -File $sTestRepo ) {
+        If ( $_ ) {
+            $sTestRepo = ( $_ ).ToString()
+            If ( $oTestRepo = Get-FileObject -File $sTestRepo ) {
 
-            $sTestRepo # > stdout
+                $sTestRepo # > stdout
 
-            If ( -Not ( $UNC ) ) {
-                $sLocalTestRepo = ( $oTestRepo | Get-LocalPathFromUNC ).FullName
-                If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
-                    $sLocalTestRepo # > stdout
+                If ( -Not ( $UNC ) ) {
+                    $sLocalTestRepo = ( $oTestRepo | Get-LocalPathFromUNC ).FullName
+                    If ( $sTestRepo.ToUpper() -ne $sLocalTestRepo.ToUpper() ) {
+                        $sLocalTestRepo # > stdout
+                    }
                 }
-            }
 
+            }
         }
     }
 
@@ -466,14 +468,34 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 }
 
 Function Get-FileRepositoryPrefix {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Fallback=$false )
 
     Begin { }
 
     Process {
         $Props = ( $File | Get-FileRepositoryProps )
-        If ( $Props ) {
+        If ( ( $Props ) -and ( $Props.Prefix ) ) {
             $Props.Prefix
+        }
+        ElseIf ( $Fallback ) {
+            $oFile = Get-FileObject -File $File
+
+            # Fully qualified file system path to the containing parent
+            $sFilePath = ( Get-ItemFileSystemParent $oFile ).FullName
+            
+            # Fully qualified UNC path to the containing parent
+            $oFileUNCPath = ( $sFilePath | Get-UNCPathResolved -ReturnObject )
+            $sFileUNCPath = $oFileUNCPath.FullName
+
+            # Slice off the root directory up to the node name of the repository container
+            $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
+            $sRepository = $oRepository.FullName
+            $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
+
+            If ( $sRepositoryNode ) {
+                "${sRepositoryNode}"
+            }
+
         }
     }
 

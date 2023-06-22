@@ -96,8 +96,8 @@ Process {
     # Slice off the root directory up to the node name of the repository container
     $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
     $sRepository = $oRepository.FullName
-    $sRepositoryNode = ( $oRepository.Parent.Name, $oRepository.Name ) -join "-"
-
+    $sRepositoryNode = ( $File | Get-FileRepositoryPrefix -Fallback )
+    
     $sFileName = $oFile.Name
 
     $reUNCRepo = [Regex]::Escape($sRepository)
