@@ -2044,6 +2044,7 @@ ElseIf ( $Version ) {
     Get-CSScriptVersion -Verb:$Verb -Words:$Words -Flags:$MyInvocation.BoundParameters | Write-Output
 }
 Else {
+
     $t0 = date
     $sCommandWithVerb = "${sCommandWithVerb} ${Verb}"
     $global:gCSCommandWithVerb = $sCommandWithVerb

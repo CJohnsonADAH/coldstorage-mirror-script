@@ -412,45 +412,61 @@ param (
 
 function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false) {
 
+    $CSBagIt= $( ColdStorage-Script-Dir -File "coldstorage-bagit.ps1" )
+
     Push-Location $DIRNAME
 
-    $BagIt = Get-PathToBagIt
-    $BagItPy = ( $BagIt | Join-Path -ChildPath "bagit.py" )
-	$Python = Get-ExeForPython
+    $LogFile = $null
+    $LogDirItem = $null
 
+    $LogDir = ( Join-Path -Path "${DIRNAME}" -ChildPath "logs" )
+    If ( Test-Path -LiteralPath $LogDir ) {
+        $LogDirItem = ( Get-Item -LiteralPath $LogDir -Force )
+    }
+    Else {
+        $LogDirItem = ( New-Item -ItemType Directory -Path $LogDir )
+    }
+    If ( $LogDirItem ) {
+        $Timestamp = @( ( Get-Date -Format 'yyyyMMdd' ), ( Get-Date -Format 'HHmmss' ) )
+        $LogFile = ( Join-Path -Path $LogDirItem.FullName -ChildPath ( "validation-{0}-{1}-{2}.txt" -f "bagit",$Timestamp[0], $Timestamp[1] ) )
+    }
+    
     If ( -Not ( -Not ( ( $Skip |% { $_.ToLower().Trim() } ) | Select-String -Pattern "^bagit$" ) ) ) {
         "BagIt Validation SKIPPED for path ${DIRNAME}" | Write-Verbose -InformationAction Continue
         "OK-BagIt: ${DIRNAME} (skipped)" # > stdout
     }
-    ElseIf ( $Verbose ) {
-        "bagit.py --validate ${DIRNAME}" | Write-Verbose
-        & $( Get-ExeForPython ) "${BagItPy}" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
-        $NotOK = $LastExitCode
-
-        if ( $NotOK -gt 0 ) {
-            $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
-            
-            "ERR-BagIt: ${DIRNAME}" | Write-Warning
-
-            $ErrorView = $OldErrorView
-        } else {
-            "OK-BagIt: ${DIRNAME}" # > stdout
-        }
-
-    }
     Else {
-        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" --validate . 2>&1 )
+        If ( $Verbose ) {
+            "bagit.py --validate ${DIRNAME}" | Write-Verbose
+        }
+        [PSCustomObject] @{ "Location"=( ( Get-Location ).Path ) } | ConvertTo-Json -Compress |% { "! JSON[Start]:`t $_" | Out-File -LiteralPath "${LogFile}" -Append -Encoding UTF8 }
+
+        $Output = @( )
+        & "${CSBagIt}" --validate . -Progress -Stdout -DisplayResult |% {
+            $Output = @( $Output ) + @( "$_" -split "[`r`n]+" )
+            If ( $Verbose ) {
+                ( "$_" -split "[`r`n]+" ) | Write-Verbose
+            }
+            "$_" | Out-File -LiteralPath "${LogFile}" -Append -Encoding UTF8
+        }
         $NotOK = $LastExitCode
-        if ( $NotOK -gt 0 ) {
+
+        [PSCustomObject] @{ "Exit"=$NotOK } | ConvertTo-Json -Compress |% { "! JSON[Exit]:`t $_" | Out-File -LiteralPath "${LogFile}" -Append -Encoding UTF8 }
+
+        If ( $NotOK -gt 0 ) {
             $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
             
             "ERR-BagIt: ${DIRNAME}" | Write-Warning
-            $Output |% { "$_" -replace "[`r`n]","" } | Write-Warning
+            If ( -Not $Verbose ) {
+                $Output | Write-Warning
+            }
 
             $ErrorView = $OldErrorView
-        } else {
+        }
+        Else {
             "OK-BagIt: ${DIRNAME}" # > stdout
         }
+
     }
 
     Pop-Location
