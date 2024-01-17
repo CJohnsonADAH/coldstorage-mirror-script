@@ -116,7 +116,7 @@ End { }
 # WAS/IS: Get-Zipped-Bag-Of-Bag/Get-ZippedBagOfUnzippedBag
 Function Get-ZippedBagOfUnzippedBag {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $BinaryOnly=$false )
 
 Begin { }
 
@@ -126,7 +126,12 @@ Process {
         $Containers = ( $oFile.FullName | Get-ZippedBagsContainer -All )
         $Prefix = ( Get-ZippedBagNamePrefix -File $oFile.FullName )
         If ( $Containers.FullName -ne $null ) {
-            $SearchPaths = ( $Containers.FullName | Join-Path -ChildPath "${Prefix}_z*_md5_*.zip" )
+            $ChildWildCard = ( "{0}_z*_md5_*.zip" -f "${Prefix}" )
+            $ChildWildCardJson = ( "{0}.json" -f "${ChildWildCard}" )
+            $SearchPaths = ( $Containers.FullName | Join-Path -ChildPath $ChildWildCard )
+            If ( -Not $BinaryOnly ) {
+                $SearchPaths = @( $SearchPaths ) + @( ( $Containers.FullName | Join-Path -ChildPath $ChildWildCardJson ) )
+            }
         }
         Else {
             $SearchPaths = @()
@@ -217,7 +222,13 @@ Process {
     $Locations |% {
         $Loc = $_
         If ( $KeepOn ) {
-            $oZipDir = ( Get-ChildItem "ZIP" -LiteralPath $Loc.FullName )
+            If ( $Loc.FullName -ne $null ) {
+                $oZipDir = ( Get-ChildItem "ZIP" -LiteralPath $Loc.FullName )
+            }
+            Else {
+                $oZipDir = ( Get-Item -LiteralPath "." )
+            }
+
             $oZipDir
             $KeepOn = ( $All -Or ( -Not $oZipDir ) )
         }

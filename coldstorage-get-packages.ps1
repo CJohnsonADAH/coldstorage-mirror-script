@@ -218,25 +218,6 @@ Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false, [switch] $Only=
     }
 }
 
-Function Get-PluralizedText {
-Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singular, $Plural="{0}s" )
-
-    Begin { }
-
-    Process {
-        $Pluralized = $( $Plural -f $Singular )
-        If ( $N -eq 1 ) {
-            $Singular
-        }
-        Else {
-            $Pluralized
-        }
-    }
-
-    End { }
-
-}
-
 Function Invoke-ColdStorageCheckFile {
 
     [CmdletBinding()]
@@ -408,69 +389,6 @@ param (
             Write-BleepBloop
         }
     }
-}
-
-function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false) {
-
-    $CSBagIt= $( ColdStorage-Script-Dir -File "coldstorage-bagit.ps1" )
-
-    Push-Location $DIRNAME
-
-    $LogFile = $null
-    $LogDirItem = $null
-
-    $LogDir = ( Join-Path -Path "${DIRNAME}" -ChildPath "logs" )
-    If ( Test-Path -LiteralPath $LogDir ) {
-        $LogDirItem = ( Get-Item -LiteralPath $LogDir -Force )
-    }
-    Else {
-        $LogDirItem = ( New-Item -ItemType Directory -Path $LogDir )
-    }
-    If ( $LogDirItem ) {
-        $Timestamp = @( ( Get-Date -Format 'yyyyMMdd' ), ( Get-Date -Format 'HHmmss' ) )
-        $LogFile = ( Join-Path -Path $LogDirItem.FullName -ChildPath ( "validation-{0}-{1}-{2}.txt" -f "bagit",$Timestamp[0], $Timestamp[1] ) )
-    }
-    
-    If ( -Not ( -Not ( ( $Skip |% { $_.ToLower().Trim() } ) | Select-String -Pattern "^bagit$" ) ) ) {
-        "BagIt Validation SKIPPED for path ${DIRNAME}" | Write-Verbose -InformationAction Continue
-        "OK-BagIt: ${DIRNAME} (skipped)" # > stdout
-    }
-    Else {
-        If ( $Verbose ) {
-            "bagit.py --validate ${DIRNAME}" | Write-Verbose
-        }
-        [PSCustomObject] @{ "Location"=( ( Get-Location ).Path ) } | ConvertTo-Json -Compress |% { "! JSON[Start]:`t $_" | Out-File -LiteralPath "${LogFile}" -Append -Encoding UTF8 }
-
-        $Output = @( )
-        & "${CSBagIt}" --validate . -Progress -Stdout -DisplayResult |% {
-            $Output = @( $Output ) + @( "$_" -split "[`r`n]+" )
-            If ( $Verbose ) {
-                ( "$_" -split "[`r`n]+" ) | Write-Verbose
-            }
-            "$_" | Out-File -LiteralPath "${LogFile}" -Append -Encoding UTF8
-        }
-        $NotOK = $LastExitCode
-
-        [PSCustomObject] @{ "Exit"=$NotOK } | ConvertTo-Json -Compress |% { "! JSON[Exit]:`t $_" | Out-File -LiteralPath "${LogFile}" -Append -Encoding UTF8 }
-
-        If ( $NotOK -gt 0 ) {
-            $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
-            
-            "ERR-BagIt: ${DIRNAME}" | Write-Warning
-            If ( -Not $Verbose ) {
-                $Output | Write-Warning
-            }
-
-            $ErrorView = $OldErrorView
-        }
-        Else {
-            "OK-BagIt: ${DIRNAME}" # > stdout
-        }
-
-    }
-
-    Pop-Location
-
 }
 
 Function Get-CSItemValidation {

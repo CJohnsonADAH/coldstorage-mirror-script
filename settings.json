@@ -68,5 +68,8 @@
 			"ColdStorage": "$Reflection",
 			"Groups": [ "NP", "Working" ]
 		}
+    },
+    "MirrorWildcards": {
+        "Bidi": [ "./logs", "./docs", "./bagged-*", "./metadata", "./.metadata" ]
     }
 }

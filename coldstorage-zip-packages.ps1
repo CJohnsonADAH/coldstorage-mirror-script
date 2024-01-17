@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation Packages compression script
-@version 2022.0901
+@version 2024.0102
 
 .PARAMETER Skip
 coldstorage zip -Skip allows you to bypass potentially time-consuming steps in the process, like clamav scans, bagit validation, and zip checksum validation. Usually you shouldn't. They're important.
@@ -38,7 +38,8 @@ Param (
     [switch] $Bork = $false,
     [switch] $WhatIf = $false,
     [switch] $Version = $false,
-    [Parameter(ValueFromRemainingArguments=$true, Position=0)] $Words,
+    [Parameter(Position=0)] $Verb,
+    [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
 )
 
@@ -170,6 +171,17 @@ Function Get-CSGPCommandWithVerb {
     $global:gCSGPCommandWithVerb
 }
 
+Function Get-CSScriptVersion {
+Param ( [string] $Verb="", $Words=@( ), $Flags=@{ } )
+
+    $oHelpMe = ( Get-Help ${global:gCSScriptPath} )
+    $ver = ( $oHelpMe.Synopsis -split "@" |% { If ( $_ -match '^version\b' ) { $_ } } )
+    If ( $ver.Count -gt 0 ) { Write-Output "${global:gCSScriptName} ${ver}" }
+    Else { $oHelpMe }
+
+}
+
+
 #############################################################################################################
 ## COMMAND FUNCTIONS ########################################################################################
 #############################################################################################################
@@ -188,7 +200,7 @@ Process {
         $oFile = Get-FileObject -File $File
         $sFile = Get-FileLiteralPath -File $File
 
-        $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip )
+        $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip -NoLog )
 
         $Progress.Update( "Validated bagged preservation package" )
         
@@ -270,26 +282,6 @@ End { }
 
 }
 
-
-Function Get-PluralizedText {
-Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singular, $Plural="{0}s" )
-
-    Begin { }
-
-    Process {
-        $Pluralized = $( $Plural -f $Singular )
-        If ( $N -eq 1 ) {
-            $Singular
-        }
-        Else {
-            $Pluralized
-        }
-    }
-
-    End { }
-
-}
-
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
 
@@ -312,23 +304,59 @@ Else {
         $global:gScriptContextName = $sCommandWithVerb
     }
 
-    $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
-    $allObjects |% {
-        $sFile = Get-FileLiteralPath -File $_
-        If ( Test-BagItFormattedDirectory -File $sFile ) {
-            $_ | Compress-CSBaggedPackage -Skip:$Skip
+    If ( $Verb -iin ( "test", "uncache" ) ) {
+        $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
+    }
+    Else {
+        $allObjects = ( @( $Verb | Where { $_ -ne $null } ) + @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
+        $Verb = "compress"
+    }
+
+    If ( $Verb -ieq "uncache" ) {
+        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $allObjects | & "${CSGetPackages}" -Items -Zipped -InCloud | ForEach-Object {
+            $pack = $_ 
+            $_ | Write-Warning
+            $pack.CSPackageZip | Select-Object -First 1 | ForEach-Object {
+                $ZipName = $_.FullName 
+                If ( $ZipName -like '*.json' ) {
+                    $NewName = $ZipName
+                }
+                Else {
+                    $NewName = ( "{0}.json" -f $ZipName )
+                }
+
+                If ( $ZipName -ine $NewName ) {
+                    $pack.CloudCopy | ConvertTo-Json | Out-File -Encoding utf8 -FilePath $ZipName
+                    Move-Item $ZipName $NewName -Verbose
+                }
+                Else {
+                    ( "JSON: {0}" -f $ZipName ) | Write-Warning
+                }
+
+                $pack.CloudCopy
+            }
         }
-        ElseIf ( Test-LooseFile -File $_ ) {
-            $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
-            If ($oBag) {
-                $oBag | Compress-CSBaggedPackage -Skip:$Skip
+        #|% { $pack = $_ ; $pack.CSPackageZip |% { $ZipName = $_.FullName ; If ( $ZipName -like '*.json' ) { $NewName = $ZipName } Else { $ZipName | Write-Warning ; $NewName = ( "{0}.json" -f $ZipName ) ; $pack.CloudCopy | ConvertTo-Json > $ZipName ; Move-Item $ZipName $NewName -Verbose } } }
+    }
+    ElseIf ( $Verb -eq "compress" ) {
+        $allObjects |% {
+            $sFile = Get-FileLiteralPath -File $_
+            If ( Test-BagItFormattedDirectory -File $sFile ) {
+                $_ | Compress-CSBaggedPackage -Skip:$Skip
+            }
+            ElseIf ( Test-LooseFile -File $_ ) {
+                $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
+                If ($oBag) {
+                    $oBag | Compress-CSBaggedPackage -Skip:$Skip
+                }
+                Else {
+                    Write-Warning "${sFile} is a loose file not a BagIt-formatted directory."
+                }
             }
             Else {
-                Write-Warning "${sFile} is a loose file not a BagIt-formatted directory."
+                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Compress-CSBaggedPackage -Skip:$Skip
             }
-        }
-        Else {
-            $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Compress-CSBaggedPackage -Skip:$Skip
         }
     }
 }

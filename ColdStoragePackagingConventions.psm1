@@ -149,18 +149,24 @@ param (
 #############################################################################################################
 
 Function Test-IndexedDirectory {
-Param( $File )
+Param( $File, [switch] $UnbaggedOnly=$false )
 
     $FileObject = Get-FileObject($File)
     $FilePath = $FileObject.FullName
 
     $result = $false
-    if ( Test-Path -LiteralPath "${FilePath}" ) {
-        $NewFilePath = "${FilePath}\index.html"
-        $result = Test-Path -LiteralPath "${NewFilePath}"
+    If ( Test-Path -LiteralPath "${FilePath}" ) {
+        $NewFilePath = ( Join-Path "${FilePath}" -ChildPath "index.html" )
+        $result = ( Test-Path -LiteralPath "${NewFilePath}" )
+    }
+    
+    If ( $UnbaggedOnly ) {
+        $hasBagItPayloadName = ( $FileObject.Name -eq "data" )
+        $result = ( $result -and ( -Not ( $hasBagItPayloadName -and ( Test-BaggedIndexedDirectory -File:$FileObject.Parent ) ) ) )
     }
     
     $result
+
 }
 
 Function Test-BaggedIndexedDirectory {
@@ -754,7 +760,7 @@ Param (
                 }
             }
         }
-        ElseIf ( Test-IndexedDirectory -File $File ) {
+        ElseIf ( Test-IndexedDirectory -File $File -UnbaggedOnly:$Ascend ) {
             $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
         }
         ElseIf ( Test-LooseFile -File $File ) {
@@ -772,15 +778,7 @@ Param (
         }
         ElseIf ( $Ascend ) {
             $aWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )
-            $Parent = ( $File | Get-ItemFileSystemParent )
-
-            If ( $Parent ) {                
-                $Top = $( If ( $AscendTop ) { $AscendTop } Else { $File | Get-FileRepositoryLocation } )
-                ( "ASCEND UP TO DIRECTORY: {0} -> {1} | {2}" -f $File.FullName,$Parent.FullName,$Top.FullName ) | Write-Verbose
-                If ( $Parent.FullName -ne $Top.FullName ) {
-                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
-                }
-            }
+            $aContents = @( )
         }
         Else {
             $aContents = @( )
@@ -793,6 +791,7 @@ Param (
 
         If ( $aContents.Count -gt 0 ) {
             $Package = $File
+            #$Package.FullName | Write-Warning
             $mContents = ( $aContents | Measure-Object -Sum Length )
             #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
 
@@ -827,9 +826,10 @@ Param (
                     
                     $aZipped |% {
                         $itemZipped = $_
-                        $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $itemZipped.Name ) ) )
-                        If ( $aListing.ContainsKey( $itemZipped.Name ) ) {
-                            $Copy = $aListing[ $itemZipped.Name ]
+                        $itemZippedName = ( $itemZipped.Name -replace "[.]json$","" )
+                        $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $itemZippedName ) ) )
+                        If ( $aListing.ContainsKey( $itemZippedName ) ) {
+                            $Copy = $aListing[ $itemZippedName ]
                             If ( $oCloudCopy -eq $null ) {
                                 $oCloudCopy = $Copy
                             }
@@ -852,6 +852,17 @@ Param (
             }
 
             $Package | Write-Output
+        }
+        ElseIf ( $Ascend ) {
+            $Parent = ( $File | Get-ItemFileSystemParent )
+
+            If ( $Parent ) {                
+                $Top = $( If ( $AscendTop ) { $AscendTop } Else { $File | Get-FileRepositoryLocation } )
+                ( "ASCEND UP TO DIRECTORY: {0} -> {1} | {2}" -f $File.FullName,$Parent.FullName,$Top.FullName ) | Write-Verbose
+                If ( $Parent.FullName -ne $Top.FullName ) {
+                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
+                }
+            }
         }
 
         Write-Debug ( "Exited Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )

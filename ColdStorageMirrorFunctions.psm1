@@ -15,6 +15,7 @@ Import-Module -Verbose:$false BitsTransfer
 Import-Module -Verbose:$false Posh-SSH
 
 # Depdencies - Script
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageRepositoryLocations.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
@@ -36,79 +37,6 @@ Param ( $Command=$null, $File=$null )
     }
 
     $Path
-}
-
-#############################################################################################################
-## PRIVATE METHODS ##########################################################################################
-#############################################################################################################
-
-Function Get-PluralizedText {
-Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singular, $Plural="{0}s" )
-
-    Begin { }
-
-    Process {
-        $Pluralized = $( $Plural -f $Singular )
-        If ( $N -eq 1 ) {
-            $Singular
-        }
-        Else {
-            $Pluralized
-        }
-    }
-
-    End { }
-
-}
-
-Function Write-RoboCopyOutput {
-Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [switch] $Epilog=$false, [switch] $Echo=$false )
-
-    Begin { $Status = $null; $pct = 0.0; $Sect = 0; }
-
-    Process {
-        If ( "${Line}" ) {
-            If ( "${Line}" -match "^\s*([0-9.]+)%\s*$" ) {
-                $pct = [Decimal] $Matches[1]
-            }
-            Else {
-                $pct = 0.0
-                $Status = ( "${Line}" -replace "\t","    " )
-                $Status = ( "${Status}" -replace "\s"," " )
-            }
-            Write-Progress -Activity ( "Robocopy.exe {0} {1}" -f "${Source}","${Destination}" ) -Status "${Status}" -PercentComplete $pct
-
-        }
-
-        If ( "${Line}" -match "^\s*-+\s*$" ) {
-            $Sect = $Sect + 1
-        }
-
-        If ( $Echo ) {
-            "${Line}"
-        }
-
-        If ( $Prolog -Or $Epilog ) {
-            If ( $Prolog -and ( $Sect -le 2 ) ) {
-                "${Line}" | Write-Host
-            }
-            ElseIf ( "${Line}" -match "^[0-9/]+\s+[0-9:]+\s+(ERROR|WARNING)\s" ) {
-                "${Line}" | Write-Host -ForegroundColor Red
-            }
-            ElseIf ( $Epilog -and ( $sect -gt 3 ) ) {
-                "${Line}" | Write-Host
-            }
-             
-        }
-        ElseIf ( -Not $Echo ) {
-            If ( "${Line}" -match "^[0-9/]+\s+[0-9:]+\s+(ERROR|WARNING)\s" ) {
-                "${Line}" | Write-Host -ForegroundColor Red
-            }
-        }
-
-    }
-
-    End { }
 }
 
 #############################################################################################################
@@ -264,6 +192,42 @@ Param ( $From, $To, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnl
     }
 }
 
+Function Copy-MirroredFilesWithMetadata {
+Param ($From, $To, [switch] $Batch=$false, [switch] $RoboCopy=$false, $DiffLevel=1, $Depth=0, $Progress=$null)
+
+    $sStatus = "*.*"
+
+    $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
+    $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe -And ( Test-Path -LiteralPath "${From}" -PathType Container ) )
+    If ( $UseRoboCopy ) {
+
+        $Progress.Update( "${sStatus} (ROBOCOPY)" )
+
+        $rcFrom = ( Convert-Path "${From}" )
+        $rcTo = ( Convert-Path "${To}" )
+
+        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
+    }
+    Else {
+
+        ##################################################################################################################
+        ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
+        ##################################################################################################################
+
+        $Progress.Update( "${sStatus} (cp)" )
+        Copy-MirroredFiles -From:$From -To:$To -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth # -Progress:$Progress
+
+        ##################################################################################################################
+        ## METADATA: Synchronize source file system meta-data to destination #############################################
+        ##################################################################################################################
+
+        $Progress.Update( "${sStatus} (meta)" )
+        Sync-Metadata -From:$From -To:$To -Batch:$Batch # -Progress:$Progress
+    }
+
+
+}
+
 Function Copy-MirroredFiles {
 Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$null)
 
@@ -352,20 +316,56 @@ Param ( [Parameter(ValueFromPipeline=$true)] $From, [switch] $Copy=$false, $Repo
 
 }
 
+Function Get-TombstoneFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $Path )
+
+    Begin {
+        $FileName = Get-TombstoneFileName
+    }
+
+    Process {
+        Join-Path $Path -ChildPath $FileName
+    }
+
+    End { }
+}
+
+Function Get-TombstoneFileName {
+    "removedmanifest-md5.txt"
+}
+
 Function Remove-MirroredFilesWhenObsolete {
-Param ( $From, $To, [switch] $Batch=$false, $Depth=0, $RepositoryOf=$null )
+Param ( $From, $To, [switch] $Batch=$false, $Depth=0, $RepositoryOf=$null, [switch] $FromTombstone )
 
     ( "[mirror] Remove-MirroredFilesWhenObsolete -From:{0} -To:{1} -Batch:{2} -Depth:{3}" -f $From, $To, $Batch, $Depth ) | Write-Debug
 
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
-    $aDirs = Get-ChildItem -LiteralPath "$To"
-    $N = $aDirs.Count
+    $aDirsTo = Get-ChildItem -LiteralPath "$To"
+    $N = $aDirsTo.Count
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
     $Progress.Open( "Matching (rm): [${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
 
-    $aDirs | Select-UnmatchedItems -Match "$From" -DiffLevel 0 -Progress:$Progress | ForEach {
+    $ToRemove = ( $aDirsTo | Select-UnmatchedItems -Match "$From" -DiffLevel 0 -Progress:$Progress )
+    If ( $FromTombstone ) {
+        $tombstone = ( "${From}" | Get-TombstoneFile )
+        If ( Test-Path -LiteralPath $tombstone ) {
+            Get-Content $tombstone | ForEach-Object {
+                $md5, $Path = ( "$_" -split "\s+", 2 )
+                $Path = ( Join-Path "${To}" -ChildPath $Path )
+                
+                If ( Test-Path -LiteralPath:$Path ) {
+                    $ToHash = ( Get-FileHash -LiteralPath:$Path -Algorithm:MD5 )
+                    If ( $md5 -eq $ToHash.Hash ) {
+                        $ToRemove = ( $ToRemove + @( ( Get-Item -LiteralPath:$ToHash.Path -Force ) ) )
+                    }
+                }
+            }
+        }
+    }
+
+    $ToRemove | ForEach {
 
         $BaseName = $_.Name
         $MoveFrom = $_.FullName
@@ -440,7 +440,7 @@ Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
 }
 
 Function Sync-MirroredFiles {
-Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $Force=$false, [switch] $NoScan=$false, $RepositoryOf=$null, [switch] $RoboCopy=$false )
+Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $Force=$false, [switch] $NoScan=$false, $RepositoryOf=$null, [switch] $RoboCopy=$false, [switch] $AlreadyCopied=$false )
 
     $sActScanning = "Scanning contents: [${From}]"
     $sStatus = "*.*"
@@ -542,10 +542,10 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
 
 
     $Steps = @(
-        "Remove-MirroredFilesWhenObsolete"
-        "Sync-MirroredDirectories"
         "Copy-MirroredFiles"
         "Sync-Metadata"
+        "Sync-MirroredDirectories"
+        "Remove-MirroredFilesWhenObsolete"
         "recurse"
     )
     $nSteps = $Steps.Count
@@ -553,66 +553,60 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( $sActScanning, "${sStatus} (sync)", $nSteps + 1 )
 
-    ##################################################################################################################
-    ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
-    ##################################################################################################################
+    If ( -Not $AlreadyCopied ) {
+        Copy-MirroredFilesWithMetadata -From:$From -To:$To -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth -RoboCopy:$RoboCopy -Progress:$Progress
+    }
 
-    $Progress.Update( $sActScanning, "${sStatus} (rm)" )
-    Remove-MirroredFilesWhenObsolete -From $From -To $To -Batch:$Batch -Depth $Depth -RepositoryOf:$RepositoryOf
-
-    $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
-    If ( $RoboCopy -And $RoboCopyExe -And ( Test-Path -LiteralPath "${From}" -PathType Container ) ) {
-        $rcFrom = ( Convert-Path "${From}" )
-        $rcTo = ( Convert-Path "${To}" )
-        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
+    If ( Test-MirrorSyncBidirectionally -LiteralPath $From ) {
+        Copy-MirroredFilesWithMetadata -From:$To -To:$From -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth -RoboCopy:$RoboCopy -Progress:$Progress
+        Remove-MirroredFilesWhenObsolete -From:$From -To:$To -Batch:$Batch -Depth:$Depth -RepositoryOf:$RepositoryOf -FromTombstone
+        Remove-MirroredFilesWhenObsolete -From:$To -To:$From -Batch:$Batch -Depth:$Depth -RepositoryOf:$RepositoryOf -FromTombstone
     }
     Else {
+        ##################################################################################################################
+        ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
+        ##################################################################################################################
+
+        $Progress.Update( $sActScanning, "${sStatus} (rm)" )
+        Remove-MirroredFilesWhenObsolete -From $From -To $To -Batch:$Batch -Depth $Depth -RepositoryOf:$RepositoryOf
+    }
+
+    $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
+    $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe -And ( Test-Path -LiteralPath "${From}" -PathType Container ) )
+
+    If ( -Not ( $UseRoboCopy ) ) {
         ##################################################################################################################
         ## COPY OVER (mkdir): Create child directories on destination to mirror subdirectories of source. ################
         ##################################################################################################################
 
         $Progress.Update( "${sStatus} (mkdir)" )
         Sync-MirroredDirectories -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth
+    }
 
-        ##################################################################################################################
-        ## COPY OVER (cp): Copy snapshot files onto destination to mirror files on source. ###############################
-        ##################################################################################################################
+    ##################################################################################################################
+    ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
+    ##################################################################################################################
 
-        $Progress.Update( "${sStatus} (cp)" )
-        Copy-MirroredFiles -From $From -To $To -Batch:$Batch -DiffLevel $DiffLevel -Depth $Depth # -Progress:$Progress
-
-        ##################################################################################################################
-        ## METADATA: Synchronize source file system meta-data to destination #############################################
-        ##################################################################################################################
-
-        $Progress.Update( "${sStatus} (meta)" )
-        Sync-Metadata -From $From -To $To -Batch:$Batch # -Progress:$Progress
-
-        ##################################################################################################################
-        ### RECURSION: Drop down into child directories and do the same mirroring down yonder. ###########################
-        ##################################################################################################################
-
-        $aFiles = @( )
-        If ( Test-Path -LiteralPath "$From" -PathType Container ) {
-            $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Select-MatchedItems -Match "$To" -DiffLevel 0 )
-        }
-        $N = $aFiles.Count
+    $aFiles = @( )
+    If ( Test-Path -LiteralPath "$From" -PathType Container ) {
+        $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Select-MatchedItems -Match "$To" -DiffLevel 0 )
+    }
+    $N = $aFiles.Count
     
-        $Progress.InsertSegment( $N )
-        $Progress.Redraw()
+    $Progress.InsertSegment( $N )
+    $Progress.Redraw()
 
-        $sFiles = ( "file" | Get-PluralizedText($N) )
-        $aFiles | ForEach {
-            $BaseName = $_.Name
-            $MirrorFrom = $_.FullName
-            $MirrorTo = ($_ | ConvertTo-MirroredPath -To "${To}")
+    $sFiles = ( "file" | Get-PluralizedText($N) )
+    $aFiles | ForEach {
+        $BaseName = $_.Name
+        $MirrorFrom = $_.FullName
+        $MirrorTo = ($_ | ConvertTo-MirroredPath -To "${To}")
 
-            $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
-            $Progress.Update( $Mesg, 0 )
-            $Mesg | Write-Debug
-            Sync-MirroredFiles -From "${MirrorFrom}" -To "${MirrorTo}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch -NoScan:$NoScan
-            $Progress.Update( $Mesg )
-        }
+        $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
+        $Progress.Update( $Mesg, 0 )
+        $Mesg | Write-Debug
+        Sync-MirroredFiles -From "${MirrorFrom}" -To "${MirrorTo}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -Batch:$Batch -NoScan:$NoScan -RoboCopy:$RoboCopy -AlreadyCopied:$RoboCopy
+        $Progress.Update( $Mesg )
     }
 
     $Progress.Complete()
@@ -750,7 +744,25 @@ End { If ( $LiteralPath.Count -gt 0 ) { $LiteralPath | Test-UnmirroredDerivedIte
 
 }
 
-Export-ModuleMember -Function Write-RoboCopyOutput
+Function Test-MirrorSyncBidirectionally {
+Param ( $LiteralPath )
+
+    $package = ( Get-Item -LiteralPath $LiteralPath | Get-ItemPackage -Ascend )
+    $patterns = ( & get-coldstorage-setting.ps1 -Name:MirrorWildcards )
+
+    $Bidi = $false
+    $patterns.Bidi |% {
+        $ChildPath = ( $_ | ConvertTo-ColdStorageSettingsFilePath )
+        
+        Push-Location $package.FullName
+        $RelPath = ( Resolve-Path -Relative $LiteralPath )
+        Pop-Location
+
+        $Bidi = ( $Bidi -or ( $RelPath -like $ChildPath ) )
+    }
+
+    $Bidi
+}
 
 Export-ModuleMember -Function ConvertTo-MirroredPath
 Export-ModuleMember -Function Sync-ItemMetadata
@@ -765,3 +777,5 @@ Export-ModuleMember -Function Remove-MirroredFilesWhenObsolete
 Export-ModuleMember -Function Sync-MirroredDirectories
 Export-ModuleMember -Function Sync-Metadata
 Export-ModuleMember -Function Sync-MirroredFiles
+
+Export-ModuleMember -Function Test-MirrorSyncBidirectionally

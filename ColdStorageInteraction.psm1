@@ -193,32 +193,164 @@ Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $V
 
 }
 
+Function Test-IsYesNoString {
+Param ( [Parameter(ValueFromPipeline=$true)] $In, [switch] $AllowEmpty )
+
+    Begin { }
+
+    Process {
+        $ok = ( $In -match '^\s*[YyNn].*$' )
+        If ( $AllowEmpty ) {
+            $ok = ( $ok -or ( $In -match '^\s*$' ) )
+        }
+        $ok
+    }
+
+    End { }
+}
+
+Function Get-YesNoOpposite {
+Param ( [Parameter(ValueFromPipeline=$true)] $In )
+    Begin { }
+
+    Process {
+        If ( $In -match '^\s*[Yy]' ) { "N" }
+        If ( $In -match '^\s*[Nn]' ) { "Y" }
+    }
+
+    End { }
+}
+
 Function Read-YesFromHost {
-Param ( [string] $Prompt, $DefaultAction="" )
+Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="", $DefaultTimeout = 5.0 )
 
         $Prompt | Write-Host -ForegroundColor Yellow
+        $YNPrompt = ( '[Y]es [N]o (default is "{0}")' -f $DefaultInput )
         Do {
-            $InKey = ( Read-Host -Prompt '[Y]es [N]o (default is "Y")' )
-        } While ( ( -Not ( $InKey -match '^[YyNn].*$' ) ) -and ( -Not ( $InKey -match '^\s*$' ) ) )
-        
-        If ( $InKey -match '^\s*$' ) {
-            ( 'DEFAULT SELECTION - {0} ... (5 seconds to cancel)' -f $DefaultAction )
-            $T0 = ( Get-Date ) ; $keyinfo = $null
-            Do {
-                $TDiff = ( Get-Date ) - $T0
-                Write-Progress -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( 5.0 - $TDiff.TotalSeconds ) ) -PercentComplete ( 100 * $TDiff.TotalSeconds / 5.5 )
-                If ( [Console]::KeyAvailable ) { $keyinfo = [Console]::ReadKey($true) }
-            } While ( ( $TDiff.TotalSeconds -lt 5.5 ) -and ( $keyinfo -eq $null ) )
-                
-            If ( ( $keyinfo -ne $null ) -and ( -Not ( $keyinfo.KeyChar -match "[Yy`r`n]" ) ) ) {
-                $InKey = 'N'
+            If ( $Timeout -lt 0.0 ) {
+                $InKey = ( Read-Host -Prompt $YNPrompt )
             }
             Else {
-                $InKey = 'Y'
+                ( "{0}: " -f $YNPrompt ) | Write-Host -NoNewline
+
+                $InKey = $null
+                $T0 = ( Get-Date ) ; $TN = ( $Timeout + 0.25 )
+                Do {
+                    $TDiff = ( Get-Date ) - $T0
+                    Write-Progress -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete ( 100 * $TDiff.TotalSeconds / $TN )
+                    If ( [Console]::KeyAvailable ) { $InKey = ( Read-Host ) }
+                } While ( ( $TDiff.TotalSeconds -lt $TN ) -and ( $InKey -eq $null ) )
+
+                If ( $InKey -eq $null ) {
+                    $InKey = $DefaultInput
+                    $InKey | Write-Host -ForegroundColor Yellow
+                }
+
+            }
+        } While ( -Not ( Test-IsYesNoString -In:$InKey -AllowEmpty ) )
+        
+        If ( $InKey -match '^\s*$' ) {
+            $T0 = ( Get-Date ) ; $TN = ( $DefaultTimeout + 0.25 ) ; $keyinfo = $null
+
+            If ( $TN -lt 0.0 ) {
+                $CancelMessage = ""
+            }
+            Else {
+                $CancelMessage = ( " ... ({0:N0} seconds to cancel)" -f $TN )
+            }
+
+            ( 'DEFAULT SELECTION - {0}{1} ' -f $DefaultAction,$CancelMessage ) | Write-Host -ForegroundColor Green -NoNewline
+            Do {
+                $TDiff = ( Get-Date ) - $T0
+                Write-Progress -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete ( 100 * $TDiff.TotalSeconds / $TN )
+                If ( [Console]::KeyAvailable ) { $keyinfo = [Console]::ReadKey($true) }
+            } While ( ( $TDiff.TotalSeconds -lt $TN ) -and ( $keyinfo -eq $null ) )
+
+            $DefaultOpposite = ( $DefaultInput | Get-YesNoOpposite )
+            If ( ( $keyinfo -ne $null ) -and ( -Not ( $keyinfo.KeyChar -match "[YyNn`r`n]" ) ) ) {
+                $InKey = $DefaultOpposite
+            }
+            ElseIf ( ( $keyinfo -ne $null ) -and ( $keyinfo.KeyChar -match "[YyNn]" ) ) {
+                $InKey = $keyinfo.KeyChar
+            }
+            Else {
+                $InKey = $DefaultInput
+            }
+            $InKey | Write-Host -ForegroundColor Yellow
+
+        }
+
+        ( $InKey -match '^\s*[Yy].*$' )
+}
+
+Function Get-PluralizedText {
+Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singular, $Plural="{0}s" )
+
+    Begin { }
+
+    Process {
+        $Pluralized = $( $Plural -f $Singular )
+        If ( $N -eq 1 ) {
+            $Singular
+        }
+        Else {
+            $Pluralized
+        }
+    }
+
+    End { }
+
+}
+
+
+Function Write-RoboCopyOutput {
+Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [switch] $Epilog=$false, [switch] $Echo=$false )
+
+    Begin { $Status = $null; $pct = 0.0; $Sect = 0; }
+
+    Process {
+        If ( "${Line}" ) {
+            If ( "${Line}" -match "^\s*([0-9.]+)%\s*$" ) {
+                $pct = [Decimal] $Matches[1]
+            }
+            Else {
+                $pct = 0.0
+                $Status = ( "${Line}" -replace "\t","    " )
+                $Status = ( "${Status}" -replace "\s"," " )
+            }
+            Write-Progress -Activity ( "Robocopy.exe {0} {1}" -f "${Source}","${Destination}" ) -Status "${Status}" -PercentComplete $pct
+
+        }
+
+        If ( "${Line}" -match "^\s*-+\s*$" ) {
+            $Sect = $Sect + 1
+        }
+
+        If ( $Echo ) {
+            "${Line}"
+        }
+
+        If ( $Prolog -Or $Epilog ) {
+            If ( $Prolog -and ( $Sect -le 2 ) ) {
+                "${Line}" | Write-Host
+            }
+            ElseIf ( "${Line}" -match "^[0-9/]+\s+[0-9:]+\s+(ERROR|WARNING)\s" ) {
+                "${Line}" | Write-Host -ForegroundColor Red
+            }
+            ElseIf ( $Epilog -and ( $sect -gt 3 ) ) {
+                "${Line}" | Write-Host
+            }
+             
+        }
+        ElseIf ( -Not $Echo ) {
+            If ( "${Line}" -match "^[0-9/]+\s+[0-9:]+\s+(ERROR|WARNING)\s" ) {
+                "${Line}" | Write-Host -ForegroundColor Red
             }
         }
 
-        ( $InKey -match '^[Yy].*$' )
+    }
+
+    End { }
 }
 
 Export-ModuleMember -Function Write-BleepBloop
@@ -229,3 +361,7 @@ Export-ModuleMember -Function Write-BaggedItemNoticeMessage
 Export-ModuleMember -Function Write-UnbaggedItemNoticeMessage
 
 Export-ModuleMember -Function Read-YesFromHost
+
+Export-ModuleMember -Function Get-PluralizedText
+
+Export-ModuleMember -Function Write-RoboCopyOutput

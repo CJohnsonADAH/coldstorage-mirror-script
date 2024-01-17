@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2023.0719
+@version 2024.0117
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -211,43 +211,6 @@ If ( $global:gScriptContextName -eq $null ) {
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
-
-Function Did-It-Have-Validation-Errors {
-Param ( [Parameter(ValueFromPipeline=$true)] $Message )
-
-Begin { $ExitCode = 0 }
-
-Process {
-    If ( -Not ( $Message -match "^OK-" ) ) {
-        $ExitCode = $ExitCode + 1
-    }
-}
-
-End { $ExitCode }
-
-}
-
-Function Where-Item-Is-Ripe {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $ReturnObject=$false )
-
-Begin { $timestamp = Get-Date }
-
-Process {
-    $oFile = Get-FileObject -File $File
-    $span = ( ( $timestamp ) - ( $oFile.CreationTime ) )
-    If ( ( $span.Days ) -ge ( $RipeDays ) ) {
-        If ( $ReturnObject ) {
-            $oFile
-        }
-        Else {
-            $oFile.FullName
-        }
-    }
-}
-
-End { }
-
-}
 
 Function Get-CurrentLine {
     $MyInvocation.ScriptLineNumber
@@ -483,25 +446,6 @@ Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false, [switch] $Only=
     Get-BaggedChildItem -LiteralPath $LiteralPath -Path $Path -Zipped:${Zipped} | % {
         $_.FullName
     }
-}
-
-Function Get-PluralizedText {
-Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singular, $Plural="{0}s" )
-
-    Begin { }
-
-    Process {
-        $Pluralized = $( $Plural -f $Singular )
-        If ( $N -eq 1 ) {
-            $Singular
-        }
-        Else {
-            $Pluralized
-        }
-    }
-
-    End { }
-
 }
 
 # Do-Mirror-Repositories
@@ -985,53 +929,6 @@ param (
     }
 }
 
-function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false) {
-
-    Push-Location $DIRNAME
-
-    $BagIt = Get-PathToBagIt
-    $BagItPy = ( $BagIt | Join-Path -ChildPath "bagit.py" )
-	$Python = Get-ExeForPython
-
-    If ( -Not ( -Not ( ( $Skip |% { $_.ToLower().Trim() } ) | Select-String -Pattern "^bagit$" ) ) ) {
-        "BagIt Validation SKIPPED for path ${DIRNAME}" | Write-Verbose -InformationAction Continue
-        "OK-BagIt: ${DIRNAME} (skipped)" # > stdout
-    }
-    ElseIf ( $Verbose ) {
-        "bagit.py --validate ${DIRNAME}" | Write-Verbose
-        & $( Get-ExeForPython ) "${BagItPy}" --validate . 2>&1 |% { "$_" -replace "[`r`n]","" } | Write-Verbose
-        $NotOK = $LastExitCode
-
-        if ( $NotOK -gt 0 ) {
-            $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
-            
-            "ERR-BagIt: ${DIRNAME}" | Write-Warning
-
-            $ErrorView = $OldErrorView
-        } else {
-            "OK-BagIt: ${DIRNAME}" # > stdout
-        }
-
-    }
-    Else {
-        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" --validate . 2>&1 )
-        $NotOK = $LastExitCode
-        if ( $NotOK -gt 0 ) {
-            $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
-            
-            "ERR-BagIt: ${DIRNAME}" | Write-Warning
-            $Output |% { "$_" -replace "[`r`n]","" } | Write-Warning
-
-            $ErrorView = $OldErrorView
-        } else {
-            "OK-BagIt: ${DIRNAME}" # > stdout
-        }
-    }
-
-    Pop-Location
-
-}
-
 Function Get-CSItemValidation {
 
 Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false )
@@ -1047,7 +944,7 @@ Process {
 
         $Validated = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
-            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose  )
+            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose -NoLog )
             $ValidationMethod = "BagIt"
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
@@ -2127,6 +2024,7 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "zip" ) {
+
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
 
         $SkipScan = @( )
@@ -2216,6 +2114,18 @@ Else {
         $Words = ( $Words | ColdStorage-Command-Line -Default @("Processed","Unprocessed", "Masters") )
         ( $Words | Get-RepositoryStats -Count:($Words.Count) -Verbose:$Verbose -Batch:$Batch ) | Out-CSData -Output:$Output
     }
+    ElseIf ( $Verb -eq "catchup" ) {
+        $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
+        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
+            -Unbagged -Report
+        $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
+            -NotMirrored -Report
+        $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
+            -Unzipped -Report
+        $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
+            -Zipped -NotInCloud -Report
+    }
     ElseIf ( $Verb -eq "packages" ) {
 
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
@@ -2278,14 +2188,6 @@ Else {
     ElseIf ( $Verb -eq "zipname" ) {
         $allObjects | ColdStorage-Command-Line -Default "${PWD}" | Get-FileObject |% {
             [PSCustomObject] @{ "File"=($File.FullName); "Prefix"=($File | Get-ZippedBagNamePrefix ); "Container"=($File | Get-ZippedBagsContainer).FullName }
-        }
-    }
-    ElseIf ( $Verb -eq "ripe" ) {
-        $Words | ColdStorage-Command-Line -Default ( Get-ChildItem ) | ForEach {
-            $ripe = ( ( Get-Item -Path $_ ) | Where-Item-Is-Ripe -ReturnObject )
-            If ( $ripe.Count -gt 0 ) {
-                $ripe
-            }
         }
     }
     ElseIf ( $Verb -eq "update" ) {
