@@ -2,7 +2,8 @@
     [string] $Name="",
     [switch] $Global=$false,
     $Context=$null,
-    $Output=$null  
+    $Default=$null,
+    $Output=$null
 )
 
 #############################################################################################################
@@ -33,4 +34,25 @@ Param ( $Command, $File=$null )
 ## EXECUTION ################################################################################################
 #############################################################################################################
 
-Get-ColdStorageSettings -Name:$Name -Output:$Output
+If ( $Global -or ( $Context -eq $null ) ) {
+    Get-ColdStorageSettings -Name:$Name -Output:$Output
+}
+Else {
+
+    $Props = ( $Context | Get-ItemColdStorageProps )
+    
+    If ( $Name.Length -gt 0 ) {
+        $Value = $Default
+        If ( $Props | Get-Member -Name:$Name -ErrorAction SilentlyContinue ) {
+            $Value = $Props.$Name
+        }
+
+        If ( $Value -ne $null ) {
+            $Value
+        }
+
+    }
+    Else {
+        $Props
+    }
+}

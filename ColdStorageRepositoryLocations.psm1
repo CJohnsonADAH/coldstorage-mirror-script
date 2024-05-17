@@ -788,14 +788,28 @@ Process {
             
             $Aspect = $_.Name
             $Location =  $_.Value
-            If ( Test-Path -LiteralPath $Location ) {
-                $Location = ( $Location | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
+            If ( $Location ) {
+                If ( Test-Path -LiteralPath $Location ) {
+                    $Location = ( $Location | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
+                }
+
+                # Simple Case -- do we have an alter at the exactly corresponding relative path?
+                $ProspectivePath = ( $Location | Join-Path -ChildPath $Stem )
+            }
+            Else {
+                ( "[Get-MirrorMatchedItem] FILE '{0} \\ {1}' LOCATION SEEMS TO BE NULL! {2} / {3}" -f $Stock,$Stem,$_,( $Range -join "," ) ) | Write-Warning
+                $ProspectivePath = $null
             }
 
-            # Simple Case -- do we have an alter at the exactly corresponding relative path?
-            $ProspectivePath = ( $Location | Join-Path -ChildPath $Stem )
+            # Q. SHOULD WE USE THIS PATH OR LOOK ELSEWHERE FOR THE RIGHT LEVEL OF MATCHING? 
+            $UseThis = ( $IgnoreBagging )
+            If ( -Not $IgnoreBagging ) {
+                If ( $ProspectivePath -ne $null ) {
+                    ( "Test-Path({0}): {1}" -f $Aspect, $ProspectivePath ) | Write-Debug
+                    $UseThis = ( Test-Path -LiteralPath $ProspectivePath )
+                }
+            }
 
-            $UseThis = $( If ( $IgnoreBagging ) { $true } Else { ( "Test-Path({0}): {1}" -f $Aspect, $ProspectivePath ) | Write-Debug ; Test-Path -LiteralPath $ProspectivePath } )
             If ( $UseThis ) {
                 $ProspectivePath
             }

@@ -43,18 +43,32 @@ Param ( $Command=$null, $File=$null )
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
-# Formerly known as: Rebase-File
 Function ConvertTo-MirroredPath {
 
     [CmdletBinding()]
 
-Param ( [String] $To, [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [String] $Within, [Parameter(ValueFromPipeline=$true)] $File )
 
     Begin {}
 
     Process {
-        $oFile = Get-FileObject($File)
-        $To | Get-FileObject | Get-ItemFileSystemLocation | Get-FileLiteralPath | Join-Path -ChildPath $oFile.Name
+        If ( $File ) {
+
+            $oFile = Get-FileObject($File)
+            $BaseTo = $Within
+
+            $FileIsLeaf = ( Test-Path -LiteralPath $oFile.FullName -PathType Leaf )
+            $ToIsContainer = ( Test-Path -LiteralPath $BaseTo -PathType Container )
+
+            If ( $FileIsLeaf -and ( -Not $ToIsContainer ) ) {
+                $BaseTo = ( $To | Split-Path -Parent )
+            }
+
+            $Rebased = ( $BaseTo | Get-FileObject | Get-ItemFileSystemLocation | Get-FileLiteralPath )        
+            $Rebased = ( $Rebased | Join-Path -ChildPath $oFile.Name )
+
+            $Rebased
+        }
     }
 
     End {}
@@ -105,9 +119,28 @@ Function Sync-ItemMetadata ($From, $To, $Progress=$null, [switch] $Verbose) {
 }
 
 Function Copy-MirroredFile {
-Param ( $From, $To, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnly=$false, $Progress=$null, [switch] $Discard=$false )
+Param ( $From, $To, $File=$null, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnly=$false, $Progress=$null, [switch] $Discard=$false )
 
-    $o1 = ( Get-Item -Force -LiteralPath "${From}" )
+    $SourceContainer = $From
+    $DestinationContainer = $To
+    $FileName = $File
+
+    $Source = $SourceContainer
+    $Destination = $DestinationContainer
+    If ( $FileName -ne $null ) {
+        $Source = ( Join-Path $Source -ChildPath $File )
+        $Destination = ( Join-Path $Destination -ChildPath $File )
+        "FILENAME: {0} / SOURCE: '{1}' -> DESTINATION: '{2}'" -f $FileName,$SourceContainer,$DestinationContainer | Write-Warning
+    }
+    ElseIf ( Test-Path -LiteralPath $SourceContainer -PathType Leaf ) {
+        "WAKKA WAKKA WAKKA" | Write-Warning
+        $SourceContainer = ( Split-Path $Source -Parent )
+        $DestinationContainer = ( Split-Path $Destination -Parent )
+
+        $FileName = ( Split-Path $Source -Leaf )
+    }
+
+    $o1 = ( Get-Item -Force -LiteralPath "${Source}" )
 
     If ( $Progress ) {
         $I0 = $Progress.I
@@ -121,20 +154,20 @@ Param ( $From, $To, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnl
     If ( $o1.Count -gt 0 ) {
         
         # 0. Overwrite if present -- save the copy about to be obliterated to the Trash
-        If ( ( Test-Path "${To}" ) -And ( -Not $Discard ) ) {
-            Remove-ItemToTrash -From "${To}"
+        If ( ( Test-Path "${Destination}" ) -And ( -Not $Discard ) ) {
+            Remove-ItemToTrash -From "${Source}"
         }
 
         # 1. Copy item
         If ( $Batch ) {
-            Copy-Item -LiteralPath "${From}" -Destination "${To}"
+            Copy-Item -LiteralPath "${Source}" -Destination "${Destination}"
         }
         Else {
             $Fallback = $false
 
             # 1B-1. Attempt to use BITS network service
             Try {
-                Start-BitsTransfer -Source "${From}" -Destination "${To}" -Description "${Direction} to ${To}" -DisplayName "Copy from ${From}" -ErrorAction Stop
+                Start-BitsTransfer -Source "${Source}" -Destination "${Destination}" -Description "${Direction} to ${To}" -DisplayName "Copy from ${From}" -ErrorAction Stop
             }
             Catch {
                 # "[Copy-MirroredFile] Failed to add BITS job due to an exception: {0}" -f $_.ToString() | Write-Error
@@ -145,24 +178,11 @@ Param ( $From, $To, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnl
             $RoboCopy = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
             If ( $RoboCopy.Source -And $Fallback ) {
 
-                $Source = "${From}"
-                $Destination = "${To}"
-                $FileName = $null
-
-                If ( Test-Path -LiteralPath "${From}" -PathType Leaf ) {
-                    $Source = ( Split-Path "${From}" -Parent )
-                    $FileName = ( Split-Path "${From}" -Leaf )
-                    
-                    $ToFileName = ( Split-Path "${To}" -Leaf )
-                    If ( $FileName -eq $ToFileName ) {
-                        $Destination = ( Split-Path "${To}" -Parent )
-                    }
-                }
-
-                $rcSource = ( Convert-Path "${Source}" )
-                $rcDestination = ( Convert-Path "${Destination}" )
-                If ( $FileName -ne $null ) {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${FileName}" | Write-RoboCopyOutput
+                $rcSource = ( Convert-Path -LiteralPath "${SourceContainer}" )
+                $rcDestination = ( Convert-Path -LiteralPath "${DestinationContainer}" )
+                
+                If ( $File -ne $null ) {
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${File}" | Write-RoboCopyOutput
                     $RoboCode = $LASTEXITCODE
                 }
                 Else {
@@ -174,7 +194,7 @@ Param ( $From, $To, $Direction="over", [switch] $Batch=$false, [switch] $ReadOnl
 
             # 1B-3. Fall back to Copy-Item
             If ( $Fallback ) {
-                Copy-Item -LiteralPath "${From}" -Destination "${To}"
+                Copy-Item -LiteralPath "${Source}" -Destination "${Destination}"
             }
 
         }
@@ -198,15 +218,32 @@ Param ($From, $To, [switch] $Batch=$false, [switch] $RoboCopy=$false, $DiffLevel
     $sStatus = "*.*"
 
     $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
-    $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe -And ( Test-Path -LiteralPath "${From}" -PathType Container ) )
+    $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe )
     If ( $UseRoboCopy ) {
 
         $Progress.Update( "${sStatus} (ROBOCOPY)" )
 
-        $rcFrom = ( Convert-Path "${From}" )
-        $rcTo = ( Convert-Path "${To}" )
+        $rcFrom = ( Convert-Path "${From}" -ErrorAction SilentlyContinue )
+        $rcTo = ( Convert-Path "${To}" -ErrorAction SilentlyContinue )
+        $rcFile = $null
+        If ( Test-Path -LiteralPath "${From}" -PathType Leaf ) {
+            $rcFrom = ( Split-Path "${From}" -Parent )
+            $rcTo = ( Split-Path "${To}" -Parent )
+            $rcFrom = ( Convert-Path "${rcFrom}" -ErrorAction SilentlyContinue )
+            $rcTo = ( Convert-Path "${rcTo}" -ErrorAction SilentlyContinue )
+            $rcFile = ( Split-Path "${From}" -Leaf )
 
-        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
+            If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
+                & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-RoboCopyOutput -Prolog -Epilog
+            }
+
+        }
+        Else {
+            If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
+                & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
+            }
+
+        }
     }
     Else {
 
@@ -223,13 +260,16 @@ Param ($From, $To, [switch] $Batch=$false, [switch] $RoboCopy=$false, $DiffLevel
 
         $Progress.Update( "${sStatus} (meta)" )
         Sync-Metadata -From:$From -To:$To -Batch:$Batch # -Progress:$Progress
-    }
 
+    }
 
 }
 
 Function Copy-MirroredFiles {
 Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$null)
+
+    "Copy-MirroredFiles FROM: {0}" -f $From | Write-Warning #DBG
+    "Copy-MirroredFiles TO: {0}" -f $To | Write-Warning #DBG
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -253,7 +293,9 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$nu
     }
     
     $matchingProgress.Open( "Matching Files (cp) [${From} => ${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    
     $aFiles = ( $aFiles | Select-UnmatchedItems -Exclude "Thumbs[.]db" -Match "${To}" -DiffLevel $DiffLevel -Progress:$matchingProgress )
+
     $N = $aFiles.Count
     $matchingProgress.Complete()
 
@@ -266,14 +308,36 @@ Param ($From, $To, [switch] $Batch=$false, $DiffLevel=1, $Depth=0, $Progress=$nu
     }
 
     $aFiles | ForEach {
-        $BaseName = $_.Name
-        $CopyFrom = $_.FullName
-        $CopyTo = ($_ | ConvertTo-MirroredPath -To "${To}")
-        
-        If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
-            Copy-MirroredFile -From:${CopyFrom} -To:${CopyTo} -Batch:${Batch} -Progress:${Progress}
-        }
+        If ( $_ ) {
+            $BaseName = $_.Name
+            $CopyFrom = $_.FullName
+            $CopyWithin = $CopyTo
+            $CopyFile = $null
 
+            $CopyTo = "${To}"
+            If ( Test-Path -LiteralPath "${CopyFrom}" -PathType Leaf ) {
+                $CopyFile = $BaseName
+                $CopyFrom = ( $_.Directory.FullName )
+                $CopyToFile = ( Split-Path "${CopyTo}" -Leaf )
+                $CopyTo = ( Split-Path "${CopyTo}" -Parent )
+                
+                If ( $CopyToFile -eq $CopyFile ) {
+                    $CopyWithin = ( Split-Path "${CopyTo}" -Parent )
+                }
+                Else {
+                    $CopyWithin = $CopyTo
+                }
+            }
+            $CopyTo = ( $CopyFrom | ConvertTo-MirroredPath -Within "${CopyWithin}" )
+
+            "Copy-MirroredFiles CopyFile: {0}" -f $CopyFile | Write-Warning #DBG
+            "Copy-MirroredFiles CopyFrom: {0}" -f $CopyFrom | Write-Warning #DBG
+            "Copy-MirroredFiles CopyTO: {0}" -f $CopyTo | Write-Warning #DBG
+
+            If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
+                Copy-MirroredFile -From:${CopyFrom} -To:${CopyTo} -File:$CopyFile -Batch:${Batch} -Progress:${Progress}
+            }
+        }
     }
     $Progress.Complete()
 }
@@ -299,16 +363,21 @@ Param ( [Parameter(ValueFromPipeline=$true)] $From, [switch] $Copy=$false, $Repo
         ( "Trashcan Path: {0}" -f $To ) | Write-Debug
 
         $TrashContainer = ( $To | Split-Path -Parent )
-        If ( -Not ( Test-Path -LiteralPath $TrashContainer ) ) {
-            "[Remove-ItemsToTrash] Create destination container: ${TrashContainer}" | Write-Verbose
-            $TrashContainer = ( New-Item -ItemType Directory -Path $TrashContainer -Force )
-        }
+        If ( $TrashContainer ) {
+            If ( -Not ( Test-Path -LiteralPath $TrashContainer ) ) {
+                "[Remove-ItemsToTrash] Create destination container: ${TrashContainer}" | Write-Verbose
+                $TrashContainer = ( New-Item -ItemType Directory -Path $TrashContainer -Force )
+            }
 
-        If ( $Copy ) {
-            Copy-Item $LiteralPath $From -Destination $To -Force
+            If ( $Copy ) {
+                Copy-Item $LiteralPath $From -Destination $To -Force
+            }
+            Else {
+                Move-Item -LiteralPath $From -Destination $To -Force
+            }
         }
         Else {
-            Move-Item -LiteralPath $From -Destination $To -Force
+            "Remove-ItemToTrash COPY={0} < {1} COULD NOT GET CONTAINER PATH [{2}]" -f $Copy,$From,$To | Write-Error
         }
     }
 
@@ -339,15 +408,15 @@ Param ( $From, $To, [switch] $Batch=$false, $Depth=0, $RepositoryOf=$null, [swit
 
     ( "[mirror] Remove-MirroredFilesWhenObsolete -From:{0} -To:{1} -Batch:{2} -Depth:{3}" -f $From, $To, $Batch, $Depth ) | Write-Debug
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+    #$Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
     $aDirsTo = Get-ChildItem -LiteralPath "$To"
     $N = $aDirsTo.Count
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
-    $Progress.Open( "Matching (rm): [${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    #$Progress.Open( "Matching (rm): [${To}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
 
-    $ToRemove = ( $aDirsTo | Select-UnmatchedItems -Match "$From" -DiffLevel 0 -Progress:$Progress )
+    $ToRemove = ( $aDirsTo | Select-UnmatchedItems -Match "$From" -DiffLevel 0 ) # -Progress:$Progress )
     If ( $FromTombstone ) {
         $tombstone = ( "${From}" | Get-TombstoneFile )
         If ( Test-Path -LiteralPath $tombstone ) {
@@ -366,17 +435,18 @@ Param ( $From, $To, [switch] $Batch=$false, $Depth=0, $RepositoryOf=$null, [swit
     }
 
     $ToRemove | ForEach {
-
-        $BaseName = $_.Name
-        $MoveFrom = $_.FullName
-        If ( -Not ( $_ | Test-UnmirroredDerivedItem ) ) {
-            $MoveFrom | Remove-ItemToTrash -RepositoryOf:$RepositoryOf
-        }
-        Else {
-            "[mirror:Remove-MirroredFilesWhenObsolete] SKIPPED (UNMIRRORED DERIVED ITEM): [${MoveFrom}]" | Write-Verbose
+        If ( $_ ) {
+            $BaseName = $_.Name
+            $MoveFrom = $_.FullName
+            If ( -Not ( $_ | Test-UnmirroredDerivedItem ) ) {
+                $MoveFrom | Remove-ItemToTrash -RepositoryOf:$RepositoryOf
+            }
+            Else {
+                "[mirror:Remove-MirroredFilesWhenObsolete] SKIPPED (UNMIRRORED DERIVED ITEM): [${MoveFrom}]" | Write-Verbose
+            }
         }
     }
-    $Progress.Complete()
+    # $Progress.Complete()
 
 }
 
@@ -389,23 +459,25 @@ Param ($From, $to, $DiffLevel=1, [switch] $Batch=$false, $Depth=0)
 
     $N = $aDirs.Count
 
-    $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
+    #$Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
-    $Progress.Open( "Matching (mkdir): [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
+    # $Progress.Open( "Matching (mkdir): [${From}]", ( "{0:N0} {1}" -f $N, $sFiles ), $N )
 
-    $aDirs | Select-UnmatchedItems -Match "${To}" -DiffLevel 0 -Progress:$Progress | ForEach {
-        If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
-            $CopyFrom = $_.FullName
-            $CopyTo = ($_ | ConvertTo-MirroredPath -To "${To}")
+    $aDirs | Select-UnmatchedItems -Match "${To}" -DiffLevel 0 | ForEach { # -Progress:$Progress
+        If ( $_ ) {
+            If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
+                $CopyFrom = $_.FullName
+                $CopyTo = ($_ | ConvertTo-MirroredPath -Within "${To}")
 
-            If ( $Progress ) {
-                $Progress.Log( "${CopyFrom}\\ =>> ${CopyTo}\\" )
+                #If ( $Progress ) {
+                #    $Progress.Log( "${CopyFrom}\\ =>> ${CopyTo}\\" )
+                #}
+                Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
             }
-            Copy-Item -LiteralPath "${CopyFrom}" -Destination "${CopyTo}"
         }
     }
-    $Progress.Complete()
+    # $Progress.Complete()
 }
 
 Function Sync-Metadata {
@@ -430,7 +502,7 @@ Param( $From, $To, $Progress=$null, [switch] $Batch=$false )
     $I0 = $Progress.I
     $aFiles | ForEach  {
         $CopyFrom = $_.FullName
-        $CopyTo = ($_ | ConvertTo-MirroredPath -To "${To}")
+        $CopyTo = ($_ | ConvertTo-MirroredPath -Within "${To}")
 
         $Progress.Update( ( "Meta: #{0:N0}/{1:N0}. {2}" -f ( ( $Progress.I - $I0 + 1 ), $N, $_.Name ) ) )
 
@@ -446,6 +518,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
     $sStatus = "*.*"
 
     If ( -Not ( Test-Path -LiteralPath "${To}" ) ) {
+
         If ( Test-Path -PathType Container "${From}" ) {
             $ToDir = ( New-Item -Type Directory "${To}" -Force:$Force -Verbose )
             If ( ( -Not $ToDir ) -or ( -Not ( Test-Path -LiteralPath "${To}" ) ) ) {
@@ -454,8 +527,25 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
                 Return
             }
         }
+        ElseIf ( Test-Path -PathType Leaf "${From}" ) {
+            $ToContainer = ( Split-Path "${To}" -Parent )
+            $ToDir = ( Get-Item -LiteralPath "${ToContainer}" -Force -ErrorAction SilentlyContinue )
+
+            $FromItem = ( Get-Item -LiteralPath "${From}" -Force -ErrorAction SilentlyContinue )
+            If ( $FromItem ) {
+                If ( -Not ( Test-Path -PathType Container "${ToContainer}" ) ) {
+                    $ToDir = ( New-Item -Type Directory "${ToContainer}" -Force:$Force -Verbose )
+                }
+            }
+           
+            If ( -Not ( $ToDir ) ) {
+                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found?!" -f $global:gCSSCriptName, $To )
+                Write-Error $ErrMesg
+                Return
+            }
+        }
         Else {
-            $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found." -f $global:gCSSCriptName, $To )
+            $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' cannot be found." -f $global:gCSSCriptName, $From )
             Write-Error $ErrMesg
             Return
         }
@@ -463,6 +553,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
 
     $sTo = $To
     If ( Test-BagItFormattedDirectory -File $To ) {
+
         If ( -Not ( Test-BagItFormattedDirectory -File $From ) ) {
             $oPayload = ( Get-FileObject($To) | Select-BagItPayloadDirectory )
             $To = $oPayload.FullName
@@ -591,6 +682,8 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
     If ( Test-Path -LiteralPath "$From" -PathType Container ) {
         $aFiles = ( Get-ChildItem -Directory -LiteralPath "$From" | Select-MatchedItems -Match "$To" -DiffLevel 0 )
     }
+
+
     $N = $aFiles.Count
     
     $Progress.InsertSegment( $N )
@@ -600,7 +693,7 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
     $aFiles | ForEach {
         $BaseName = $_.Name
         $MirrorFrom = $_.FullName
-        $MirrorTo = ($_ | ConvertTo-MirroredPath -To "${To}")
+        $MirrorTo = ($_ | ConvertTo-MirroredPath -Within "${To}")
 
         $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
         $Progress.Update( $Mesg, 0 )
@@ -644,7 +737,7 @@ Function Test-MatchedFile ($From, $To, $DiffLevel=0) {
 Function Select-UnmatchedItems {
     [CmdletBinding()]
 
-   param (
+   Param (
     [String]
     $Match,
 
@@ -663,12 +756,17 @@ Function Select-UnmatchedItems {
    Begin { }
 
    Process {
+
         If ( $Progress -ne $null ) { $Progress.Update( ( "{0}" -f $File.Name ) ) }
         
-        If ( -Not ( $File.Name -match $Exclude ) ) { 
-            $Object = ($File | ConvertTo-MirroredPath -To $Match)
-            if ( -Not ( Test-MatchedFile -From $File -To $Object -DiffLevel $DiffLevel ) ) {
-                $File
+        If ( $File ) {
+            If ( -Not ( $File.Name -match $Exclude ) ) { 
+                $Object = ($File | ConvertTo-MirroredPath -Within $Match)
+
+                If ( -Not ( Test-MatchedFile -From:$File -To:$Object -DiffLevel:$DiffLevel ) ) {
+                    $File
+                }
+
             }
         }
    }
@@ -680,16 +778,18 @@ Function Select-UnmatchedItems {
 Function Select-MatchedItems {
     [CmdletBinding()]
 
-    Param ( [String] $Match, [Int] $DiffLevel = 0, $Progress=$null, [Parameter(ValueFromPipeline=$true)] $File )
+    Param ( [String] $Match, [Int] $DiffLevel = 0, $Progress=$null, [string] $Exclude="^$", [Parameter(ValueFromPipeline=$true)] $File )
 
     Begin { }
 
     Process {
         If ( $Progress -ne $null ) { $Progress.Update( $File.Name ) }
 
-        $Object = ($File | ConvertTo-MirroredPath -To $Match)
-        If ( Test-MatchedFile -From $File -To $Object -DiffLevel $DiffLevel ) {
-            $File
+        If ( -Not ( $File.Name -match $Exclude ) ) {
+            $Object = ($File | ConvertTo-MirroredPath -Within $Match)
+            If ( Test-MatchedFile -From $File -To $Object -DiffLevel $DiffLevel ) {
+                $File
+            }
         }
     }
 
@@ -751,14 +851,22 @@ Param ( $LiteralPath )
     $patterns = ( & get-coldstorage-setting.ps1 -Name:MirrorWildcards )
 
     $Bidi = $false
-    $patterns.Bidi |% {
-        $ChildPath = ( $_ | ConvertTo-ColdStorageSettingsFilePath )
-        
-        Push-Location $package.FullName
-        $RelPath = ( Resolve-Path -Relative $LiteralPath )
-        Pop-Location
+    
+    If ( $package.FullName ) {
 
-        $Bidi = ( $Bidi -or ( $RelPath -like $ChildPath ) )
+        If ( Test-Path -LiteralPath $package.FullName -PathType Container ) {
+    
+            $patterns.Bidi |% {
+                $ChildPath = ( $_ | ConvertTo-ColdStorageSettingsFilePath )
+        
+                Push-Location $package.FullName
+                $RelPath = ( Resolve-Path -Relative $LiteralPath )
+                Pop-Location
+
+                $Bidi = ( $Bidi -or ( $RelPath -like $ChildPath ) )
+            }
+        }
+
     }
 
     $Bidi

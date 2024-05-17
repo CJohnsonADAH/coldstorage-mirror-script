@@ -237,9 +237,11 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
                 $T0 = ( Get-Date ) ; $TN = ( $Timeout + 0.25 )
                 Do {
                     $TDiff = ( Get-Date ) - $T0
-                    Write-Progress -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete ( 100 * $TDiff.TotalSeconds / $TN )
+                    $tPct = ( @( 100.0, ( 100 * $TDiff.TotalSeconds / $TN ) ) | Measure-Object -Minimum ).Minimum
+                    Write-Progress -Id 707 -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete:$tPct
                     If ( [Console]::KeyAvailable ) { $InKey = ( Read-Host ) }
                 } While ( ( $TDiff.TotalSeconds -lt $TN ) -and ( $InKey -eq $null ) )
+                Write-Progress -Id 707 -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete:100.0 -Completed
 
                 If ( $InKey -eq $null ) {
                     $InKey = $DefaultInput
@@ -262,9 +264,11 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
             ( 'DEFAULT SELECTION - {0}{1} ' -f $DefaultAction,$CancelMessage ) | Write-Host -ForegroundColor Green -NoNewline
             Do {
                 $TDiff = ( Get-Date ) - $T0
-                Write-Progress -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete ( 100 * $TDiff.TotalSeconds / $TN )
+                $tPct = ( @( 100.0, ( 100 * $TDiff.TotalSeconds / $TN ) ) | Measure-Object -Minimum ).Minimum
+                Write-Progress -Id 707 -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete:$tPct
                 If ( [Console]::KeyAvailable ) { $keyinfo = [Console]::ReadKey($true) }
             } While ( ( $TDiff.TotalSeconds -lt $TN ) -and ( $keyinfo -eq $null ) )
+            Write-Progress -Id 707 -Activity "Waiting to Trigger Default Action" -Status ( '{0} in {1:N0}' -f $DefaultAction, ( $TN - $TDiff.TotalSeconds ) ) -PercentComplete:100.0 -Completed
 
             $DefaultOpposite = ( $DefaultInput | Get-YesNoOpposite )
             If ( ( $keyinfo -ne $null ) -and ( -Not ( $keyinfo.KeyChar -match "[YyNn`r`n]" ) ) ) {

@@ -25,8 +25,6 @@ Using Module ".\ColdStorageProgress.psm1"
 
 param (
     [Parameter(Position=0)] [string] $Verb,
-    [switch] $Development = $false,
-    [switch] $Production = $false,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
 	[switch] $Batch = $false,
@@ -50,6 +48,8 @@ param (
     [switch] $Only = $false,
     [switch] $PassThru = $false,
     [switch] $Report = $false,
+    [switch] $Progress = $false,
+    $Context = $null,
     [switch] $ReportOnly = $false,
     [switch] $Dependencies = $false,
     $Props = $null,
@@ -58,18 +58,12 @@ param (
     [String[]] $Side = "local,cloud",
     [String[]] $Name = @(),
     [String] $LogLevel=0,
-    [switch] $Dev = $false,
-    [switch] $Bork = $false,
-    #[switch] $Verbose = $false,
-    #[switch] $Debug = $false,
-    [switch] $WhatIf = $false,
     [switch] $Version = $false,
     [string] $From,
     [string] $To,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
 )
-$RipeDays = 7
 
 $Verbose = ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent )
 $Verbose = $( If ( $Verbose -eq $null ) { $false } Else { $Verbose } )
@@ -77,79 +71,6 @@ $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 $Debug = $( If ( $Debug -eq $null ) { $false } Else { $Debug } )
 
 $global:gBucketObjects = @{ }
-
-Function Test-CSDevelopmentBranchDir {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
-
-    Process {
-        ( $Item.Name -like "*-development" )
-    }
-
-}
-Function Get-CSProductionBranchDirName {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
-
-    Process {
-        $Item.Parent.FullName | Join-Path -ChildPath ( $Item.Name -replace "-development$", "" )
-    }
-
-}
-Function Get-CSDevelopmentBranchDirName {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
-
-    Process {
-        $Item.Parent.FullName | Join-Path -ChildPath ( "{0}-development" -f ( $Item.Name -replace "-development$","" ) )
-    }
-
-}
-
-Function Get-CSProductionBranchDir {
-Param ( $File=$null )
-
-    $ScriptPath = Get-Item -Force -LiteralPath ( Split-Path -Parent $PSCommandPath )
-    $ScriptPath = $( If ($ScriptPath | Test-CSDevelopmentBranchDir) { $ScriptPath | Get-CSProductionBranchDirName } Else { $ScriptPath.FullName } )
-
-    If ( $File -ne $null ) {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath | Join-Path -ChildPath $File ) )
-    }
-    Else {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath ) )
-    }
-
-}
-
-Function Get-CSDevelopmentBranchDir {
-Param ( $File=$null )
-
-    $ScriptPath = Get-Item -Force -LiteralPath ( Split-Path -Parent $PSCommandPath )
-    $ScriptPath = $( If ($ScriptPath | Test-CSDevelopmentBranchDir) { $ScriptPath.FullName } Else { $ScriptPath | Get-CSDevelopmentBranchDirName } )
-
-    If ( $File -ne $null ) {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath | Join-Path -ChildPath $File ) )
-    }
-    Else {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath ) )
-    }
-
-}
-
-# Do we need to hand off control to an alternate branch of the script?
-If ( $Development -or $Production ) {
-    $ps1 = $( If ($Development) { ( Get-CSDevelopmentBranchDir -File ( Split-Path -Leaf $PSCommandPath ) ) } Else { ( Get-CSProductionBranchDir -File ( Split-Path -Leaf $PSCommandPath ) ) } )
-    $Branch = $( If ( $Development ) { "Development" } Else { "Production" } )
-    If ( $ps1 ) {
-
-        $aParameters = $MyInvocation.BoundParameters
-        $aParameters[$Branch] = $False
-        Write-Warning ( "[{0}] Invoking the {1} branch {2}" -f  $MyInvocation.MyCommand.Name, $Branch, $ps1.FullName )
-        & ( "{0}" -f $ps1.FullName ) @aParameters
-       
-    }
-    Else {
-        Write-Warning ( "[{0}] Could not find {1} branch for {2}" -f $MyInvocation.MyCommand.Name, $Branch, $PSCommandPath )
-    }
-    Exit
-}
 
 Function ColdStorage-Script-Dir {
 Param ( $File=$null )
@@ -677,159 +598,6 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [switch] $FullName, [switch] 
     End { }
 }
 
-Function Write-ColdStoragePackagesReport {
-Param (
-    [Parameter(ValueFromPipeline=$true)] $Package,
-    [switch] $Report=$false,
-    [string] $Output="",
-    [switch] $FullName=$false,
-    [switch] $CheckZipped=$false,
-    [switch] $CheckMirrored=$false,
-    [switch] $CheckCloud=$false,
-    $Timestamp,
-    $Context
-
-)
-
-    Begin { $Subsequent = $false; $sDate = ( Get-Date $Timestamp -Format "MM-dd-yyyy" ); $aBucketListings = @{}; $jsonOut = @() }
-
-    Process {
-
-        $oContext = ( Get-FileObject $Context )
-
-        Push-Location ( $oContext | Get-ItemFileSystemLocation ).FullName
-
-        $sFullName = $Package.FullName
-        $sRelName = ( Resolve-Path -Relative -LiteralPath $Package.FullName )
-        $sTheName = $( If ( $FullName ) { $sFullName } Else { $sRelName } )
-
-        $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )
-        $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
-        If ( $CheckZipped ) {
-            $sZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
-            $nZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { 1 } Else { 0 } )
-            $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
-        }
-        Else {
-            $sZippedFlag = $null
-            $sZippedFile = $null
-        }
-        $nContents = ( $Package.CSPackageContents )
-        $sContents = ( "{0:N0} file{1}" -f $nContents, $( If ( $nContents -ne 1 ) { "s" } Else { "" } ))
-        $nFileSize = ( $Package.CSPackageFileSize )
-        $sFileSize = ( "{0:N0}" -f $Package.CSPackageFileSize )
-        $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
-        $sBagFile = $( If ( $Package.CSPackageBagLocation ) { $Package.CSPackageBagLocation.FullName | Resolve-Path -Relative } Else { "" } )
-        $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
-
-        Pop-Location
-
-        If ( $CheckMirrored ) {
-            $nMirroredFlag = $Package.CSPackageMirrored
-            $sMirroredFlag = $( If ( $nMirroredFlag ) { "MIRRORED" } Else { "unmirrored" } )
-            $sMirrorLocation = $Package.CSPackageMirrorLocation
-        }
-
-        $oCloudCopy = $null
-        $sCloudCopyFlag = $null
-        $nCloudCopyFlag = $null
-
-        If ( $CheckCloud ) {
-
-            If ( $Package.CloudCopy -and $sZippedFile ) {
-                $bCloudCopy = $true
-                $oCloudCopy = $Package.CloudCopy
-                $nCloudCopyFlag = 1
-                $sCloudCopyFlag = "CLOUD"
-            }
-            Else {
-                $bCloudCopy = $false
-                $oCloudCopy = $null
-                $nCloudCopyFlag = 0
-                $sCloudCopyFlag = "local"
-            }
-
-        }
-
-        $o = [PSCustomObject] @{
-            "Date"=( $sDate )
-            "Name"=( $sTheName )
-            "Bag"=( $sBaggedFlag )
-            "BagFile"=( $sBagFile )
-            "Bagged"=( $nBaggedFlag )
-            "ZipFile"=( $sZippedFile )
-            "Zipped"=( $nZippedFlag )
-            "InZip"=( $sZippedFlag )
-            "Mirrored"=( $nMirroredFlag )
-            "MirrorLocation"=( $sMirrorLocation )
-            "InMirror"=( $sMirroredFlag )
-            "CloudFile"=( $oCloudCopy | Get-CloudStorageURI )
-            "CloudTimestamp"=( $oCloudCopy | Get-CloudStorageTimestamp )
-            "InCloud"=( $nCloudCopyFlag )
-            "Clouded"=( $sCloudCopyFlag )
-            "Files"=( $nContents )
-            "Contents"=( $sContents )
-            "Bytes"=( $nFileSize )
-            "Size"=( $sFileSizeReadable )
-            "Context"=( $oContext.FullName )
-        }
-
-        If ( $Report ) {
-
-            If ( $sZippedFlag -eq $null ) {
-                $o.PSObject.Properties.Remove("ZipFile")
-                $o.PSObject.Properties.Remove("Zipped")
-                $o.PSObject.Properties.Remove("InZip")
-            }
-            If ( $sCloudCopyFlag -eq $null ) {
-                $o.PSObject.Properties.Remove("CloudFile")
-                $o.PSObject.Properties.Remove("CloudTimestamp")
-                $o.PSObject.Properties.Remove("CloudBacked")
-                $o.PSObject.Properties.Remove("Clouded")
-            }
-
-            If ( ("CSV","JSON") -ieq $Output ) {
-                # Fields not used in CSV columns/JSON fields
-                $o.PSObject.Properties.Remove("Bag")
-                $o.PSObject.Properties.Remove("InZip")
-                $o.PSObject.Properties.Remove("Clouded")
-
-                # Output
-                Switch ( $Output ) {
-                    "JSON" { $jsonOut += , $o }
-                    "CSV" { $o | ConvertTo-CSV -NoTypeInformation | Select-Object -Skip:$( If ($Subsequent) { 1 } Else { 0 } ) }
-                }
-            }
-            Else {
-
-                # Fields formatted for text report
-                $sRptBagged = ( " ({0})" -f $o.Bag )
-                $sRptZipped = $( If ( $o.Zipped -ne $null ) { ( " ({0})" -f $o.InZip ) } Else { "" } )
-                $sRptMirrored = $( If ( $o.Mirrored -ne $null ) { ( " ({0})" -f $o.InMirror ) } Else { "" } )
-                $sRptCloud = $( If ( $o.Clouded -ne $null ) { ( " ({0})" -f $o.Clouded ) } Else { "" } )
-
-                # Output
-                ( "{0}{1}{2}{3}{4}, {5}, {6}{7}" -f $o.Name,$sRptBagged,$sRptZipped,$sRptMirrored,$sRptCloud,$o.Contents,$o.Size,$sBaggedLocation )
-            
-            }
-        }
-        Else {
-            
-            $o = $_
-            #If ( $oCloudCopy -ne $null ) {
-            #    $o | Add-Member -MemberType NoteProperty -Name CloudCopy -Value $oCloudCopy -Force
-            #}
-
-            $o | Select-CSFileInfo -FullName:$FullName -ReturnObject:(-Not $FullName)
-        }
-
-        $Subsequent = $true
-
-    }
-
-    End { If ( $jsonOut ) { $jsonOut | ConvertTo-Json } }
-}
-
 Function Select-ColdStoragePackagesToReport {
 Param (
     [Parameter(ValueFromPipeline=$true)] $Package,
@@ -904,7 +672,9 @@ Param (
     [switch] $FullName,
     [switch] $Report,
     [switch] $At,
-    [string] $Output
+    [switch] $Progress=$false,
+    [string] $Output,
+    $Context = $null
 )
 
     Begin { $CurDate = ( Get-Date ) }
@@ -914,9 +684,16 @@ Param (
         $CheckMirrored = ( $Mirrored -or $NotMirrored )
         $CheckCloud = ( $InCloud -or $NotInCloud )
 
-        $Location | Get-ChildItemPackages -Recurse:$Recurse -At:$At -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud |
+        If ( $Context ) {
+            $sContext = $Context
+        }
+        Else {
+            $sContext = $Location
+        }
+
+        $Location | Get-ChildItemPackages -Recurse:$Recurse -At:$At -ShowWarnings:$ShowWarnings -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -Progress:$Progress |
             Select-ColdStoragePackagesToReport -Bagged:$Bagged -Zipped:$Zipped -Unbagged:$Unbagged -Unzipped:$Unzipped -Mirrored:$Mirrored -NotMirrored:$NotMirrored -InCloud:$InCloud -NotInCloud:$NotInCloud -Only:$Only |
-            Write-ColdStoragePackagesReport -Report:$Report -Output:$Output -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -FullName:$FullName -Context:$Location -Timestamp:$CurDate
+            & write-packages-report-cs.ps1 -Output:( $( If ( $Report ) { $Output } Else { "ITEM" } ) ) -FullName:$FullName -Context:$sContext -Timestamp:$CurDate
     }
 
     End { }
@@ -1101,7 +878,9 @@ Else {
             -InCloud:$InCloud `
             -NotInCloud:$NotInCloud `
             -Only:$Only `
+            -Progress:$Progress `
             -FullName:$FullName `
+            -Context:$Context `
             -Report:$true `
             -At:$At `
             -Output:$Output
@@ -1169,7 +948,9 @@ Else {
             -Mirrored:$Mirrored -NotMirrored:$NotMirrored `
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
+            -Progress:$Progress `
             -FullName:$FullName `
+            -Context:$Context `
             -Report:$Report `
             -At:$At `
             -Output:$Output

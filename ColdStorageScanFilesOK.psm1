@@ -311,13 +311,13 @@ Param (
 }
 
 Function Select-WhereWeShallContinue {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ) )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ), [Int[]] $MaybeCodes=@( ) )
 
     Begin { }
 
     Process {
 
-        If ( $Item | Test-ShallWeContinue -Force:$Force -OKCodes:$OKCodes ) {
+        If ( $Item | Test-ShallWeContinue -Force:$Force -OKCodes:$OKCodes -MaybeCodes:$MaybeCodes ) {
             $Item
         }
 
@@ -327,8 +327,45 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int
 
 }
 
+Function Read-ShallWeContinueBasedOn {
+Param ( [Parameter(ValueFromPipeline=$true)] $Outcome, [switch] $Force=$false, [switch] $Stopped=$false, $MaybeTimeout=30 )
+
+    Begin { }
+
+    Process {
+        
+        If ( $Outcome ) {
+            $ExitCode = $Outcome.ExitCode
+            $Tag = $( If ( $Outcome.Tag ) { "[{0}] " -f $Outcome.Tag } Else { "" } )
+            
+            $Mesg = ( "{0}Exit Code {1:N0}" -f $Tag, $ExitCode )
+            $ShouldContinueMaybe = ( -Not $Stopped )
+            If ( $ShouldContinueMaybe ) {
+                If ( $Force ) {
+                    ( "{0}; continuing anyway due to -Force flag" -f $Mesg ) | Write-Warning
+                }
+                ElseIf ( ( $Outcome.Tag -eq 'clamav' ) -and ( $ExitCode -eq 2 ) ) {
+                    $ShouldContinueMaybe = ( & read-yesfromhost-cs.ps1 -Prompt ( "{0}. Continue?" -f $Mesg ) -Timeout:$MaybeTimeout )
+                }
+                Else {
+                    $ShouldContinueMaybe = ( & read-yesfromhost-cs.ps1 -Prompt ( "{0}. Continue?" -f $Mesg ) )
+                }
+            }
+            Else {
+                ( "{0}; stopped due to user input." -f $Mesg ) | Write-Warning
+            }
+
+            $ShouldContinueMaybe
+        }
+
+    }
+
+    End { }
+
+}
+
 Function Test-ShallWeContinue {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ) )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int[]] $OKCodes=@( 0 ), [Int[]] $MaybeCodes=@( ), $MaybeTimeout=30 )
 
     Begin { $result = $true }
 
@@ -345,26 +382,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Force=$false, [Int
 
         $ShouldWeContinue = "Y"
         $ErrorCodes |% {
-            $Error = $_
-            If ( $Error ) {
-                $ExitCode = $Error.ExitCode
-                $Tag = $( If ( $Error.Tag ) { "[{0}] " -f $Error.Tag } Else { "" } )
-            
-                $Mesg = ( "{0}Exit Code {1:N0}" -f $Tag, $ExitCode )
-                If ( $result ) {
-                    If ( $Force ) {
-                        ( "{0}; continuing anyway due to -Force flag" -f $Mesg ) | Write-Warning
-                        $ShouldWeContinue = "Y"
-                    }
-                    Else {
-                        $ShouldWeContinue = ( Read-Host ( "{0}. Continue (Y/N)? " -f $Mesg ) )
-                    }
-                }
-                Else {
-                    ( "{0}; stopped due to user input." -f $Mesg ) | Write-Warning
-                }
-
-                $result = ( $result -and ( $ShouldWeContinue -eq "Y" ) )
+            $Outcome = $_
+            If ( $Outcome ) {
+                $ContinueOK = ( $Outcome | Read-ShallWeContinueBasedOn -Force:$Force -Stopped:( -Not $result ) -MaybeTimeout:$MaybeTimeout )
+                $result = ( $result -and $ContinueOK )
             }
         }
     }

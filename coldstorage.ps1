@@ -25,8 +25,6 @@ Using Module ".\ColdStorageProgress.psm1"
 
 param (
     [Parameter(Position=0)] [string] $Verb,
-    [switch] $Development = $false,
-    [switch] $Production = $false,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
     [switch] $Diff = $false,
@@ -78,6 +76,8 @@ param (
     [string] $To,
     [switch] $Reverse = $false,
     [switch] $RoboCopy = $false,
+    [switch] $Progress = $false,
+    $Context = $null,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
 )
@@ -90,93 +90,12 @@ $Debug = $( If ( $Debug -eq $null ) { $false } Else { $Debug } )
 
 $global:gBucketObjects = @{ }
 
-Function Test-CSDevelopmentBranchDir {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
-
-    Process {
-        ( $Item.Name -like "*-development" )
+    Function Get-CSScriptDirectory {
+    Param ( $File=$null )
+        $ScriptPath = ( Split-Path -Parent $PSCommandPath )
+        If ( $File -ne $null ) { $ScriptPath = ( Join-Path "${ScriptPath}" -ChildPath "${File}" ) }
+        ( Get-Item -Force -LiteralPath "${ScriptPath}" )
     }
-
-}
-Function Get-CSProductionBranchDirName {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
-
-    Process {
-        $Item.Parent.FullName | Join-Path -ChildPath ( $Item.Name -replace "-development$", "" )
-    }
-
-}
-Function Get-CSDevelopmentBranchDirName {
-Param ( [Parameter(ValueFromPipeline=$true)] $Item=$null )
-
-    Process {
-        $Item.Parent.FullName | Join-Path -ChildPath ( "{0}-development" -f ( $Item.Name -replace "-development$","" ) )
-    }
-
-}
-
-Function Get-CSProductionBranchDir {
-Param ( $File=$null )
-
-    $ScriptPath = Get-Item -Force -LiteralPath ( Split-Path -Parent $PSCommandPath )
-    $ScriptPath = $( If ($ScriptPath | Test-CSDevelopmentBranchDir) { $ScriptPath | Get-CSProductionBranchDirName } Else { $ScriptPath.FullName } )
-
-    If ( $File -ne $null ) {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath | Join-Path -ChildPath $File ) )
-    }
-    Else {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath ) )
-    }
-
-}
-
-Function Get-CSDevelopmentBranchDir {
-Param ( $File=$null )
-
-    $ScriptPath = Get-Item -Force -LiteralPath ( Split-Path -Parent $PSCommandPath )
-    $ScriptPath = $( If ($ScriptPath | Test-CSDevelopmentBranchDir) { $ScriptPath.FullName } Else { $ScriptPath | Get-CSDevelopmentBranchDirName } )
-
-    If ( $File -ne $null ) {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath | Join-Path -ChildPath $File ) )
-    }
-    Else {
-        ( Get-Item -Force -LiteralPath ( $ScriptPath ) )
-    }
-
-}
-
-# Do we need to hand off control to an alternate branch of the script?
-If ( $Development -or $Production ) {
-    $ps1 = $( If ($Development) { ( Get-CSDevelopmentBranchDir -File ( Split-Path -Leaf $PSCommandPath ) ) } Else { ( Get-CSProductionBranchDir -File ( Split-Path -Leaf $PSCommandPath ) ) } )
-    $Branch = $( If ( $Development ) { "Development" } Else { "Production" } )
-    If ( $ps1 ) {
-
-        $aParameters = $MyInvocation.BoundParameters
-        $aParameters[$Branch] = $False
-        Write-Warning ( "[{0}] Invoking the {1} branch {2}" -f  $MyInvocation.MyCommand.Name, $Branch, $ps1.FullName )
-        & ( "{0}" -f $ps1.FullName ) @aParameters
-       
-    }
-    Else {
-        Write-Warning ( "[{0}] Could not find {1} branch for {2}" -f $MyInvocation.MyCommand.Name, $Branch, $PSCommandPath )
-    }
-    Exit
-}
-
-Function ColdStorage-Script-Dir {
-Param ( $File=$null )
-
-    $ScriptPath = ( Split-Path -Parent $PSCommandPath )
-    
-    If ( $File -ne $null ) {
-        $Item = ( Get-Item -Force -LiteralPath "${ScriptPath}\${File}" )
-    }
-    Else {
-        $Item = ( Get-Item -Force -LiteralPath $ScriptPath )
-    }
-
-    $Item
-}
 
 # External Dependencies - Modules
 Import-Module -Verbose:$false BitsTransfer
@@ -186,21 +105,21 @@ Import-Module -Verbose:$false Posh-SSH
 $bVerboseModules = ( $Debug -eq $true )
 $bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) )
 
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageData.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageInteraction.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageSettings.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageFiles.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageMirrorFunctions.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageRepositoryLocations.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStoragePackagingConventions.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageScanFilesOK.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageBagItDirectories.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageBaggedChildItems.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageStats.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageZipArchives.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToCloudStorage.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "ColdStorageToADPNet.psm1" )
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( ColdStorage-Script-Dir -File "LockssPluginProperties.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageData.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageInteraction.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageMirrorFunctions.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStoragePackagingConventions.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageScanFilesOK.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageBagItDirectories.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageBaggedChildItems.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageStats.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageZipArchives.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageToCloudStorage.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageToADPNet.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "LockssPluginProperties.psm1" )
 
 $global:gCSScriptName = $MyInvocation.MyCommand
 $global:gCSScriptPath = $MyInvocation.MyCommand.Definition
@@ -1053,6 +972,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
 
     Process {
         If ( $File ) {
+
             $oRepository = ( Get-FileRepositoryLocation -File $File )
             $sRepository = $oRepository.FullName
             $RepositorySlug = ( Get-FileRepositoryName -File $File )
@@ -1070,10 +990,27 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
             }
 
             ( "REPOSITORY: {0} - SLUG: {0}" -f $sRepository,$RepositorySlug ) | Write-Debug
-            ( "FROM:{0} -> TO:{1} [DIFF LEVEL: {0}]" -f $Src, $Dest, $DiffLevel ) | Write-Verbose
+            ( "FROM:{0} -> TO:{1} [DIFF LEVEL: {2:N0}]" -f $Src, $Dest, $DiffLevel ) | Write-Verbose
             
             If ( -Not $WhatIf ) {
                 Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy
+                
+                If ( Test-Path -LiteralPath "${Src}" -PathType Leaf ) {
+                    $srcPackage = ( $Src | Get-ItemPackage )
+                    $bBaggedElsewhere = ( $srcPackage.CSPackageBagLocation -and ( $srcPackage.CSPackageBagLocation.FullName -ne $srcPackage.FullName ) )
+                    If ( $bBaggedElsewhere ) {
+
+                        $bDoIt = ( -Not $Only )
+                        If ( $Only -and ( -Not $Batch ) ) {
+                            $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror bagged copy at {0}?" -f $srcPackage.CSPackageBagLocation ) )
+                        }
+
+                        If ( $bDoIt ) {
+                            $srcPackage.CSPackageBagLocation | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -WhatIf:$WhatIf
+                        }
+                    }
+                }
+
             }
             Else {
                 Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy"
@@ -1311,7 +1248,7 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
 
     If ( ( $What -eq "_" ) -and ( -not $Halt ) ) {
         
-        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $Locations = ( "." | & "${CSGetPackages}" -Items -Recurse -Bagged -Zipped -NotInCloud )
         Invoke-ColdStorageTo -Destination:$Destination -What:$Locations -Items -Diff:$Diff -WhatIf:$WhatIf -Report:$Report -ReportOnly:$ReportOnly -Batch:$Batch
 
@@ -1978,7 +1915,7 @@ Else {
     }
     ElseIf ( ("validate") -ieq $Verb ) {
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words } )
-        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $Locations | & "${CSGetPackages}" "${Verb}" -Items:$Items -Repository:$Repository `
             -Recurse:$Recurse `
             -At:$At `
@@ -1989,6 +1926,7 @@ Else {
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
             -FullName:$FullName `
+            -Context:$Context `
             -Report:$Report `
             -Output:$Output `
             -PassThru:$PassThru
@@ -2031,7 +1969,7 @@ Else {
         If ( $NoScan ) {
             $SkipScan = @( "clamav", "bagit", "zip" )
         }
-        $CSZipPackages = $( ColdStorage-Script-Dir -File "coldstorage-zip-packages.ps1" )
+        $CSZipPackages = $( Get-CSScriptDirectory -File "coldstorage-zip-packages.ps1" )
 
         $Locations | & "${CSZipPackages}" -Skip:$SkipScan 
 
@@ -2116,7 +2054,7 @@ Else {
     }
     ElseIf ( $Verb -eq "catchup" ) {
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
-        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
             -Unbagged -Report
         $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
@@ -2129,7 +2067,7 @@ Else {
     ElseIf ( $Verb -eq "packages" ) {
 
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
-        $CSGetPackages = $( ColdStorage-Script-Dir -File "coldstorage-get-packages.ps1" )
+        $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository `
             -Recurse:$Recurse `
             -At:$At `
@@ -2140,6 +2078,8 @@ Else {
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
             -FullName:$FullName `
+            -Context:$Context `
+            -Progress:$Progress `
             -Report:$Report `
             -Output:$Output
         
@@ -2186,9 +2126,8 @@ Else {
         Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$allObjects -Output:$Output
     }
     ElseIf ( $Verb -eq "zipname" ) {
-        $allObjects | ColdStorage-Command-Line -Default "${PWD}" | Get-FileObject |% {
-            [PSCustomObject] @{ "File"=($File.FullName); "Prefix"=($File | Get-ZippedBagNamePrefix ); "Container"=($File | Get-ZippedBagsContainer).FullName }
-        }
+        $CSGetPackageInformationZipName = $( Get-CSScriptDirectory -File "cs-get-package-information-zip-name.ps1" )
+        $allObjects | ColdStorage-Command-Line -Default "${PWD}" | & "${CSGetPackageInformationZipName}" -Debug:$Debug -Verbose:$Verbose
     }
     ElseIf ( $Verb -eq "update" ) {
         $Object, $Words = $Words

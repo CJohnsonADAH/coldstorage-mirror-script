@@ -22,6 +22,8 @@ Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageRepositoryLocations.psm1" )
 
+Function Get-CSItemPackageProgressId { 909 }
+
 #############################################################################################################
 ## PUBLIC FUNCTIONS: PIPELINE FOR PACKAGING #################################################################
 #############################################################################################################
@@ -690,7 +692,8 @@ Param (
     [switch] $CheckZipped=$false,
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
-    [switch] $ShowWarnings=$false
+    [switch] $ShowWarnings=$false,
+    [switch] $Progress=$false
 )
 
     Begin { }
@@ -698,6 +701,7 @@ Param (
     Process {
         $File = Get-FileObject($File)
         Write-Debug ( "Entered Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
+        If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status $File.FullName }
 
         If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
             Continue
@@ -714,6 +718,9 @@ Param (
         }
         ElseIf ( $File | Get-ItemFileSystemLocation | Test-ColdStoragePropsDirectory -NoPackageTest ) {
             $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $File.FullName )
+        }
+        ElseIf ( $Recurse -and ( $File.Name -like '.metadata' ) ) {
+            $aWarnings += @( "SKIPPED -- METADATA DIRECTORY: {0}" -f $File.FullName )
         }
         ElseIf ( Test-ZippedBag -LiteralPath $File.FullName ) {
             $aWarnings += @( "SKIPPED -- ZIPPED BAG: {0}" -f $File.FullName )
@@ -774,7 +781,7 @@ Param (
         ElseIf ( $Recurse -and ( Test-Path -LiteralPath $File.FullName -PathType Container ) ) {
             ( "RECURSE INTO DIRECTORY: {0}" -f $File.FullName ) | Write-Verbose
             $aContents = @( )
-            Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
+            Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -CheckMirrored:$CheckMirrored -ShowWarnings:$ShowWarnings -Progress:$Progress
         }
         ElseIf ( $Ascend ) {
             $aWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )
@@ -794,6 +801,11 @@ Param (
             #$Package.FullName | Write-Warning
             $mContents = ( $aContents | Measure-Object -Sum Length )
             #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
+
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedBagged" -Value:$true -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedMirrored" -Value:$CheckMirrored -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedZipped" -Value:$CheckZipped -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedCloud" -Value:$CheckCloud -Force
 
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $oBagLocation -Force
@@ -860,7 +872,7 @@ Param (
                 $Top = $( If ( $AscendTop ) { $AscendTop } Else { $File | Get-FileRepositoryLocation } )
                 ( "ASCEND UP TO DIRECTORY: {0} -> {1} | {2}" -f $File.FullName,$Parent.FullName,$Top.FullName ) | Write-Verbose
                 If ( $Parent.FullName -ne $Top.FullName ) {
-                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings
+                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings -Progress:$Progress
                 }
             }
         }
@@ -881,31 +893,34 @@ Param (
     [switch] $CheckZipped=$false,
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
-    [switch] $ShowWarnings=$false
+    [switch] $ShowWarnings=$false,
+    [switch] $Progress=$false
 )
 
-    Begin { }
+    Begin { If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status "-" } }
 
     Process {
+
         $oFile = ( Get-FileObject -File $File )
         Write-Debug ( "Get-ChildItemPackages({0} -> {1})" -f $File, $oFile.Name )
-        
+        If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status $oFile.FullName }
+
         If ( $oFile -eq $null ) {
             Write-Error ( "No such item: {0}" -f $File )
         }
         ElseIf ( $At -or ( Test-BagItFormattedDirectory -File $oFile ) ) {
-            Get-Item -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
+            Get-Item -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings -Progress:$Progress
 
         }
         Else {
 
-            Get-ChildItem -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings
+            Get-ChildItem -LiteralPath $oFile.FullName -Force | Get-ItemPackage -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings -Progress:$Progress
 
         }
 
     }
 
-    End { }
+    End { If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status "-" -Completed } }
 
 }
 
