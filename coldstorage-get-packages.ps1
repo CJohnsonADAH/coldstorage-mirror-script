@@ -672,6 +672,7 @@ Param (
     [switch] $FullName,
     [switch] $Report,
     [switch] $At,
+    [switch] $Ascend=$false,
     [switch] $Progress=$false,
     [string] $Output,
     $Context = $null
@@ -864,10 +865,17 @@ Else {
 
     $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
 
+    # Repository is inherently recursive; Items is not
+    $Recursive = ( $Recurse -or ( -Not $Items ))
+
+    $CheckZipped = ( $Zipped -or $Unzipped )
+    $CheckMirrored = ( $Mirrored -or $NotMirrored )
+    $CheckInCloud = ( $InCloud -or $NotInCloud )
+
     If ( $Verb -eq "report" ) {
 
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
-        $Locations | Invoke-ColdStoragePackagesReport -Recurse:( $Recurse -or ( -Not $Items )) `
+        $Locations | Invoke-ColdStoragePackagesReport -Recurse:$Recursive `
             -ShowWarnings:$Verbose `
             -Bagged:$Bagged `
             -Unbagged:$Unbagged `
@@ -906,6 +914,10 @@ Else {
         $Words = ( $Words | Get-CSCommandLine -Default @("Processed","Unprocessed", "Masters") )
         ( $Words | Get-RepositoryStats -Count:($Words.Count) -Verbose:$Verbose -Batch:$Batch ) | Out-CSData -Output:$Output
     }
+    ElseIf ( @( "for" ) -ieq $Verb ) {
+        $Locations = $( If ( $Items ) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
+        ( $Locations | Get-ItemPackage -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckInCloud -Ascend:( -Not $At ) )
+    }
     ElseIf ( @("in") -ieq $Verb ) {
         $Object, $Words = $Words
         $allObjects = ( @( $Words |? { $_ -ne $null } ) + @( $Input |? { $_ -ne $null } ) )
@@ -941,7 +953,7 @@ Else {
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $allObjects | Get-ColdStorageLocation -ShowWarnings } )
         $Locations = ( $Locations |? { -Not ( -Not ( $_  ) ) } )
 
-        $Locations | Invoke-ColdStoragePackagesReport -Recurse:( $Recurse -or ( -Not $Items )) `
+        $Locations | Invoke-ColdStoragePackagesReport -Recurse:$Recursive `
             -ShowWarnings:$Verbose `
             -Bagged:$Bagged -Unbagged:$Unbagged `
             -Zipped:$Zipped -Unzipped:$Unzipped `

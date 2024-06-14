@@ -1,18 +1,9 @@
 ﻿Param(
     [switch] $Stdout=$false,
     [switch] $Progress=$false,
-    [switch] $DisplayResult=$false
+    [switch] $DisplayResult=$false,
+    [switch] $PassThru=$false
 )
-
-$cmd = ( $MyInvocation.MyCommand )
-$cmdName = ( $cmd.Name )
-$cmdDir = ( Split-Path -LiteralPath $cmd.Source )
-
-# Internal Dependencies - Modules
-$bVerboseModules = ( $Debug -eq $true )
-$bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) )
-
-Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Join-Path -Path $cmdDir -ChildPath "ColdStorageSettings.psm1" )
 
 Function Get-BagitPyFilePath {
 Param ( $Path )
@@ -23,59 +14,106 @@ Param ( $Path )
 
 Function Get-BagitPyPath {
 
-    $BagIt = Get-PathToBagIt
-    If ( $BagIt ) {
-        Get-Item -Force -LiteralPath ( $BagIt | Join-Path -ChildPath "bagit.py" )
+    ( $env:PATH -split ';' ) |% {
+		$_
+		If ( $_.Length -gt 0 ) {
+		    $bagitSubDir = ( Join-Path "$_" -ChildPath "bagit-python" ) 
+		    If ( Test-Path $bagitSubDir -PathType Container ) {
+			    $bagitSubDir
+		    }
+        }
+		
+	} | Sort-Object -Unique |? { $_.Length -gt 0 } |? { Test-Path -PathType Leaf ( Get-BagitPyFilePath -Path $_ ) } |% { Get-Item -Force -LiteralPath ( Get-BagitPyFilePath -Path $_ ) } | Select-Object -First 1
+
+}
+
+Function Write-BagItOutput {
+Param( [Parameter(ValueFromPipeline=$true)] $Line, $args, [switch] $Progress=$false, [switch] $Stdout=$false, [switch] $DisplayResult=$false )
+    Begin {
+        $sActivity = "bagit.py {0}" -f ( $args -join " " )
+        $AfterErrorMessage = $false
     }
-    Else {
-        ( $env:PATH -split ';' ) |? { $_.Length -gt 0 } |? { Test-Path -PathType Leaf ( Get-BagitPyFilePath -Path $_ ) } |% { Get-Item -Force -LiteralPath ( Get-BagitPyFilePath -Path $_ ) }
+
+    Process {
+        
+        If ( $Progress ) {
+            If ( ( $Line -ne $null ) -and ( $Line.Length -gt 0 ) ) {
+                Write-Progress -Activity:( $sActivity ) -Status "${Line}"
+            }
+            If ( $DisplayResult -Or ( -Not $Stdout ) ) {
+                If ( $Line -match "^(([0-9\-\:\,]|\s)+)\s*-\s*([A-Z]+)\s-(.*)is\s+(in)?valid([:]|$)" ) {
+                    If ( $Matches[3] -eq "ERROR" ) {
+                        $FG = "Red"
+                    }
+                    ElseIf ( $Matches[3] -eq "INFO" ) {
+                        $FG = "Green"
+                    }
+                    Else {
+                        $FG = "Yellow"
+                    }
+                    Write-Host "${Line}" -ForegroundColor $FG
+                }
+                ElseIf ( $AfterErrorMessage -or ( $Line -match "^(([0-9\-\:\,]|\s)+)\s*-\s*(ERROR)\s-(.*)$" ) ) {
+                    $FG = "Red"
+                    Write-Host "${Line}" -ForegroundColor $FG
+                    $AfterErrorMessage = $true
+                }
+                # 2023-12-11 12:15:44,140 - ERROR
+            }
+        }
+        If ( $Stdout ) {
+            "${Line}"
+        }
+
+    }
+
+    End {
+        If ( $Progress ) {
+            Write-Progress -Activity $sActivity -Status "DONE" -Completed
+        }
     }
 
 }
 
 $PExit = 254
 
-$pythonExe = Get-ExeForPython
-$bagitPy = Get-BagItPyPath
-
-If ( $bagitPy ) {
+$bagitPy = $null
+$bagitArgs = $args
+Get-BagItPyPath |% {
+    $bagitPy = $_
     $bagitPyPath = $bagitPy.FullName
     If ( $Stdout -or $Progress ) {
-        $sActivity = "bagit.py {0}" -f ( $args -join " " )
-        & python.exe "${bagitPyPath}" $args 2>&1 |% {
-            If ( $Progress ) {
-                If ( ( $_ -ne $null ) -and ( $_.Length -gt 0 ) ) {
-                    Write-Progress -Activity:( $sActivity ) -Status "$_"
-                }
-                If ( $DisplayResult -or ( -Not $Stdout ) ) {
-                    If ( $_ -match "^(([0-9\-\:\,]|\s)+)\s*-\s*([A-Z]+)\s-(.*)is\s+(in)?valid([:]|$)" ) {
-                        If ( $Matches[3] -eq "ERROR" ) {
-                            $FG = "Red"
-                        }
-                        ElseIf ( $Matches[3] -eq "INFO" ) {
-                            $FG = "Green"
-                        }
-                        Else {
-                            $FG = "Yellow"
-                        }
-                        Write-Host "$_" -ForegroundColor $FG
-                    }
-                }
-            }
-            If ( $Stdout ) { "$_" }
-        }
+        
+        & python.exe "${bagitPyPath}" $bagitArgs 2>&1 | Write-BagItOutput -args:$bagitArgs -Progress:$Progress -Stdout:$Stdout -DisplayResult:$DisplayResult
         $PExit = $LASTEXITCODE
 
-        If ( $Progress ) {
-            Write-Progress -Activity $sActivity -Status "DONE" -Completed
-        }
     }
     Else {
-        & python.exe "${bagitPyPath}" $args
+
+        & python.exe "${bagitPyPath}" $bagitArgs
         $PExit = $LASTEXITCODE
+
     }
-} Else {
-    ( '[{0}] Could not locate bagit.py script; check your $env:PATH variable.' -f $cmdName ) | Write-Error
+
+    If ( $PassThru ) {
+        If ( $PExit -eq 0 ) {
+            $Item = $null
+            $bagitArgs |? { -not ( "$_" -match '^--' ) } |% {
+                If ( Test-Path -LiteralPath "$_" ) {
+                    $Item = ( Get-Item -LiteralPath "$_" -Force )
+                    $Item
+                }
+            }
+            If ( $Item -eq $null ) {
+                '[bagit.ps1] Could not determine directory for PassThru' | Write-Error
+            }
+        }
+    }
+
+}
+
+If ( -Not $bagitPy ) {
+    '[bagit.ps1] Could not locate bagit.py script; check your $env:PATH variable.' | Write-Error
 }
 
 Exit $PExit

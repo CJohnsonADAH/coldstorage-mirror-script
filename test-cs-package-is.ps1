@@ -59,18 +59,37 @@ Process {
     $CheckCloud = $Package.CSPackageCheckedCloud
 
     $bResult = ( $Package -ne $null )
+    
+    # -BAGGED / -UNBAGGED
+    If ( $CheckBagged ) {
+        $checked = $Package
+    }
+    Else {
+        # This can be checked on the fly if we don't have a cached result.
+        $checked = ( $Package | coldstorage-get-packages.ps1 for -Items -Bagged )
+        $CheckBagged = ( $checked -ne $null )
+    }
     If ( $CheckBagged ) {
         If ( $Bagged ) {
-            $bResult = ( $bResult -and $Package.CSPackageBagged )
+            $bResult = ( $bResult -and $checked.CSPackageBagged )
         }
         If ( $Unbagged ) {
-            $bResult = ( $bResult -and ( -Not $Package.CSPackageBagged ) )
+            $bResult = ( $bResult -and ( -Not $checked.CSPackageBagged ) )
         }
     }
 
+    # -MIRRORED / -NOTMIRRORED
     If ( $CheckMirrored ) {
-        $bIsMirrored = $Package.CSPackageMirrored
-        $sMirrorLocation = $Package.CSPackageMirrorLocation
+        $checked = $Package
+    }
+    Else {
+        # This can be checked on the fly if we don't have a cached result.
+        $checked = ( $Package | coldstorage-get-packages.ps1 for -Items -Mirrored )
+        $CheckMirrored = ( $checked -ne $null )
+    }
+    If ( $CheckMirrored ) {
+        $bIsMirrored = $checked.CSPackageMirrored
+        $sMirrorLocation = $checked.CSPackageMirrorLocation
 
         If ( $Mirrored ) {
             $bResult = ( $bResult -and $bIsMirrored )
@@ -80,6 +99,7 @@ Process {
         }
     }
 
+    # -ZIPPED / -UNZIPPED
     If ( $CheckZipped ) {
         $bIsZipped = ( $Package.CSPackageZip.Count -gt 0 )
         If ( $Zipped ) {
@@ -90,6 +110,7 @@ Process {
         }
     }
 
+    # -INCLOUD / -NOTINCLOUD
     If ( $CheckCloud ) {
         $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
         $bIsInCloud = ( $Package.CloudCopy -and $sZippedFile )

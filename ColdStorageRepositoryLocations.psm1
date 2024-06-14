@@ -675,9 +675,9 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
             $sParent = ( $sPath | Split-Path -Parent )
             $sChild = ( $sPath | Split-Path -Leaf )
             If ( $Depth -eq 0 ) {
-                "\ ${RepositoryRoot}" | Write-Debug
+                "[Split-MirrorMatchedPath] \ ${RepositoryRoot}" | Write-Debug
             }
-            ( "{0} {1}" -f ("." * ($Depth+1)), $sChild ) | Write-Debug
+            ( "[Split-MirrorMatchedPath] {0} {1}" -f ("." * ($Depth+1)), $sChild ) | Write-Debug
 
             $Rest = @( $null, $sParent )
             If ( $sParent ) {

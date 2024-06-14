@@ -603,10 +603,16 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
             $Items = ( Get-ChildItem -Force -LiteralPath "${To}" )
             If ( $Items.Count -gt 0 ) {
                 $DoTheMove = $Force
+                $DoTheRepair = $false
 
                 If ( -Not $DoTheMove ) {
                     If ( -Not $Batch ) {
                         $DoTheMove = ( Read-YesFromHost -Prompt ( "Move {0} contents into BagIt data payload directory?" -f "${To}" ) )
+                    }
+                }
+                If ( -Not $DoTheMove ) {
+                    If ( -Not $Batch ) {
+                        $DoTheRepair = ( Read-YesFromHost -Prompt ( "Repair {0} contents from BagIt data payload directory?" -f "${To}" ) )
                     }
                 }
 
@@ -620,10 +626,13 @@ Param ($From, $To, $DiffLevel=1, $Depth=0, [switch] $Batch=$false, [switch] $For
 
                 }
                 Else {
-            
-                    $oPayload = ( Get-FileObject($From) | Select-BagItPayloadDirectory )
-                    $From = $oPayload.FullName
-
+                    If ( -Not $DoTheRepair ) {
+                        $oPayload = ( Get-FileObject($From) | Select-BagItPayloadDirectory )
+                        $From = $oPayload.FullName
+                    }
+                    Else {
+                        # NOOP
+                    }
                 }
 
             }
