@@ -21,6 +21,7 @@ Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageScanFilesOK.psm1" )
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
 Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageZipArchives.psm1" )
 
 Function Get-CSItemPackageProgressId { 909 }
 
@@ -353,7 +354,7 @@ Function Get-PathToBaggedCopyOfLooseFile {
     Process {
         $Prefix = ""
         if ( $FullName ) {
-            $Prefix = $File.Directory
+            $Prefix = $File.Directory.FullName
             $Prefix = "${Prefix}\"
         }
         $FileName = $File.Name
@@ -409,41 +410,50 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
 
                 $oContainer = $oFile.Parent
                 If ( $oContainer ) {
-
-                    $sContainer = $oContainer.FullName
-                    $Counterpart = ( $sContainer | Join-Path -ChildPath $Payload.Name | Get-FileObject )
-
-                    If ( $Counterpart ) {
-
-                        # We found a viable counterpart. But let's give other tests a chance to disqualify it.
-                        If ( $DiffLevel -gt 0 ) {
-
-                            If ( Test-DifferentFileContent -From $Payload -To $Counterpart -DiffLevel $DiffLevel ) {
-                                
-                                $Counterpart = $null
-
-                                If ( $ShowWarnings ) {
-
-                                    ( "[$sContext] {0} bag payload {1} matches to a loose file's name, but contents differ!" -f $oFile.FullName,$Payload.Name ) | Write-Warning                                
-
-                                }
-
-                            }
-                                                        
+                    $Counterpart = $null
+                    $BagContainers = ( Get-BaggedCopyContainerSubdirectories )
+                    $BagContainers | ForEach-Object {
+                        
+                        If ( '.' -eq $_ ) {
+                            $sContainer = $oContainer.FullName
                         }
+                        ElseIf ( $oContainer.Name -eq $_ ) {
+                            $sContainer = $oContainer.Parent.FullName
+                        }
+
+                        $Counterpart = ( $sContainer | Join-Path -ChildPath $Payload.Name | Get-FileObject )
 
                         If ( $Counterpart ) {
-                            $Counterpart
-                        }
 
+                            # We found a viable counterpart. But let's give other tests a chance to disqualify it.
+                            If ( $DiffLevel -gt 0 ) {
+
+                                If ( Test-DifferentFileContent -From $Payload -To $Counterpart -DiffLevel $DiffLevel ) {
+                                
+                                    $Counterpart = $null
+
+                                    If ( $ShowWarnings ) {
+                                    
+                                        ( "[$sContext] {0} bag payload {1} matches to a loose file's name, but contents differ!" -f $oFile.FullName,$Payload.Name ) | Write-Warning                                
+
+                                    }
+
+                                }
+                                                        
+                            }
+
+                            If ( $Counterpart ) {
+                                $Counterpart
+                            }
+                        }
                     }
-                    ElseIf ( $ShowWarnings ) {
+
+                    If ( ( $Counterpart -eq $null ) -and $ShowWarnings ) {
 
                         ( "[$sContext] {0} bag payload {1} does not match to a loose file." -f $oFile.FullName,$Payload.Name ) | Write-Warning
 
                     }
 
-                    
                 }
                 ElseIf ( $ShowWarnings ) {
 
@@ -469,6 +479,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
     End { }
 }
 
+Function Get-BaggedCopyContainerSubdirectories {
+    "."
+    ".bagged"
+}
+
 Function Get-BaggedCopyOfLooseFile {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
@@ -481,11 +496,18 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
     If ( Test-LooseFile($File) ) {
         $oFile = Get-FileObject($File)
         $Parent = $oFile.Directory
-        $Wildcard = ( $oFile | Get-PathToBaggedCopyOfLooseFile -Wildcard )
-        $match = ( Get-ChildItem -Directory $Parent | Select-BaggedCopiesOfLooseFiles -Wildcard $Wildcard | Select-BaggedCopyMatchedToLooseFile -File $oFile )
+        
+        $BagContainers = ( Get-BaggedCopyContainerSubdirectories )
+        $BagContainers | ForEach-Object {
+            $Wildcard = ( $oFile | Get-PathToBaggedCopyOfLooseFile -Wildcard )
+            $Container = ( Join-Path $Parent.FullName -ChildPath $_ )
 
-        if ( $match.Count -gt 0 ) {
-            $result = $match
+            If ( Test-Path -LiteralPath $Container -PathType Container ) {
+                $match = ( Get-ChildItem -Directory $Container | Select-BaggedCopiesOfLooseFiles -Wildcard $Wildcard | Select-BaggedCopyMatchedToLooseFile -File $oFile )
+                If ( $match.Count -gt 0 ) {
+                    $result = $match
+                }
+            }
         }
     }
 
@@ -682,10 +704,108 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $PassThru=$false
     End { }
 }
 
+Function Add-ItemPackageMirrorData {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    [switch] $Force=$false,
+    [switch] $PassThru=$false
+)
+
+    Begin { }
+
+    Process {
+        If ( $Package ) {
+
+            $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedMirror )
+
+            If ( $Force -or $NotYetChecked ) {
+                $bMirrorCopy = $false
+                $oMirrorCopy = $null
+                $sMirrorCopy = $null
+
+                # Is it mirrored at all?
+                $cold = ( $File | Get-MirrorMatchedItem -ColdStorage )
+
+                If ( $cold.Count -gt 0 ) {
+                    $bMirrorCopy = ( Test-Path -LiteralPath $cold )
+                    If ( $bMirrorCopy ) {
+                        $oMirrorCopy = ( Get-Item -Force -LiteralPath $cold )
+                        $sMirrorCopy = $oMirrorCopy.FullName
+                    }
+                }
+
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrored" -Value $bMirrorCopy -Force
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrorLocation" -Value $sMirrorCopy -Force
+                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrorCopy" -Value $oMirrorCopy -Force
+
+            }
+        }
+
+        If ( $PassThru ) {
+            $Package | Write-Output
+        }
+
+    }
+
+    End { }
+}
+
+Function Add-ItemPackageCloudCopyData {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    [switch] $Force=$false,
+    [switch] $PassThru=$false
+)
+
+    Begin { }
+
+    Process {
+
+        $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedCloud )
+
+        If ( $Force -or $NotYetChecked ) {
+
+            $aZipped = $Package.CSPackageZip
+            If ( $aZipped.Name ) {
+
+                $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
+                $aListing = ( $oListing | Get-TablesMerged )
+                    
+                $aZipped |% {
+                    $itemZipped = $_
+                    $itemZippedName = ( $itemZipped.Name -replace "[.]json$","" )
+                    $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $itemZippedName ) ) )
+                    If ( $aListing.ContainsKey( $itemZippedName ) ) {
+                        $Copy = $aListing[ $itemZippedName ]
+                        If ( $oCloudCopy -eq $null ) {
+                            $oCloudCopy = $Copy
+                        }
+                        Else {
+                            $oCloudCopy = @( $oCloudCopy ) + @( $Copy )
+                        }
+                    }
+                }
+            }
+
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCloudCopy" -Value $oCloudCopy -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $oCloudCopy -Force
+
+        }
+
+        If ( $PassThru ) {
+            $Package | Write-Output
+        }
+
+    }
+
+    End { }
+}
+
 
 Function Get-ItemPackage {
 Param (
     [Parameter(ValueFromPipeline=$true)] $File,
+    [switch] $At=$false,
     [switch] $Recurse=$false,
     [switch] $Ascend=$false,
     $AscendTop=$null,
@@ -700,7 +820,7 @@ Param (
 
     Process {
         $File = Get-FileObject($File)
-        Write-Debug ( "Entered Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
+        Write-Debug ( "Entered Get-ItemPackage: {0} -At:{1} -Recurse:{2} -Ascend:{3} -AscendTop:{4} -CheckZipped:{5} -ShowWarnings:{6}" -f $File.FullName, $At, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
         If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status $File.FullName }
 
         If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
@@ -798,70 +918,45 @@ Param (
 
         If ( $aContents.Count -gt 0 ) {
             $Package = $File
-            #$Package.FullName | Write-Warning
+            
             $mContents = ( $aContents | Measure-Object -Sum Length )
             #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
-
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedBagged" -Value:$true -Force
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedMirrored" -Value:$CheckMirrored -Force
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedZipped" -Value:$CheckZipped -Force
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCheckedCloud" -Value:$CheckCloud -Force
 
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $oBagLocation -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
-            
-            $bMirrorCopy = $false
-            $oMirrorCopy = $null
-            $sMirrorCopy = $null
-            If ( $CheckMirrored ) {
-                # Is it mirrored at all?
-                $cold = ( $File | Get-MirrorMatchedItem -ColdStorage )
-
-                If ( $cold.Count -gt 0 ) {
-                    $bMirrorCopy = ( Test-Path -LiteralPath $cold )
-                    If ( $bMirrorCopy ) {
-                        $oMirrorCopy = ( Get-Item -Force -LiteralPath $cold )
-                        $sMirrorCopy = $oMirrorCopy.FullName
-                    }
-                }
-            }
 
             $oCloudCopy = $null
             If ( $aZipped -ne $false ) {
                 $Package | Add-Member -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
-
-                If ( $aZipped.Name -and $CheckCloud ) {
-                    $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
-                    $aListing = ( $oListing | Get-TablesMerged )
-                    
-                    $aZipped |% {
-                        $itemZipped = $_
-                        $itemZippedName = ( $itemZipped.Name -replace "[.]json$","" )
-                        $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $itemZippedName ) ) )
-                        If ( $aListing.ContainsKey( $itemZippedName ) ) {
-                            $Copy = $aListing[ $itemZippedName ]
-                            If ( $oCloudCopy -eq $null ) {
-                                $oCloudCopy = $Copy
-                            }
-                            Else {
-                                $oCloudCopy = @( $oCloudCopy ) + @( $Copy )
-                            }
-                        }
-                    }
-                }
             }
 
             If ( $CheckMirrored ) {
-                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrored" -Value $bMirrorCopy -Force
-                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrorLocation" -Value $sMirrorCopy -Force
-                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageMirrorCopy" -Value $oMirrorCopy -Force
+                $Package | Add-ItemPackageMirrorData
             }
 
             If ( $CheckCloud ) {
-                $Package | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $oCloudCopy -Force
+                $Package | Add-ItemPackageCloudCopyData
             }
+
+            $aPackageChecked = @{
+                "Bagged"=( $Package.CSPackageCheckedBagged -or ( [bool] $true ) )
+                "Mirrored"=( $Package.CSPackageCheckedMirrored -or ( [bool] $CheckMirrored ) )
+                "Zipped"=( $Package.CSPackageCheckedZipped -or ( [bool] $CheckZipped ) )
+                "Cloud"=( $Package.CSPackageCheckedCloud -or ( [bool] $CheckCloud ) )
+            }
+
+            $PackageChecked = ( $Package.CSPackageChecked )
+            @( "Bagged", "Mirrored", "Zipped", "Cloud" ) | ForEach-Object {
+                $CheckedPropertyName = ( "CSPackageChecked{0}" -f $_ )
+                $Package | Add-Member -MemberType NoteProperty -Name:$CheckedPropertyName -Value:$aPackageChecked[ $_ ] -Force    
+                If ( $aPackageChecked[ $_ ] ) {
+                    $PackageChecked = @( $PackageChecked ) + @( "$_".ToLower() )
+                }
+            }
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageChecked" -Value:( $PackageChecked | Select-Object -Unique ) -Force
+
 
             $Package | Write-Output
         }
@@ -872,7 +967,7 @@ Param (
                 $Top = $( If ( $AscendTop ) { $AscendTop } Else { $File | Get-FileRepositoryLocation } )
                 ( "ASCEND UP TO DIRECTORY: {0} -> {1} | {2}" -f $File.FullName,$Parent.FullName,$Top.FullName ) | Write-Verbose
                 If ( $Parent.FullName -ne $Top.FullName ) {
-                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -ShowWarnings:$ShowWarnings -Progress:$Progress
+                    $Parent | Get-ItemPackage -Ascend:$Ascend -AscendTop:$Top -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -ShowWarnings:$ShowWarnings -Progress:$Progress
                 }
             }
         }

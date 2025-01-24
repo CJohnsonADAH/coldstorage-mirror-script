@@ -5,6 +5,8 @@
     [switch] $ER=$false,
     [switch] $Loop=$false,
     [switch] $SU=$false,
+    [switch] $Catchup=$false,
+    $InputTimeout=60,
     $Path=@()
 )
 
@@ -69,7 +71,7 @@ Function Invoke-CSMirrorCheckup {
     }
 
     Process {
-        $_ | Write-Warning
+        ( "[Invoke-CSMirrorCheckup] Process: {0}" -f "$_" ) | Write-Verbose
         $oRepository = ( $_ | & "${cmdCSScript}" repository -Items )
         $oPackages = ( Get-Item $_.FullName | & "${cmdCSGetPackages}" -At -Items )
         If ( $oPackages.Count -gt 0 ) {
@@ -121,7 +123,7 @@ Function Invoke-CSMirrorCheckup {
                         & coldstorage bag -Bundle -Items $_.FullName -PassThru | & coldstorage zip -Items -PassThru | & coldstorage to cloud -Items
                     }
                     If ( $DoMirror ) {
-                        & coldstorage mirror -Items $_.FullName -RoboCopy
+                        & coldstorage mirror -Items $_.FullName -RoboCopy -Scheduled
                     }
 
                 }
@@ -159,6 +161,25 @@ Function Invoke-CSMirrorCheckup {
 
 # }
 
+Function Get-CSRepositoryLogFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $Dir )
+
+    $Container = ( Join-Path $Dir -ChildPath ".coldstorage\logs" )
+    If ( -Not ( Test-Path $Container -PathType Container ) ) {
+        If ( -Not ( Test-Path $Container ) ) {
+            $ContainerItem = ( New-Item $Container -ItemType:Directory -Confirm -Force )
+        }
+        Else {
+            Get-Item $Container | Write-Warning
+            "I HAVE NO IDEA WHAT TO DO!!!" | Write-Error
+            Exit 255
+        }
+    }
+
+    ( Join-Path $Container -ChildPath "mirror-checkup.log" ) | Write-Output
+
+}
+
 $Invoc = $MyInvocation
 $cmd = $Invoc.MyCommand
 If ( -Not ( Test-UserHasNetworkAccess ) ) {
@@ -175,25 +196,17 @@ If ( -Not ( Test-UserHasNetworkAccess ) ) {
     }
 }
 Else {
-    ( "[{0}] User has network access to {1}; good to go!" -f $cmd.Name,( Get-ColdStorageAccessTestPath ) ) | Write-Warning
+    ( "[{0}] User has network access to {1}; good to go!" -f $cmd.Name,( Get-ColdStorageAccessTestPath ) ) | Write-Verbose
 }
 
 $Automat = $false
 $ContinueLoop = $Loop
 
-$ERProcessed = "H:\ElectronicRecords\Processed"
-$ERProcessed_LogDir = ( Join-Path $ERProcessed -ChildPath ".coldstorage\logs" )
-If ( -Not ( Test-Path $ERProcessed_LogDir -PathType Container ) ) {
-    If ( -Not ( Test-Path $ERProcessed_LogDir ) ) {
-        New-Item $ERProcessed_LogDir -ItemType:Directory -Confirm -Force
-    }
-    Else {
-        "I HAVE NO IDEA WHAT TO DO!!!" | Write-Warning
-        Get-Item $ERProcessed_LogDir
-        Exit 255
-    }
-}
-$ERProcessed_LogFile = ( Join-Path $ERProcessed_LogDir -ChildPath "mirror-checkup.log" )
+$dirQNumbers = "H:\Digitization\Masters\Q_numbers"
+$dirERUnprocessed = "H:\ElectronicRecords\Unprocessed"
+$dirERProcessed = "H:\ElectronicRecords\Processed"
+
+$ERProcessed_LogFile = ( $dirERProcessed | Get-CSRepositoryLogFile )
 
 Do {
     If ( $Loop ) {
@@ -202,12 +215,19 @@ Do {
 
     If ( $ER ) {
         $Automat = $true
-        Push-Location $ERProcessed
+        Push-Location $dirERProcessed
 
         $T0 = ( Get-Date )
 
-        $ProcessedWindow=20
-        $ProcessedTimeout=( New-TimeSpan -Minutes:30 )
+        If ( $Q ) {
+            $ProcessedWindow=20
+            $ProcessedTimeout=( New-TimeSpan -Minutes:30 )
+        }
+        Else {
+            $ProcessedWindow=60
+            $ProcessedTimeout=( New-TimeSpan -Minutes:60 )
+        }
+
 
         $ERProcessed_Dirs = @()
         $LogWriteWindow = ( $T0 - ( [DateTime]::Parse("1/1/1970 00:00") ) )
@@ -224,21 +244,15 @@ Do {
         }
 
         "ER-Processed: {0} ({1})" -f ( $T0 ),$ProcessedWindow | Write-Host
-        "" | Write-Host
-        "" | Write-Host
-        "" | Write-Host
-        "" | Write-Host
-        "" | Write-Host
-        "ER-Processed: {0} ({1})" -f ( $T0 ),$ProcessedWindow | Write-Host
         
-        & report-status-erprocessed.ps1 -Directories:$ProcessedWindow -Tiemout:$ProcessedTimeout -RandomOrder -Progress -LogFile:$ERProcessed_LogFile -PassThru | & sync-cs-packagetopreservation.ps1 -InputTimeout:-1
+        & report-status-erprocessed.ps1 -Directories:$ProcessedWindow -Timeout:$ProcessedTimeout -RandomOrder -Progress -LogFile:$ERProcessed_LogFile -PassThru | & sync-cs-packagetopreservation.ps1 -InputTimeout:$InputTimeout
         
         $TN = ( Get-Date )
         Write-Progress -Activity "Scanning ER-Processed" -Completed ; ( $TN- $T0 )
         
         Pop-Location
 
-        Push-Location H:\ElectronicRecords\Unprocessed
+        Push-Location $dirERUnprocessed
     
         "ER-Unprocessed: {0}" -f ( Get-Date )
         & coldstorage.ps1 packages -Zipped -Mirrored -InCloud -Items . |% {
@@ -255,11 +269,11 @@ Do {
     If ( $Q ) {
         $Automat = $true
 
-        Push-Location H:\Digitization\Masters\Q_numbers
+        Push-Location $dirQNumbers
         Get-Item Master,Altered |% {
             "DA-Q {0}: {1}" -f $_.Name,( Get-Date )
             Push-Location $_.FullName ;
-            &coldstorage-mirror-checkup.ps1 -SU:$SU ;
+            &coldstorage-mirror-checkup.ps1 -SU:$SU -InputTimeout:$InputTimeout ;
             Pop-Location
         }
         Pop-Location

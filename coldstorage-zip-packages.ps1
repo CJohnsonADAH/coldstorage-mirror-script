@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation Packages compression script
-@version 2024.0102
+@version 2025.0116
 
 .PARAMETER Skip
 coldstorage zip -Skip allows you to bypass potentially time-consuming steps in the process, like clamav scans, bagit validation, and zip checksum validation. Usually you shouldn't. They're important.
@@ -14,6 +14,7 @@ coldstorage-zip-packages uncache: Replace original binary archive of a zipped pa
 Using Module ".\ColdStorageProgress.psm1"
 
 Param (
+    [switch] $Items = $false,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
 	[switch] $Batch = $false,
@@ -91,7 +92,7 @@ Param ( [string] $Verb="", $Words=@( ), $Flags=@{ } )
 #############################################################################################################
 
 Function Compress-CSBaggedPackage {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Batch = $false, [String[]] $Skip=@() )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Batch = $false, [String[]] $Skip=@(), [switch] $WhatIf )
 
 Begin { }
 
@@ -101,6 +102,7 @@ Process {
     $Progress.Open( ( "Processing {0}" -f "${sArchive}" ), "Validating bagged preservation package", 5 )
 
     If ( Test-BagItFormattedDirectory -File $File ) {
+
         $oFile = Get-FileObject -File $File
         $sFile = Get-FileLiteralPath -File $File
 
@@ -114,49 +116,55 @@ Process {
 
             $Result = $null
 
+            # Idempotent: if you have created a zip of this bag before in a location that we know to look in, return that zip or its JSON placeholder
             If ( $oZip.Count -gt 0 ) {
                 $asArchiveHashed = ( $oZip | Sort-Object -Property LastWriteTime -Descending |% { $oZip.FullName } )
                 $sArchiveHashed = ( $asArchiveHashed | Select-Object -First 1 )
-                $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"=$sArchiveHashed; "Zips"=$asArchiveHashed; "New"=$false; "Validated"=$Validated; "Compressed"=$null }
+                $Result = @( [PSCustomObject] @{ "Bag"=$sFile; "Zip"=$sArchiveHashed; "Zips"=$asArchiveHashed; "New"=$false; "Validated"=$Validated; "Compressed"=$null } )
                 $Progress.Update( "Located archive with MD5 Checksum", 2 )
             }
             Else {
+                $Result = @( )
+
                 $Progress.Update( "Compressing archive" )
 
                 $oRepository = ( $oFile | Get-ZippedBagsContainer )
                 $sRepository = $oRepository.FullName
 
-                $ts = $( Date -UFormat "%Y%m%d%H%M%S" )
-                $sZipPrefix = ( Get-ZippedBagNamePrefix -File $oFile )
-
-                $sZipName = "${sZipPrefix}_z${ts}"
-
+                $sAlgorithm='MD5'
+                $oTS = ( Get-Date )
+                $sZipName = ( Get-ZippedBagNamePrefix -File $oFile -Extension:'zip' )
                 If ( $sRepository ) {
-                    $sArchive = ( $sRepository | Join-Path -ChildPath "${sZipName}.zip" )
+        
+                    $sArchive = ( $sRepository | Join-Path -ChildPath:$sZipName )
 
-                    $CompressResult = ( $sFile | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath ${sArchive} )
+                    $Progress.Update( "Compressing archive {0}" -f $sArchive )
+                    $Package = ( $sFile | Get-ItemPackage -Ascend )
 
-                    $Progress.Update( "Computing MD5 checksum" )
-                    If ( -Not $WhatIf ) {
-                        $md5 = $( Get-FileHash -LiteralPath "${sArchive}" -Algorithm MD5 ).Hash.ToLower()
+                    $Package | Add-ZippedBagOfPreservationPackage -Force
+
+                    If ( $Package.CSPackageZip ) {
+                        $Package.CSPackageZip |% {
+
+                            $oZip = $_
+                            $Progress.Update( ( "Computing {0} checksum" -f $sAlgorithm ) )    
+                            
+                            $oZip | Add-CSFileChecksum -Algorithm:$sAlgorithm
+                            $sArchiveHashed = ( $Package | Get-ZippedBagNameWithMetadata -Repository:$sRepository -TS:$oTS -Hash:( $oZip | Get-CSFileChecksum -Algorithm:$sAlgorithm ) -HashAlgorithm:$sAlgorithm )
+                            If ( $sArchiveHashed ) {
+                                Move-Item -LiteralPath:$oZip.FullName -Destination:$sArchiveHashed -Verbose -WhatIf:$WhatIf
+                            }
+                            Else {
+                                ( "[Compress-CSBaggedPackage] Failed to move '{0}' to '{1}'" -f $oZip.FullName,$sArchiveHashed ) | Write-Warning
+                            }
+                            $Result = @( $Result ) + @( [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$true; "Validated-Bag"=$Validated; "Compressed"=$oZip.CSCompressArchiveResult } )
+
+                        }
                     }
                     Else {
-                        $stream = [System.IO.MemoryStream]::new()
-                        $writer = [System.IO.StreamWriter]::new($stream)
-                        $writer.write($sArchive)
-                        $writer.Flush()
-                        $stream.Position = 0
-                        $md5 = $( Get-FileHash -InputStream $stream ).Hash.ToLower()
-                    }
+                        ( "[Compress-CSBaggedPackage] Failed to compress '{0}' to '{1}'" -f $Package.FullName,$sZipName ) | Write-Warning
+                     }
 
-                    $sZipHashedName = "${sZipName}_md5_${md5}"
-                    $sArchiveHashed = ( $sRepository | Join-Path -ChildPath "${sZipHashedName}.zip" )
-
-                    If ( -Not $WhatIf ) {
-                        Move-Item -WhatIf:$WhatIf -LiteralPath $sArchive -Destination $sArchiveHashed
-                    }
-
-                    $Result = [PSCustomObject] @{ "Bag"=$sFile; "Zip"="${sArchiveHashed}"; "New"=$true; "Validated-Bag"=$Validated; "Compressed"=$CompressResult }
                 }
                 Else {
                     ( "[Compress-CSBaggedPackage] Could not determine destination container for path: '{0}'" -f $oFile.FullName ) | Write-Warning
@@ -166,9 +174,13 @@ Process {
             
             $Progress.Update( "Testing zip file integrity" )
 
-            If ( $Result -ne $null ) {
-                $Result | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed -Skip:$Skip )
-                $Result | Write-Output
+            If ( ( $Result -ne $null ) -and ( $Result.Count -gt 0 ) ) {
+                
+                $Result |% {
+                    $_ | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed -Skip:$Skip )
+                    $_ | Write-Output
+                }
+
             }
 
         }
@@ -208,7 +220,7 @@ Else {
         $global:gScriptContextName = $sCommandWithVerb
     }
 
-    If ( $Verb -iin ( "test", "uncache" ) ) {
+    If ( $Verb -iin ( "test", "uncache", "get", "compress" ) ) {
         $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
     }
     Else {
@@ -243,11 +255,17 @@ Else {
         }
         #|% { $pack = $_ ; $pack.CSPackageZip |% { $ZipName = $_.FullName ; If ( $ZipName -like '*.json' ) { $NewName = $ZipName } Else { $ZipName | Write-Warning ; $NewName = ( "{0}.json" -f $ZipName ) ; $pack.CloudCopy | ConvertTo-Json > $ZipName ; Move-Item $ZipName $NewName -Verbose } } }
     }
+    ElseIf ( $Verb -eq "get" ) {
+        $allObjects |% {
+            $Package = ( $_ | Get-ItemPackage )
+            $Package | Get-ZippedBagOfUnzippedBag
+        }
+    }
     ElseIf ( $Verb -eq "compress" ) {
         $allObjects |% {
             $sFile = Get-FileLiteralPath -File $_
             If ( Test-BagItFormattedDirectory -File $sFile ) {
-                $_ | Compress-CSBaggedPackage -Skip:$Skip
+                $_ | Compress-CSBaggedPackage -Skip:$Skip -WhatIf:$WhatIf
             }
             ElseIf ( Test-LooseFile -File $_ ) {
                 $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
@@ -259,7 +277,7 @@ Else {
                 }
             }
             Else {
-                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Compress-CSBaggedPackage -Skip:$Skip
+                $_ | Get-Item -Force |% { Get-BaggedChildItem -LiteralPath $_.FullName } | Compress-CSBaggedPackage -Skip:$Skip -WhatIf:$WhatIf
             }
         }
     }

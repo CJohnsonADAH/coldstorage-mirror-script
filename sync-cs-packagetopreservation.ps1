@@ -19,7 +19,11 @@ Begin {
 }
 
 Process {
+    $DeferredFile = ( & get-deferred-preservation-jobs-cs.ps1 | Select-Object -First 1 )
     If ( $Package | test-cs-package-is ) {
+
+        $PassThru = $false
+        $SkipOver = $false
 
         If ( ( -Not $NoMirror ) -and ( $Package | test-cs-package-is -Unmirrored ) ) {
 
@@ -29,11 +33,14 @@ Process {
             }
             If ( $DoIt ) {
                 $Package | & coldstorage mirror -Items
+                $PassThru = $true
             }
+            Else {
+                ( "{0} | & coldstorage mirror -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+            }
+
         }
 
-        $PassThru = $false
-        $SkipOver = $false
         If ( $Package | test-cs-package-is -Unbagged ) {
             $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
             $DefaultLeaveDo = $( If ( $PassThru ) { "bag package" } Else { "leave unbagged" } )
@@ -57,6 +64,9 @@ Process {
                 $PassThru = $true
                 $SkipOver = $false
             }
+            Else {
+                ( "{0} | & coldstorage bag -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+            }
         }
         If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -Unzipped ) ) ) {
             $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
@@ -75,6 +85,9 @@ Process {
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false
+            }
+            Else {
+                ( "{0} | & coldstorage zip -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
             }
         }
         If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -NotInCloud ) ) ) {
@@ -95,6 +108,9 @@ Process {
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false
+            }
+            Else {
+                ( "{0} | & coldstorage to cloud -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
             }
         }
     

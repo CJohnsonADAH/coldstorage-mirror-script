@@ -41,4 +41,36 @@ Outputs the computed MD5 hash for the input string, or hashes for each of severa
     }
 }
 
+Function Get-StringChecksum {
+Param ( [Parameter(ValueFromPipeline=$true)] $Line, $Text=$null, $Algorithm="MD5" )
+    Begin { }
+
+    Process {
+
+        If ( $Line -ne $null ) {
+
+            $stream = [System.IO.MemoryStream]::new()
+            $writer = [System.IO.StreamWriter]::new( $stream )
+            $writer.write( $Line )
+            $writer.Flush()
+            $stream.Position = 0
+
+            $oHash = ( Get-FileHash -InputStream:$stream -Algorithm:$Algorithm )
+            If ( $oHash ) {
+                $oHash.Hash
+            }
+
+        }
+
+    }
+
+    End { 
+        If ( $Text -ne $null ) {
+            $Text | Get-StringChecksum -Algorithm:$Algorithm
+        }
+    }
+
+}
+
 Export-ModuleMember -Function Get-StringMD5
+Export-ModuleMember -Function Get-StringChecksum

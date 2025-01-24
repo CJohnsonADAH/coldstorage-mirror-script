@@ -659,6 +659,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
     }
 
     Process {
+        "[Split-MirrorMatchedPath] {0}" -f $LiteralPath | Write-Debug
         If ( $Props -eq $null ) {
             $Props = ( $LiteralPath | Get-FileRepositoryProps )
         }
@@ -758,25 +759,54 @@ Process {
             $Locations = $mirrors[$Pair].Locations
         }
 
+        $HereThereDiagLines = @(
+            "-----",
+            "HERE",
+            "-----"
+        )
+
         $Here = (
             $Locations | Get-Member -MemberType NoteProperty |% {
                 $PropName = $_.Name
                 $PropValue = $Locations.${PropName}
-                If ( $PropValue -eq $Stock ) {
+                $Include = ( $PropValue -eq $Stock )
+                If ( $Include ) {
                     [PSCustomObject] @{ "Name"=$PropName; "Value"=$PropValue }
                 }
+
+                $HereThereDiagLines = @( $HereThereDiagLines ) + @(
+                    "PROPNAME: ${PropName}",
+                    "PROPVALUE: ${PropValue}",
+                    "INCLUDED: ${Include}",
+                    "-----"
+                )
             }
         )
+
+        $HereThereDiagLines = @( $HereThereDiagLines ) + @(
+            "-----",
+            "THERE",
+            "-----"
+        )
+
         $There = (
             $Range |% {
                 $PropName = $_
                 $PropValue = $Locations.${PropName}
                 $ItsMe = ( $PropValue -eq $Stock )
+                $Include = ( ( -Not $Implicit ) -or ( $All ) -or ( $ItsMe -eq $Self ) )
+
+                $HereThereDiagLines = @( $HereThereDiagLines ) + @(
+                    "PROPNAME: ${PropName}",
+                    "PROPVALUE: ${PropValue}",
+                    "INCLUDED: ${Include}",
+                    "-----"
+                )
 
                 # default = return only the requested locations in $Range that are alternative counterparts to the selected item; never the item itself
                 # -Self = return only the requested locations in $Range that are the item itself, not alternative counterparts
                 # -All = return all the requested locations in $Range, whether the item itself or alternative counterparts
-                If ( ( -Not $Implicit ) -or ( $All ) -or ( $ItsMe -eq $Self ) ) {
+                If ( $Include ) {
                     [PSCustomObject] @{ "Name"=$PropName; "Value"=$PropValue }
                 }
             }
@@ -798,6 +828,7 @@ Process {
             }
             Else {
                 ( "[Get-MirrorMatchedItem] FILE '{0} \\ {1}' LOCATION SEEMS TO BE NULL! {2} / {3}" -f $Stock,$Stem,$_,( $Range -join "," ) ) | Write-Warning
+                $HereThereDiagLines | Write-Warning
                 $ProspectivePath = $null
             }
 

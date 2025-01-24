@@ -77,6 +77,7 @@ param (
     [switch] $Reverse = $false,
     [switch] $RoboCopy = $false,
     [switch] $Progress = $false,
+    [switch] $Scheduled = $false,
     $Context = $null,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
@@ -368,7 +369,7 @@ Param( $LiteralPath=$null, $Path=$null, [switch] $Zipped=$false, [switch] $Only=
 }
 
 # Do-Mirror-Repositories
-Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false, [switch] $Force=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false ) {
+Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=$false, [switch] $Force=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false, [switch] $Scheduled=$false ) {
 
     $Context = Get-CommandWithVerb
     $mirrors = ( Get-ColdStorageRepositories )
@@ -402,7 +403,7 @@ Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=
             $dest = (Get-Item -Force -LiteralPath $locations[$iDest] | Get-LocalPathFromUNC ).FullName
 
             $Progress.Update(("Location: {0}" -f $Pair), 0) 
-            Sync-MirroredFiles -From "${src}" -To "${dest}" -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy
+            Sync-MirroredFiles -From "${src}" -To "${dest}" -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
             $Progress.Update(("Location: {0}" -f $Pair)) 
         }
         Else {
@@ -419,7 +420,7 @@ Function Sync-MirroredRepositories ($Pairs=$null, $DiffLevel=1, [switch] $Batch=
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Sync-MirroredRepositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy
+                Sync-MirroredRepositories -Pairs $recurseInto -DiffLevel $DiffLevel -Batch:$Batch -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
             }
             Else {
                 ( "[{0}] No such repository: {1}." -f $Context,$Pair ) | Write-Warning 
@@ -966,7 +967,7 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 }
 
 Function Invoke-ColdStorageItemMirror {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $Force=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false, [switch] $WhatIf )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $Force=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false, [switch] $Scheduled=$false, [switch] $WhatIf )
 
     Begin { }
 
@@ -990,10 +991,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
             }
 
             ( "REPOSITORY: {0} - SLUG: {0}" -f $sRepository,$RepositorySlug ) | Write-Debug
-            ( "FROM:{0} -> TO:{1} [DIFF LEVEL: {2:N0}]" -f $Src, $Dest, $DiffLevel ) | Write-Verbose
+
+            $sSrc = ( "${Src}" | ConvertTo-CSFileSystemPath )
+            $sDest = ( "${Dest}" | ConvertTo-CSFileSystemPath )
+            ( "[coldstorage mirror] {0} --> {1} [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Host -ForegroundColor Yellow
             
             If ( -Not $WhatIf ) {
-                Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy
+                Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
                 
                 If ( Test-Path -LiteralPath "${Src}" -PathType Leaf ) {
                     $srcPackage = ( $Src | Get-ItemPackage )
@@ -1006,14 +1010,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
                         }
 
                         If ( $bDoIt ) {
-                            $srcPackage.CSPackageBagLocation | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -WhatIf:$WhatIf
+                            $srcPackage.CSPackageBagLocation | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
                         }
                     }
                 }
 
             }
             Else {
-                Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy"
+                Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled"
             }
 
         }
@@ -1899,10 +1903,10 @@ Else {
         }
 
         If ( $Items ) {
-            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -WhatIf:$WhatIf
+            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
         }
         Else {
-            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy
+            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
         }
     }
     ElseIf ( $Verb -eq "check" ) {

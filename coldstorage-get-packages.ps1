@@ -35,6 +35,7 @@ param (
     [switch] $At = $false,
     [switch] $NoScan = $false,
     [switch] $NoValidate = $false,
+    [switch] $NoValidateLog = $false,
     [switch] $Force = $false,
     [switch] $FullName = $false,
     [switch] $Bagged = $false,
@@ -314,7 +315,7 @@ param (
 
 Function Get-CSItemValidation {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false )
 
 Begin {
     $nChecked = 0
@@ -327,7 +328,7 @@ Process {
 
         $Validated = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
-            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose  )
+            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose -NoLog:$NoLog )
             $ValidationMethod = "BagIt"
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
@@ -459,7 +460,7 @@ Param ( $Pairs=$null )
 
 }
 
-Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false) {
+Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false, [switch] $NoLog=$false ) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     If ( $Pairs.Count -lt 1 ) {
@@ -528,7 +529,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
                         $BagPath = Get-FileLiteralPath -File $_
                         $Progress.Update( ( "#{0:N0}. Validating: {1}" -f $Progress.I, $BagPathLeaf ), 0 )
 
-                        $Validated = ( $BagPath | Get-CSItemValidation -Verbose:$Verbose -Summary:$false )
+                        $Validated = ( $BagPath | Get-CSItemValidation -Verbose:$Verbose -Summary:$false -NoLog:$NoLog )
                         
                         $nChecked = $nChecked + 1
                         $nValidated = $nValidated + $Validated.Count
@@ -904,10 +905,10 @@ Else {
     }
     ElseIf ( $Verb -eq "validate" ) {
         If ( $Items ) {
-            $allObjects | Get-CSItemValidation -Verbose:$Verbose -Summary:$Report -PassThru:$PassThru
+            $allObjects | Get-CSItemValidation -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -PassThru:$PassThru
         }
         Else {
-            Invoke-ColdStorageValidate -Pairs $allObjects -Verbose:$Verbose -Zipped
+            Invoke-ColdStorageValidate -Pairs $allObjects -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped
         }
     }
     ElseIf ( $Verb -eq "stats" ) {

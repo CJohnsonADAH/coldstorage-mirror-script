@@ -335,6 +335,20 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [Parameter(Position=0)
 
 }
 
+Function ConvertTo-CSFileSystemPath {
+Param( [Parameter(ValueFromPipeline=$true)] $Path )
+
+    Begin { }
+
+    Process {
+        $sPath = "${Path}"
+        If ( $sPath -match "^[^:]+::" ) { $sPath = ( $sPath | Split-Path -NoQualifier ) }
+        $sPath | Write-Output
+     }
+
+    End { }
+}
+
 # WAS/IS: Get-File-FileSystem-Location/Get-ItemFileSystemLocation
 Function Get-ItemFileSystemLocation {
 Param( [Parameter(ValueFromPipeline=$true)] $Piped, $File=$null )
@@ -434,6 +448,117 @@ Param ( [Parameter(ValueFromPipeline=$True)] $Piped, $Name=$null, [ValidateSet('
 
 }
 
+Function Get-CSFileChecksum {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Algorithm="MD5", [switch] $Force=$false, [switch] $WhatIf=$false )
+
+    Begin {
+        $ChecksumMember = "CSFileChecksum"
+    }
+
+    Process {
+
+        If ( $File -ne $null ) {
+            $oHash = $null
+            If ( ( [bool] ( $File | Get-Member -Name:$ChecksumMember ) ) -and ( -Not $Force ) ) {
+                $oHashes = ( ${File}.${ChecksumMember} )
+                $oHashes |? {
+                    ( $_.Algorithm -eq $Algorithm )
+                } |% {
+                   $oHash = $_
+                }
+
+            }
+
+            If ( ( $oHash -eq $null ) -and $Force ) {
+                $oFile = ( $File | Add-CSFileChecksum -Algorithm:$Algorithm -PassThru -WhatIf:$WhatIf )
+                
+                $oHashes = ( ${oFile}.${ChecksumMember} )
+                $oHashes |? {
+                    ( $_.Algorithm -eq $Algorithm )
+                } |% {
+                   $oHash = $_
+                }
+
+            }
+
+            $oHash | Write-Output
+        }
+
+    }
+
+    End { }
+}
+
+Function Add-CSFileChecksum {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Algorithm="MD5", [switch] $Force=$false, [switch] $PassThru=$false, [switch] $WhatIf=$false )
+
+    Begin {
+        $ChecksumMember = "CSFileChecksum"
+    }
+
+    Process {
+        # IN: a path or file object
+        # OUT: a file object with added member CSFileChecksum
+
+        $oFile = ( $File | Get-FileObject )
+        If ( $oFile -ne $null ) {
+            
+            $oHash = $null
+            If ( ( [bool] ( $oFile | Get-Member -Name:$ChecksumMember ) ) -and ( -Not $Force ) ) {
+                $oHashes = ( ${oFile}.${ChecksumMember} )
+                $oHashes |? {
+                    ( $_.Algorithm -eq $Algorithm )
+                } |% {
+                   $oHash = $_
+                }
+
+            }
+
+            # We didn't get a checksum out of the cache; so let's compute one.
+            If ( $oHash -eq $null ) {
+
+                $FileLiteralPath = ( $oFile | Get-FileLiteralPath )
+
+                If ( -Not $WhatIf ) {
+                    $oHash = ( Get-FileHash -LiteralPath:$FileLiteralPath -Algorithm:$Algorithm )
+                }
+                Else {
+                    $stream = [System.IO.MemoryStream]::new()
+                    $writer = [System.IO.StreamWriter]::new( $stream )
+                    $writer.write( $FileLiteralPath )
+                    $writer.Flush()
+                    $stream.Position = 0
+
+                    $oHash = ( Get-FileHash -InputStream:$stream -Algorithm:$Algorithm )
+                }
+
+                If ( $oHash -ne $null ) {
+                    $oHash | Add-Member -MemberType NoteProperty -Name:Timestamp -Value:( Get-Date ) -Force
+
+                    $oHashes = @( $oHash )
+                    If ( $oFile | Get-Member -Name:$ChecksumMember ) {
+                        $oHashes = @( $oHashes ) + @( $oFile.$ChecksumMember )
+                    }
+                
+                    $File | Add-Member -MemberType NoteProperty -Name:$ChecksumMember -Value:$oHashes -Force
+                    $oFile | Add-Member -MemberType NoteProperty -Name:$ChecksumMember -Value:$oHashes -Force
+                }
+
+            }
+            
+
+        }
+        
+        If ( $PassThru ) {
+            $oFile | Write-Output
+        }
+
+    }
+
+    End { }
+
+}
+
 Export-ModuleMember -Function Get-FileObject
 Export-ModuleMember -Function Get-FileLiteralPath
 Export-ModuleMember -Function Test-HiddenOrSystemFile
@@ -443,8 +568,11 @@ Export-ModuleMember -Function Test-DifferentFileContent
 Export-ModuleMember -Function Get-UNCPathResolved
 Export-ModuleMember -Function Get-LocalPathFromUNC
 Export-ModuleMember -Function Resolve-PathRelativeTo
+Export-ModuleMember -Function ConvertTo-CSFileSystemPath
 Export-ModuleMember -Function Get-ItemFileSystemLocation
 Export-ModuleMember -Function Get-ItemFileSystemParent
 Export-ModuleMember -Function Get-ItemFileSystemSearchPath
 Export-ModuleMember -Function Get-ItemFileSystemSearchFor
 Export-ModuleMember -Function Get-ItemPropertiesDirectoryLocation
+Export-ModuleMember -Function Add-CSFileChecksum
+Export-ModuleMember -Function Get-CSFileChecksum

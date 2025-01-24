@@ -37,12 +37,17 @@ Function Test-UserHasNetworkAccess {
     }
 }
 Function Invoke-SelfWithNetworkAccess {
-Param ( $Invocation, $Credentials=$null, [switch] $Loop=$false )
+Param ( $Invocation, $User=$null, $Credentials=$null, [switch] $NoExit=$false, [switch] $Loop=$false )
 
         $Cmd = $Invocation.MyCommand
 
     $newProcess = new-object System.Diagnostics.ProcessStartInfo( "powershell.exe" );
-    $cmdLine = ( '"{0}"' -f $Cmd.Source )
+    
+    $cmdLine = ""
+    If ( $NoExit ) {
+        $cmdLine = "-NoExit "
+    }
+    $cmdLine = ( '{0}"{1}"' -f $cmdLine, $Cmd.Source )
     
     $Params = @{ }
     $Invocation.BoundParameters.Keys |% {
@@ -59,8 +64,14 @@ Param ( $Invocation, $Credentials=$null, [switch] $Loop=$false )
                 $NextArgument = ( "-{0}" -f $_ )
             }
         }
+        ElseIf ( $Params[ $_ ] -eq $null ) {
+            $NextArgument = ( '-{0}:$null' -f $_ )
+        }
         ElseIf ( $Params[ $_ ].GetType() -eq [int] ) {
             $NextArgument = ( "-{0}:{1}" -f $_, $Params[ $_ ].ToString() )
+        }
+        ElseIf ( $Params[ $_ ].GetType() -eq [ScriptBlock] ) {
+            $NextArgument = ( '-{0}:{{ {1} }}' -f $_, $Params[ $_ ].ToString() ) 
         }
         Else {
             $NextArgument = ( "-{0}:'{1}'" -f $_, $Params[ $_ ].ToString() )
@@ -73,14 +84,24 @@ Param ( $Invocation, $Credentials=$null, [switch] $Loop=$false )
     }
     $newProcess.Arguments = $cmdLine
 
-    If ( $Credentials -eq $null ) {
+    $UserName = $null; $Password = $null
+    If ( $User -ne $null ) {
+        $UserName = $User
+    }
+    If ( $Credentials -ne $null ) {
+        If ( $Credentials | Get-Member -Name UserName ) {
+            $UserName = ( $Credentials.UserName )
+        }
+        If ( $Credentials | Get-Member -Name Password ) {
+            $Password = ( $Credentials.Password )
+        }
+    }
+    If ( $UserName -eq $null ) {
         # Indicate that the process should be elevated
         $UserName = ( Read-Host -Prompt "User [Administrator]" )
-        $Password = ( Read-Host -Prompt "Password" -AsSecureString )
     }
-    Else {
-        $UserName = ( $Credentials.UserName )
-        $Password = ( $Credentials.Password )
+    If ( $Password -eq $null ) {
+        $Password = ( Read-Host -Prompt "Password" -AsSecureString )
     }
 
     $newProcess.UseShellExecute = $false
@@ -105,7 +126,6 @@ Param ( $Invocation, $Credentials=$null, [switch] $Loop=$false )
     $newProcess.Password = $Password
 
     # Start the new process
-    "OKOKOK"|Write-Warning
     $process = ( [System.Diagnostics.Process]::Start($newProcess) )
     If ( $process ) {
         $process.WaitForExit()
@@ -134,6 +154,8 @@ Param ( $Invocation, $Credentials=$null, [switch] $Loop=$false )
 
     }
     
+    $ReturnCredentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $UserName, $Password
+    $ExitCode | Add-Member -MemberType NoteProperty -Name ISWNACredentials -Value $ReturnCredentials
     Return $ExitCode
 
 }

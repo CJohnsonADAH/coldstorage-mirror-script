@@ -18,7 +18,9 @@ Param ( $Command, $File=$null )
 $global:gZipArchivesModuleCmd = $MyInvocation.MyCommand
 
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageData.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageFiles.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageRepositoryLocations.psm1" )
 
 ######################################################################################################
@@ -79,7 +81,7 @@ End { }
 
 # WAS: Get-Bag-Zip-Name-Prefix
 Function Get-ZippedBagNamePrefix {
-Param ( [Parameter(ValueFromPipeline=$true)] $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Extension=$null )
 
 Begin { }
 
@@ -105,11 +107,175 @@ Process {
         
     $sZipPrefix = ( $sZipPrefix -replace "[^A-Za-z0-9]+","-" )
 
-    "${sZipPrefix}-${sFileName}" # > stdout
+    $sZippedBagNamePrefix = ( "${sZipPrefix}-${sFileName}" )
+
+    # SAFEGUARD: avoid "The specified path, file name, or both are too long." exceptions...
+    # "The fully qualified file name must be less than 260 characters, and the directory name must be less than 248 characters."
+    # If the prefix is long enough that the prefix + metadata suffixes + file extension will push it over,
+    # trim it down and use an MD5 hash to help keep the naming unique.
+
+    $nMaxPrefixLen = 185 ; $nMaxPrefixTrim = ( $nMaxPrefixLen - 35 )
+    If ( $sZippedBagNamePrefix.Length -gt $nMaxPrefixLen ) {
+            
+        $stream = [System.IO.MemoryStream]::new()
+        $writer = [System.IO.StreamWriter]::new($stream)
+        $writer.write($sZippedBagNamePrefix)
+        $writer.Flush()
+        $stream.Position = 0
+        $oZipHashedSlugHash = ( Get-FileHash -InputStream $stream -Algorithm:MD5 )
+        $sZipHashedSlugHash = $oZipHashedSlugHash.Hash
+
+        $sZippedBagNamePrefix = ( '{0}--{1}' -f ( $sZippedBagNamePrefix.Substring(0, $nMaxPrefixTrim ) ), $sZipHashedSlugHash.ToLower() )
+
+    }
+    
+    If ( $Extension -ne $null ) {
+        $sZippedBagNamePrefix = ( '{0}.{1}' -f $sZippedBagNamePrefix, $Extension )
+    }
+
+    $sZippedBagNamePrefix | Write-Output
 
 }
 
 End { }
+
+}
+
+Function Get-ZippedBagNameWithTimestamp {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $TS=$null, [switch] $WhatIf=$false )
+
+    Begin {
+        $sTSFormat = 'yyyyMMddHHmmss'
+        $sTSPattern = 'z{0}'
+    }
+
+    Process {
+
+        $sTS = $TS
+        If ( $TS -eq $null ) {
+            $sTS = ( Get-Date ).ToString($sTSFormat)
+        }
+        ElseIf ( $TS -is [DateTime] ) {
+            $sTS = ( $TS.ToString( $sTSFormat ) )
+        }
+        ElseIf ( $TS -is [String] ) {
+            $sTS = $TS
+        }
+
+        If ( $File -is [string] ) {
+            $FileName = ( $File | Split-Path -Leaf )
+        }
+        Else {
+            $FileName = $File.Name
+        }
+
+        $FileNameParts = ( $FileName -split '[.]',2 )
+        If ( $sTS -ne $null ) {
+            $FileSlugParts = ( $FileNameParts[0] -split '_' )
+            $FileSlugParts = @( $FileSlugParts ) + @( ( $sTSPattern -f $sTS ) )
+            $FileSlug = ( $FileSlugParts -join "_" )
+            $FileNameParts[0] = ( $FileSlug )
+        }
+        $FileName = ( $FileNameParts -join '.' )
+        
+        $FileName | Write-Output
+
+    }
+
+    End { }
+
+}
+
+
+Function Get-ZippedBagNameWithChecksum {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Hash=$null, $HashAlgorithm="md5", [switch] $WhatIf=$false )
+
+    Begin { }
+
+    Process {
+        $sHash = $null
+        $sAlgorithm = $HashAlgorithm
+        $oHash = $Hash
+
+        If ( $File | Get-Member -Name CSZippedBagChecksum ) {
+            $sHash = $File.CSZippedBagChecksum
+            If ( $File | Get-Member -Name CSZippedBagChecksumAlgorithm ) {
+                $sAlgorithm = $File.CSZippedBagChecksumAlgorithm
+            }
+        }
+        Else {
+
+            If ( $oHash -is [ScriptBlock] ) {
+                $oHash = ( $oHash.Invoke() )
+            }
+            ElseIf ( $oHash -is [String] ) {
+                $oHash = [PSCustomObject] @{ "Algorithm"=$sAlgorithm; "Hash"=$Hash; "Path"=$File.FullName }
+            }
+
+            If ( $oHash -eq $null ) {
+                $sHash = $null
+            }
+            ElseIf ( $oHash | Get-Member -Name Hash ) {
+                # If the hash is a Get-FileHash object, COPY the (already computed) hash
+                $sHash = $oHash.Hash
+
+                If ( $oHash | Get-Member -Name Algorithm ) {
+                    $sAlgorithm = $oHash.Algorithm
+                }
+
+            }
+            ElseIf ( $oHash | Get-Member -Name FullName ) {
+                # If the "hash" is a file reference, COMPUTE the hash from the file's contents
+                $oHash = ( Get-FileHash -LiteralPath $Hash.FullName -Algorithm:$sAlgorithm )
+                If ( $oHash ) {
+                    $sHash = $oHash.Hash
+                }
+
+            }
+        }
+
+        If ( $File -is [string] ) {
+            $FileName = ( $File | Split-Path -Leaf )
+        }
+        Else {
+            $FileName = $File.Name
+        }
+
+        $FileNameParts = ( $FileName -split '[.]',2 )
+        If ( $sHash -ne $null ) {
+            $Pattern = ( '_{0}_[0-9a-fA-F]+$' -f $HashAlgorithm )
+            $FileSlug = ( $FileNameParts[0] -replace $Pattern,'' )
+
+            $FileNameParts[0] = ( '{0}_{1}_{2}' -f $FileSlug, $sAlgorithm.ToLower(), $sHash.ToLower() )
+        }
+        $FileName = ( $FileNameParts -join '.' )
+        
+        $FileName | Write-Output
+
+    }
+
+    End { }
+
+}
+
+Function Get-ZippedBagNameWithMetadata {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository, $TS=$null, $Hash=$null, $HashAlgorithm="md5" )
+
+    Begin { }
+
+    Process {
+
+        $sZipPrefix = ( Get-ZippedBagNamePrefix -File $File )
+        $sZipNameSimple = ( '{0}.zip' -f $sZipPrefix )
+
+        $sZipNameWithTimestamp = ( $sZipNameSimple | Get-ZippedBagNameWithTimestamp -TS:$TS )       
+        $sZipNameWithMetadata = ( $sZipNameWithTimestamp | Get-ZippedBagNameWithChecksum -Hash:$Hash -HashAlgorithm:$HashAlgorithm )
+         
+        $Repository | Join-Path -ChildPath:$sZipNameWithMetadata
+
+    }
+
+    End { }
 
 }
 
@@ -143,6 +309,69 @@ Process {
 End { }
 
 }
+
+Function Add-ZippedBagOfPreservationPackage {
+
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Force=$false, [switch] $PassThru=$false, [switch] $WhatIf )
+
+    Begin { }
+
+    Process {
+
+        $oFile = ( $Package | Get-FileObject )
+
+        $oZip = @( )
+        If ( -Not $Force ) {
+            
+            $oZip = ( $oFile | Get-ZippedBagOfUnzippedBag )
+
+        }
+
+        If ( $oZip.Count -eq 0 ) {
+
+            $oRepository = ( $oFile | Get-ZippedBagsContainer -NoCreate:$WhatIf )
+            $sRepository = $oRepository.FullName
+
+            If ( $sRepository ) {
+            
+                $sAlgorithm='MD5'
+                $oTS = ( Get-Date )
+
+                $sZipName = ( Get-ZippedBagNamePrefix -File $oFile -Extension:'zip' )
+                $sZipPath = ( $sRepository | Join-Path -ChildPath:$sZipName )
+
+                $CAResult = ( $oFile.FullName | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath:$sZipPath )
+                $CACompleted = ( Get-Date )
+
+                If ( $CAResult[0] -eq 0 ) {
+                
+                    $oZip = ( $sZipPath | Get-FileObject )
+                    $oZip | Add-Member -MemberType NoteProperty -Name:CSCompressArchiveResult -Value:$CAResult -Force
+                    $oZip | Add-Member -MemberType NoteProperty -Name:CSCompressArchiveExitCode -Value:$CAResult[0] -Force
+                    $oZip | Add-Member -MemberType NoteProperty -Name:CSCompressArchiveOutput -Value:( $CAResult | Select-Object -Skip:1 ) -Force
+                    $oZip | Add-Member -MemberType NoteProperty -Name:CSCompressArchiveTimestamp -Value:$CACompleted -Force
+
+                    If ( $Package | Get-Member -Name:CSPackageZip ) {
+                        $oZip = @( $oZip ) + ( $Package.CSPackageZip )
+                    }
+
+                    $Package | Add-Member -MemberType:NoteProperty -Name:CSPackageZip -Value:@( $oZip ) -Force
+                    $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageZip -Value:@( $oZip ) -PassThru:$PassThru -Force
+
+                }
+                Else {
+                    $CAResult | Write-Warning
+                }
+
+            }
+        }
+
+    }
+
+    End { }
+
+}
+
 
 # WAS/IS: Get-Zipped-Bag-Location/Get-ZippedBagsContainer
 Function New-ZippedBagsContainer {
@@ -322,7 +551,11 @@ Param ( [switch] $WhatIf=$false, [Parameter(ValueFromPipeline=$true)] $LiteralPa
 Export-ModuleMember -Function Test-ZippedBagIntegrity
 Export-ModuleMember -Function Get-ZippedBagProfessedMD5
 Export-ModuleMember -Function Get-ZippedBagNamePrefix
+Export-ModuleMember -Function Get-ZippedBagNameWithTimestamp
+Export-ModuleMember -Function Get-ZippedBagNameWithChecksum
+Export-ModuleMember -Function Get-ZippedBagNameWithMetadata
 Export-ModuleMember -Function Get-ZippedBagOfUnzippedBag
+Export-ModuleMember -Function Add-ZippedBagOfPreservationPackage
 Export-ModuleMember -Function New-ZippedBagsContainer
 Export-ModuleMember -Function Add-ZippedBagsContainer
 Export-ModuleMember -Function Get-ZippedBagsContainer

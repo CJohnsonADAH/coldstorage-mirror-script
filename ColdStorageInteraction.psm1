@@ -224,6 +224,32 @@ Param ( [Parameter(ValueFromPipeline=$true)] $In )
 Function Read-YesFromHost {
 Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="", $DefaultTimeout = 5.0 )
 
+    If ( $global:psISE ) {
+        If ( $Timeout -gt 0 ) {
+            $wshellTimeout = $Timeout
+        }
+        Else {
+            $wshellTimeout = 0
+        }
+
+        $wshell = ( New-Object -ComObject Wscript.Shell )
+        $answer = $wshell.Popup( $Prompt, $wshellTimeout, "Question", 32+4 )
+        
+        $InKey = $DefaultInput
+        If ( $answer -eq -1 ) {
+            $InKey = $DefaultInput
+        }
+        ElseIf ( $answer -eq 6 ) {
+            $InKey = 'Y'
+        }
+        ElseIf ( $answer -eq 7 ) {
+            $InKey = 'N'
+        }
+
+        ( $InKey -match '^\s*[Yy].*$' )
+
+    }
+    Else {
         $Prompt | Write-Host -ForegroundColor Yellow
         $YNPrompt = ( '[Y]es [N]o (default is "{0}")' -f $DefaultInput )
         Do {
@@ -285,6 +311,7 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
         }
 
         ( $InKey -match '^\s*[Yy].*$' )
+    }
 }
 
 Function Get-PluralizedText {
