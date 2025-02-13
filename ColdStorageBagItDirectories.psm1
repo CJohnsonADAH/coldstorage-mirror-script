@@ -29,9 +29,9 @@ Param ( $File )
     $result = $false # innocent until proven guilty
 
     $oFile = Get-FileObject -File $File
-    If ( $oFile -ne $null ) {
+    If ( ( $oFile -ne $null ) -and ( $oFile | Get-Member -Name FullName ) ) {
         $BagDir = $oFile.FullName
-        if ( Test-Path -LiteralPath $BagDir -PathType Container ) {
+        If ( Test-Path -LiteralPath $BagDir -PathType Container ) {
             $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
             if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
                 $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )

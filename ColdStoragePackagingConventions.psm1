@@ -301,40 +301,55 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Zip )
 ## LOOSE FILES: Typically found in ER Processed directory and DA directories. ###############################
 #############################################################################################################
 
-Function Test-LooseFile ( $File ) {
-    
-    $oFile = Get-FileObject($File)
+Function Test-LooseFile {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $File
+)
 
-    $result = $false
-    If ( -Not ( $oFile -eq $null ) ) {
-        If ( Test-Path -LiteralPath $oFile.FullName -PathType Leaf ) {
-            $result = $true
+    Begin { }
 
-            $Context = $oFile.Directory
-            $sContext = $Context.FullName
+    Process {
 
-            If ( $Context | Test-ColdStoragePropsDirectory -NoPackageTest ) {
-                $result = $false
+        $oFile = Get-FileObject($File)
+
+        $result = $false
+        If ( $oFile -ne $null ) {
+            If ( Test-Path -LiteralPath $oFile.FullName -PathType Leaf ) {
+                $result = $true
+
+                $Context = $oFile.Directory
+                $sContext = $Context.FullName
+
+                If ( $Context | Test-ColdStoragePropsDirectory -NoPackageTest ) {
+                    $result = $false
+                }
+                ElseIf ( Test-IndexedDirectory($sContext) ) {
+                    $result = $false
+                }
+                ElseIf  ( Test-BaggedIndexedDirectory($sContext) ) {
+                    $result = $false
+                }
+                ElseIf ( Test-ERInstanceDirectory($Context) ) {
+                    $result = $false
+                }
+                ElseIf ( Test-ZippedBag($oFile) ) {
+                    $result = $false
+                }
+                ElseIf ( $oFile | Test-InBaggedCopyContainerSubdirectory ) {
+                    $result = $false
+                }
+                ElseIf ( Test-HiddenOrSystemFile($oFile) ) {
+                    $result = $false
+                }
             }
-            ElseIf ( Test-IndexedDirectory($sContext) ) {
-                $result = $false
-            }
-            ElseIf  ( Test-BaggedIndexedDirectory($sContext) ) {
-                $result = $false
-            }
-            ElseIf ( Test-ERInstanceDirectory($Context) ) {
-                $result = $false
-            }
-            ElseIf ( Test-ZippedBag($oFile) ) {
-                $result = $false
-            }
-            ElseIf ( Test-HiddenOrSystemFile($oFile) ) {
-                $result = $false
-            }
+
         }
-    }
     
-    $result
+        $result
+    }
+
+    End { }
+
 }
 
 Function Get-PathToBaggedCopyOfLooseFile {
@@ -479,9 +494,66 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
     End { }
 }
 
+Function Add-BaggedCopyContainer {
+    Param (
+        [Parameter(ValueFromPipeline=$true)] $Path
+    )
+
+    Begin { $BagContainers = ( Get-BaggedCopyContainerSubdirectories -ExcludeDots ) }
+
+    Process {
+        
+        If ( $Path -ne $null ) {
+
+            $LiteralPath = ( $Path | Get-FileLiteralPath )
+            
+            $FoundContainers = ( $BagContainers |? { Test-Path -LiteralPath ( Join-Path $LiteralPath -ChildPath $_ ) } )
+            If ( $FoundContainers.Count -gt 0 ) {
+                $FoundContainers | Select-Object -First 1 |% { Get-Item -LiteralPath ( Join-Path $LiteralPath -ChildPath $_ ) -Force }
+            }
+            Else {
+                $BagContainers | Select-Object -First 1 |% { New-Item -ItemType Directory -Path ( Join-Path $LiteralPath -ChildPath $_ ) } 
+            }
+
+        }
+
+    }
+
+    End { }
+}
+
 Function Get-BaggedCopyContainerSubdirectories {
-    "."
-    ".bagged"
+    Param (
+        [switch] $ExcludeDots=$false
+    )
+
+    If ( -Not $ExcludeDots ) {
+        "." | Write-Output
+    }
+
+    ".bagged" | Write-Output
+
+}
+
+Function Test-InBaggedCopyContainerSubdirectory {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File=$null
+)
+
+    Begin {
+        $BagContainers = ( Get-BaggedCopyContainerSubdirectories -ExcludeDots )
+    }
+    
+    Process {
+        If ( $File -ne $null ) {
+            $Count = ( $File.FullName | Split-PathEntirely |? { $_ -in $BagContainers } )
+            ( $Count.Count -gt 0 )
+        }
+
+    }
+
+    End { }
+
 }
 
 Function Get-BaggedCopyOfLooseFile {
@@ -801,6 +873,145 @@ Param(
     End { }
 }
 
+Function Add-ItemPackageBagData {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    $Contents=@( ),
+    [switch] $Bagged=$false,
+    $BagLocation=$null
+)
+    Begin { }
+
+    Process {
+
+        $mContents = ( $Contents | Measure-Object -Sum Length )
+        #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
+
+        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value ( [bool] $Bagged ) -Force
+        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $BagLocation -Force
+        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
+        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
+    }
+
+    End { }
+
+}
+
+Function Test-CSNonpackagedItem {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File
+)
+
+    Begin { }
+
+    Process {
+    
+        If ( $File -ne $null ) {
+            $IsNonpackaged = $false
+
+            If ( $File | Get-ItemFileSystemLocation | Test-ColdStorageRepositoryPropsDirectory ) {
+                $IsNonpackaged = $true
+                $IsNonpackaged | Add-Member -MemberType NoteProperty -Name CSNonpackagedReason -Value ( "Props directory: {0}" -f $File.FullName ) -Force
+            }
+            ElseIf ( $File | Get-ItemFileSystemLocation | Test-ColdStoragePropsDirectory -NoPackageTest ) {
+                $IsNonpackaged = $true
+                $IsNonpackaged | Add-Member -MemberType NoteProperty -Name CSNonpackagedReason -Value ( "Props directory: {0}" -f $File.FullName ) -Force
+            }
+            ElseIf ( ( Test-Path $File.FullName -PathType Container ) -and ( $File.Name -like '.metadata' ) ) {
+                $IsNonpackaged = $true
+                $IsNonpackaged | Add-Member -MemberType NoteProperty -Name CSNonpackagedReason -Value ( "Metadata directory: {0}" -f $File.FullName ) -Force
+            }
+            ElseIf ( Test-ZippedBag -LiteralPath $File.FullName ) {
+                $IsNonpackaged = $true
+                $IsNonpackaged | Add-Member -MemberType NoteProperty -Name CSNonpackagedReason -Value ( "Zipped bag: {0}" -f $File.FullName ) -Force
+            }
+
+            $IsNonpackaged | Write-Output
+
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Test-CSBaggedPackageItem {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File
+)
+
+    Begin { }
+
+    Process {
+        
+        If ( $File -ne $null ) {
+
+            $IsBaggedPackageItem = $false
+
+            If ( Test-ERInstanceDirectory -File $File ) {
+                $IsBaggedPackageItem = $true
+            }
+            ElseIf ( Test-BaggedIndexedDirectory -File $File ) {
+                $IsBaggedPackageItem = $true
+            }
+            ElseIf ( Test-BagItFormattedDirectory -File $File ) {
+                $IsBaggedPackageItem = $true
+            }
+
+            $IsBaggedPackageItem | Write-Output
+
+        }
+
+    }
+
+    End { }
+}
+
+Function Get-CSPackageItemBagging {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File,
+    [switch] $CheckZipped=$false
+)
+
+    Begin { }
+
+    Process {
+
+        If ( $File -ne $null ) {
+
+            $aContents = @( )
+            
+            $bBagged = ( Test-BagItFormattedDirectory -File $File )
+            $oBagLocation = $null
+
+            If ( Test-ERInstanceDirectory -File $File ) {
+                $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
+            }
+            ElseIf ( Test-BaggedIndexedDirectory -File $File ) {
+                $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
+            }
+            ElseIf ( Test-BagItFormattedDirectory -File $File ) {
+                $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
+            }
+
+            If ( $aContents.Count -gt 0 ) {
+                If ( $bBagged ) {
+                    $oBagLocation = $File
+                    If ( $CheckZipped ) {
+                        $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+                    }
+                }           
+            }
+
+            @{ "Bag"=$oBagLocation; "Contents"=$aContents; "Zip"=$aZipped } | Write-Output
+
+        }
+
+    }
+
+    End { }
+}
 
 Function Get-ItemPackage {
 Param (
@@ -833,26 +1044,9 @@ Param (
         $aContents = @( )
         $aWarnings = @( )
         
-        If ( $File | Get-ItemFileSystemLocation | Test-ColdStorageRepositoryPropsDirectory ) {
-            $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $File.FullName )
-        }
-        ElseIf ( $File | Get-ItemFileSystemLocation | Test-ColdStoragePropsDirectory -NoPackageTest ) {
-            $aWarnings += @( "SKIPPED -- PROPS DIRECTORY: {0}" -f $File.FullName )
-        }
-        ElseIf ( $Recurse -and ( $File.Name -like '.metadata' ) ) {
-            $aWarnings += @( "SKIPPED -- METADATA DIRECTORY: {0}" -f $File.FullName )
-        }
-        ElseIf ( Test-ZippedBag -LiteralPath $File.FullName ) {
-            $aWarnings += @( "SKIPPED -- ZIPPED BAG: {0}" -f $File.FullName )
-        }
-        ElseIf ( Test-ERInstanceDirectory -File $File ) {
-            $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
-            If ( $bBagged ) {
-                $oBagLocation = $File
-                If ( $CheckZipped ) {
-                    $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
-                }
-            }
+        $nonpackaged = ( $File | Test-CSNonpackagedItem )
+        If ( $nonpackaged ) {
+            $aWarnings += @( "SKIPPED -- {0}" -f $nonpackaged.CSNonpackagedReason )
         }
         ElseIf ( Test-BaggedCopyOfLooseFile -File $File -DiffLevel 1 ) {
 
@@ -869,23 +1063,16 @@ Param (
             }
 
         }
-        ElseIf ( Test-BaggedIndexedDirectory -File $File ) {
-            $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
+        ElseIf ( $File | Test-CSBaggedPackageItem ) {
+            $t = ( $File | Get-CSPackageItemBagging -CheckZipped:$CheckZipped )
+            $aContents = @( $t['Contents'] )
             If ( $bBagged ) {
-                $oBagLocation = $File
+                $oBagLocation = $t['Bag']
                 If ( $CheckZipped ) {
-                    $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+                    $aZipped = @( $t['Zip'] )
                 }
             }
-        }
-        ElseIf ( Test-BagItFormattedDirectory -File $File ) {
-            $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
-            If ( $bBagged ) {
-                $oBagLocation = $File
-                If ( $CheckZipped ) {
-                    $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
-                }
-            }
+
         }
         ElseIf ( Test-IndexedDirectory -File $File -UnbaggedOnly:$Ascend ) {
             $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
@@ -918,14 +1105,7 @@ Param (
 
         If ( $aContents.Count -gt 0 ) {
             $Package = $File
-            
-            $mContents = ( $aContents | Measure-Object -Sum Length )
-            #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
-
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value $bBagged -Force
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $oBagLocation -Force
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
-            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
+            $Package | Add-ItemPackageBagData -Contents:$aContents -Bagged:$bBagged -BagLocation:$oBagLocation 
 
             $oCloudCopy = $null
             If ( $aZipped -ne $false ) {
@@ -1299,12 +1479,14 @@ Export-ModuleMember -Function Get-LooseFileOfBaggedCopy
 Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
 Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
+Export-ModuleMember -Function Add-BaggedCopyContainer
 Export-ModuleMEmber -Function New-BagItManifestContainer
 Export-ModuleMember -Function Undo-CSBagPackage
 Export-ModuleMember -Function Test-ERInstanceDirectory
 Export-ModuleMember -Function Select-ERInstanceDirectories
 Export-ModuleMember -Function Add-ERInstanceData
 Export-ModuleMember -Function Get-ERInstanceData
+Export-ModuleMember -Function Test-CSNonpackagedItem
 Export-ModuleMember -Function Get-ItemPackage
 Export-ModuleMember -Function Get-ChildItemPackages
 Export-ModuleMember -Function ConvertTo-HTMLDocument

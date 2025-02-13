@@ -300,7 +300,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
             $OriginalFullName = $Item.FullName
             $FileName = ( $Item | Get-PathToBaggedCopyOfLooseFile )
 
-            $BagDir = ( Get-Location | Join-Path -ChildPath "${FileName}" )
+            $BagDir = ( Get-Location | Add-BaggedCopyContainer | Join-Path -ChildPath "${FileName}" )
             If ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
                 $oBagDir = ( New-Item -Type Directory -Path $BagDir )
                 $BagDir = $( If ( $oBagDir ) { $oBagDir.FullName } Else { $null } )
@@ -994,30 +994,34 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
 
             $sSrc = ( "${Src}" | ConvertTo-CSFileSystemPath )
             $sDest = ( "${Dest}" | ConvertTo-CSFileSystemPath )
-            ( "[coldstorage mirror] {0} --> {1} [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Host -ForegroundColor Yellow
-            
-            If ( -Not $WhatIf ) {
-                Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
+            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Host -ForegroundColor Yellow
+            If ( ( "${sSrc}" -ne '' ) -and ( "${sDest}" -ne '' ) ) {
+                If ( -Not $WhatIf ) {
+                    Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
                 
-                If ( Test-Path -LiteralPath "${Src}" -PathType Leaf ) {
-                    $srcPackage = ( $Src | Get-ItemPackage )
-                    $bBaggedElsewhere = ( $srcPackage.CSPackageBagLocation -and ( $srcPackage.CSPackageBagLocation.FullName -ne $srcPackage.FullName ) )
-                    If ( $bBaggedElsewhere ) {
+                    If ( Test-Path -LiteralPath "${Src}" -PathType Leaf ) {
+                        $srcPackage = ( $Src | Get-ItemPackage )
+                        $bBaggedElsewhere = ( $srcPackage.CSPackageBagLocation -and ( $srcPackage.CSPackageBagLocation.FullName -ne $srcPackage.FullName ) )
+                        If ( $bBaggedElsewhere ) {
 
-                        $bDoIt = ( -Not $Only )
-                        If ( $Only -and ( -Not $Batch ) ) {
-                            $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror bagged copy at {0}?" -f $srcPackage.CSPackageBagLocation ) )
-                        }
+                            $bDoIt = ( -Not $Only )
+                            If ( $Only -and ( -Not $Batch ) ) {
+                                $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror bagged copy at {0}?" -f $srcPackage.CSPackageBagLocation ) )
+                            }
 
-                        If ( $bDoIt ) {
-                            $srcPackage.CSPackageBagLocation | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
+                            If ( $bDoIt ) {
+                                $srcPackage.CSPackageBagLocation | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
+                            }
                         }
                     }
-                }
 
+                }
+                Else {
+                    Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled"
+                }
             }
             Else {
-                Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled"
+                ( '[{0}:{1:N0}] ( "{2}", "{3}" ) has an empty file path parameter.' -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $sSrc, $sDest ) | Write-Error
             }
 
         }

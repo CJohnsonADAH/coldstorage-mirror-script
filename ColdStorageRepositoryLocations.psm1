@@ -107,7 +107,6 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
             If ( $Tag ) {
                 
                 $Row = $MirrorsMeta.${Repository}
-                
                 $RepositorySlug = ( ${Repository} -split "_" | Select-Object -First 1 )
 
                 $Locations = @( ${RepositorySlug} )
@@ -133,10 +132,13 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                         "LOCATIONS: " | Write-Warning
                         $Locations |% { If ( $_ -ne $null ) { $_ | Write-Warning } Else { "(null)" | Write-Warning } }
                     }
-
-                    $Converted = ( $ToConvert |% { $_ -f $Locations | ConvertTo-ColdStorageSettingsFilePath } )
-                    $Row.$Aspect = ( $Converted |% { $Path = $_ ; If ( $Path | Test-IsListable ) { $Path } } | Select-Object -First 1 )
                     
+                    $Converted = ( $ToConvert |% { $_ -f $Locations | ConvertTo-ColdStorageSettingsFilePath } )
+
+                    # Priority goes to a listable location; failing that, fall back onto the first listed candidate
+                    $BestOption = @( $Converted |% { $Path = $_ ; If ( $Path | Test-IsListable ) { $Path } } ) + @( $Converted )                   
+                    $Row.$Aspect = ( $BestOption | Select-Object -First 1 )
+
                 }
 
                 # 2. Let's fill in Trashcan if not declined
@@ -716,8 +718,35 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
     }
 }
 
+Function Get-MirrorMatchedItemPair {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null )
+
+    Begin { }
+
+    Process {
+
+        $PairOutput = $Pair
+
+        $oRepository = ( $File | Get-FileRepositoryProps )
+        If ( $PairOutput -eq $null ) {
+            $PairOutput = ( $oRepository.Repository )
+            If ( $PairOutput.Length -gt 0 ) {
+                Write-Debug ( "* Adopted implicit Repository from item: {0}" -f ${PairOutput} )
+            }
+            Else  {
+                Write-Warning ( "! Cannot determine a Repository from item: {0}" -f $File.FullName )
+            }
+        }
+        $PairOutput
+
+    }
+
+    End { }
+
+}
+
 Function Get-MirrorMatchedItem {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, [switch] $Passive=$false, $Repositories=$null )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, [switch] $Passive=$false, $Repositories=$null, [switch] $ShowWarnings=$false )
 
 Begin { $mirrors = ( Get-ColdStorageRepositories -NoTrash -Tag ) }
 
@@ -738,16 +767,7 @@ Process {
     }
 
     Write-Debug ( "[Get-MirrorMatchedItem] Match {0}" -f $( If ( $File -is [String] ) { $File } Else { $File.FullName } ) )
-    $oRepository = ( $File | Get-FileRepositoryProps )
-    If ( $Pair -eq $null ) {
-        $Pair = ( $oRepository.Repository )
-        If ( $Pair.Length -gt 0 ) {
-            Write-Debug ( "* Adopted implicit Repository from item: {0}" -f ${Pair} )
-        }
-        Else  {
-            Write-Warning ( "! Cannot determine a Repository from item: {0}" -f $File.FullName )
-        }
-    }
+    $Pair = ( $File | Get-MirrorMatchedItemPair -Pair:$Pair )
 
     # Split the path up; look for $Stock in list of mirrored repositories, then we can reattach $Stem
     $Stock, $Stem = ( $File | Split-MirrorMatchedPath -Root -Stem -Canonicalize )
@@ -755,14 +775,16 @@ Process {
     If ( $Stock -and $Pair ) {
 
         $Locations = $null
-        If ( $mirrors.ContainsKey($Pair) ) {
-            $Locations = $mirrors[$Pair].Locations
+        If ( $mirrors.ContainsKey( "${Pair}" ) ) {
+            $Locations = $mirrors[ "${Pair}" ].Locations
         }
 
         $HereThereDiagLines = @(
-            "-----",
+            ( "PAIR: '{0}'" -f ( $Pair -join "'; '" ) ),
+            ( "MIRRORS: [ {0} ]" -f ( $mirrors | ConvertTo-Json -Compress ) ),
+            "----",
             "HERE",
-            "-----"
+            "----"
         )
 
         $Here = (
@@ -775,8 +797,7 @@ Process {
                 }
 
                 $HereThereDiagLines = @( $HereThereDiagLines ) + @(
-                    "PROPNAME: ${PropName}",
-                    "PROPVALUE: ${PropValue}",
+                    "PROP: '${PropName}'='${PropValue}'",
                     "INCLUDED: ${Include}",
                     "-----"
                 )
@@ -784,7 +805,6 @@ Process {
         )
 
         $HereThereDiagLines = @( $HereThereDiagLines ) + @(
-            "-----",
             "THERE",
             "-----"
         )
@@ -797,8 +817,7 @@ Process {
                 $Include = ( ( -Not $Implicit ) -or ( $All ) -or ( $ItsMe -eq $Self ) )
 
                 $HereThereDiagLines = @( $HereThereDiagLines ) + @(
-                    "PROPNAME: ${PropName}",
-                    "PROPVALUE: ${PropValue}",
+                    "PROP: '${PropName}'='${PropValue}'",
                     "INCLUDED: ${Include}",
                     "-----"
                 )
@@ -919,7 +938,11 @@ Process {
         If ( -Not ( $File -is [String] ) ) {
             $sFile = Get-FileLiteralPath($File)
         }
-        ( "[Get-MirrorMatchedItem] Does not appear to be in a mirrored location: {0}" -f $sFile ) | Write-Warning
+        ( "[{0}] Does not appear to be in a mirrored location: '{1}'" -f $MyInvocation.MyCommand,$sFile ) | Write-Warning
+    }
+
+    If ( ( $HereThereDiagLines.Count -gt 0 ) -and $ShowWarnings ) {
+        $HereThereDiagLines | Write-Warning
     }
 
 }
@@ -972,6 +995,7 @@ Export-ModuleMember -Function Test-ColdStorageRepositoryPropsDirectory
 Export-ModuleMember -Function Test-ColdStorageRepositoryPropsFile
 Export-ModuleMember -Function Split-PathEntirely
 Export-ModuleMember -Function Split-MirrorMatchedPath
+Export-ModuleMember -Function Get-MirrorMatchedItemPair
 Export-ModuleMember -Function Get-MirrorMatchedItem
 Export-ModuleMember -Function Test-MirrorMatchedItem
 Export-ModuleMember -Function Test-IsListable

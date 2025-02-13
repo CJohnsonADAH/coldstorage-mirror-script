@@ -24,6 +24,9 @@ If ( -Not ( Test-UserHasNetworkAccess ) ) {
     Else {
         $LoopCredentials = $null
         Do {
+            "Updating ClamAV database." | Write-Host -ForegroundColor Yellow
+            & coldstorage update clamav
+
             $retval = ( Invoke-SelfWithNetworkAccess -Invocation:$Invoc -Credentials:$LoopCredentials -Loop:$Loop )
             $LoopCredentials = ( $retval.ISWNACredentials )
             $LoopCredentials.UserName | Write-Warning

@@ -24,6 +24,12 @@ Param( [Parameter(ValueFromPipeline=$true)] $File )
             }
 
         }
+        ElseIf ( ( $File -is [object] ) -and ( $File | Get-Member -Name "FullName" -MemberType Properties ) ) {
+            $oFile = $File
+        }
+        ElseIf ( ( $File -is [object] ) -and ( $File | Get-Member -Name "Path" -MemberType Properties ) ) {
+            $oFile = ( Get-Item -LiteralPath $File.Path )
+        }
         Else {
             $oFile = $File
         }

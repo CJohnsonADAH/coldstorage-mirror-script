@@ -58,7 +58,12 @@ Param ( [String] $Within, $SyncOptions=$null, [Parameter(ValueFromPipeline=$true
             $BaseTo = $Within
 
             $FileIsLeaf = ( Test-Path -LiteralPath $oFile.FullName -PathType Leaf )
-            $ToIsContainer = ( Test-Path -LiteralPath $BaseTo -PathType Container )
+            If ( $BaseTo.Length -gt 0 ) {
+                $ToIsContainer = ( Test-Path -LiteralPath $BaseTo -PathType Container )
+            }
+            Else {
+                $ToIsContainer = $false
+            }
 
             If ( $FileIsLeaf -and ( -Not $ToIsContainer ) ) {
                 $BaseTo = ( $To | Split-Path -Parent )
@@ -219,31 +224,52 @@ Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, [switch] $RoboCop
 
     $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
     $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe )
+
+
+    If ( "${To}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+    ElseIf ( "${From}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+
     If ( $UseRoboCopy ) {
 
         $Progress.Update( "${sStatus} (ROBOCOPY)" )
 
-        $rcFrom = ( Convert-Path "${From}" -ErrorAction SilentlyContinue )
-        $rcTo = ( Convert-Path "${To}" -ErrorAction SilentlyContinue )
-        $rcFile = $null
-        If ( Test-Path -LiteralPath "${From}" -PathType Leaf ) {
-            $rcFrom = ( Split-Path "${From}" -Parent )
-            $rcTo = ( Split-Path "${To}" -Parent )
-            $rcFrom = ( Convert-Path "${rcFrom}" -ErrorAction SilentlyContinue )
-            $rcTo = ( Convert-Path "${rcTo}" -ErrorAction SilentlyContinue )
-            $rcFile = ( Split-Path "${From}" -Leaf )
+        If ( "${From}" -ne "" ) {
+            $rcFrom = ( Convert-Path "${From}" -ErrorAction SilentlyContinue )
+            If ( "${To}" -ne "" ) {
+                $rcTo = ( Convert-Path "${To}" -ErrorAction SilentlyContinue )
+                $rcFile = $null
+                If ( Test-Path -LiteralPath "${From}" -PathType Leaf ) {
+                    $rcFrom = ( Split-Path "${From}" -Parent )
+                    $rcTo = ( Split-Path "${To}" -Parent )
+                    $rcFrom = ( Convert-Path "${rcFrom}" -ErrorAction SilentlyContinue )
+                    $rcTo = ( Convert-Path "${rcTo}" -ErrorAction SilentlyContinue )
+                    $rcFile = ( Split-Path "${From}" -Leaf )
 
-            If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-RoboCopyOutput -Prolog -Epilog
+                    If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
+                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-RoboCopyOutput -Prolog -Epilog
+                    }
+                }
+                Else {
+                    If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
+                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
+                    }
+                }
+
             }
-
+            Else {
+                "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+            }
         }
         Else {
-            If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
-            }
-
+            "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
         }
+
     }
     Else {
 
@@ -270,6 +296,15 @@ Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, $DiffLevel=1, $De
 
     "Copy-MirroredFiles FROM: {0}" -f $From | Write-Debug
     "Copy-MirroredFiles TO: {0}" -f $To | Write-Debug
+
+    If ( "${To}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+    ElseIf ( "${From}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -461,6 +496,17 @@ Param (
     $Depth=0
 )
 
+
+    If ( "${To}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+    ElseIf ( "${From}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+
+
     $aDirs = @( )
     If ( Test-Path -LiteralPath "$From" ) {
         $aDirs = Get-ChildItem -Directory -LiteralPath "$From"
@@ -491,6 +537,15 @@ Param (
 
 Function Sync-Metadata {
 Param( $From, $To, $Progress=$null, $SyncOptions=$null, [switch] $Batch=$false )
+
+    If ( "${To}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+    ElseIf ( "${From}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
 
     $aFiles = @( )
     If ( Test-Path -LiteralPath "$From" ) {
@@ -537,6 +592,15 @@ Param (
     [ScriptBlock] $TestMoveIntoBag=$null
 )
 
+    If ( "${To}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+    ElseIf ( "${From}" -eq "" ) {
+        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        Return
+    }
+
     If ( $TestMoveIntoBag -eq $null ) {
         $TestMoveIntoBag = [ScriptBlock] {
             Param( $Scheduled )
@@ -557,36 +621,44 @@ Param (
 
     If ( -Not ( Test-Path -LiteralPath "${To}" ) ) {
 
-        If ( Test-Path -PathType Container "${From}" ) {
-            $ToDir = ( New-Item -Type Directory "${To}" -Force:$Force -Verbose )
-            If ( ( -Not $ToDir ) -or ( -Not ( Test-Path -LiteralPath "${To}" ) ) ) {
-                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' could neither be found NOR created." -f $global:gCSSCriptName, $To )
-                Write-Error $ErrMesg
-                Return
-            }
-        }
-        ElseIf ( Test-Path -PathType Leaf "${From}" ) {
-            $ToContainer = ( Split-Path "${To}" -Parent )
-            $ToDir = ( Get-Item -LiteralPath "${ToContainer}" -Force -ErrorAction SilentlyContinue )
-
-            $FromItem = ( Get-Item -LiteralPath "${From}" -Force -ErrorAction SilentlyContinue )
-            If ( $FromItem ) {
-                If ( -Not ( Test-Path -PathType Container "${ToContainer}" ) ) {
-                    $ToDir = ( New-Item -Type Directory "${ToContainer}" -Force:$Force -Verbose )
+        If ( "${From}" -ne "" ) {
+            If ( Test-Path -PathType Container "${From}" ) {
+                $ToDir = ( New-Item -Type Directory "${To}" -Force:$Force -Verbose )
+                If ( ( -Not $ToDir ) -or ( -Not ( Test-Path -LiteralPath "${To}" ) ) ) {
+                    $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' could neither be found NOR created." -f $global:gCSSCriptName, $To )
+                    Write-Error $ErrMesg
+                    Return
                 }
             }
+            ElseIf ( Test-Path -PathType Leaf "${From}" ) {
+                $ToContainer = ( Split-Path "${To}" -Parent )
+                $ToDir = ( Get-Item -LiteralPath "${ToContainer}" -Force -ErrorAction SilentlyContinue )
+
+                $FromItem = ( Get-Item -LiteralPath "${From}" -Force -ErrorAction SilentlyContinue )
+                If ( $FromItem ) {
+                    If ( -Not ( Test-Path -PathType Container "${ToContainer}" ) ) {
+                        $ToDir = ( New-Item -Type Directory "${ToContainer}" -Force:$Force -Verbose )
+                    }
+                }
            
-            If ( -Not ( $ToDir ) ) {
-                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found?!" -f $global:gCSSCriptName, $To )
+                If ( -Not ( $ToDir ) ) {
+                    $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' cannot be found?!" -f $global:gCSSCriptName, $To )
+                    Write-Error $ErrMesg
+                    Return
+                }
+            }
+            Else {
+                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' cannot be found." -f $global:gCSSCriptName, $From )
                 Write-Error $ErrMesg
                 Return
             }
         }
         Else {
-            $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' cannot be found." -f $global:gCSSCriptName, $From )
+            $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' for '{2}' is empty." -f $global:gCSSCriptName, $From, $To )
             Write-Error $ErrMesg
             Return
         }
+
     }
 
     $sTo = $To
@@ -906,30 +978,34 @@ Process {
 
 Function Test-MirrorSyncBidirectionally {
 Param ( $LiteralPath, $SyncOptions=$null )
-
-    $package = ( Get-Item -LiteralPath $LiteralPath | Get-ItemPackage -Ascend )
-    $patterns = ( & get-coldstorage-setting.ps1 -Name:MirrorWildcards )
-
+    
     $Bidi = $false
-    
-    If ( $package.FullName ) {
+    If ( "${LiteralPath}" -ne "" ) {
+        $package = ( Get-Item -LiteralPath $LiteralPath | Get-ItemPackage -Ascend )
+        $patterns = ( & get-coldstorage-setting.ps1 -Name:MirrorWildcards )
 
-        If ( Test-Path -LiteralPath $package.FullName -PathType Container ) {
+        $Bidi = $false
     
-            $patterns.Bidi |% {
-                $ChildPath = ( $_ | ConvertTo-ColdStorageSettingsFilePath )
+        If ( $package.FullName ) {
+
+            If ( Test-Path -LiteralPath $package.FullName -PathType Container ) {
+    
+                $patterns.Bidi |% {
+                    $ChildPath = ( $_ | ConvertTo-ColdStorageSettingsFilePath )
         
-                Push-Location $package.FullName
-                $RelPath = ( Resolve-Path -Relative $LiteralPath )
-                Pop-Location
+                    Push-Location $package.FullName
+                    $RelPath = ( Resolve-Path -Relative $LiteralPath )
+                    Pop-Location
 
-                $Bidi = ( $Bidi -or ( $RelPath -like $ChildPath ) )
+                    $Bidi = ( $Bidi -or ( $RelPath -like $ChildPath ) )
+                }
             }
-        }
 
+        }
     }
 
     $Bidi
+
 }
 
 Export-ModuleMember -Function ConvertTo-MirroredPath
