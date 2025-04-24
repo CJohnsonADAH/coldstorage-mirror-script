@@ -16,6 +16,37 @@ Begin {
 
     $Interactive = ( -Not $Batch )
 
+    Function Write-OutputWithLogMaybe {
+    Param ( [Parameter(ValueFromPipeline)] $Line, $Package, $Command=$null, $Log )
+
+        Begin {
+            If ( $Log -ne $null ) {
+                If ( -Not ( Test-Path -LiteralPath $Log ) ) {
+                    $StartMessage = @{ "Location"=$Package.FullName; "Time"=( Get-Date ).ToString() }
+                    ( "! JSON[Start]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+                }
+            }
+            If ( $Command -ne $null ) {
+                If ( $Log -ne $null ) {
+                    $StartMessage = @{ "Command"=( $Command -f ( "Get-Item -LiteralPath '{0}' -Force" -f $Package.FullName ) ); "Time"=( Get-Date ).ToString() }
+                    ( "! JSON[Command]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+                }
+            }
+        }
+
+        Process {
+            If ( $Line -ne $null ) {
+                $Line | Write-Output
+                If ( $Log -ne $null ) {
+                    "$Line" >> $Log
+                }
+            }
+        }
+
+        End { }
+
+    }
+
 }
 
 Process {
@@ -25,6 +56,12 @@ Process {
         $PassThru = $false
         $SkipOver = $false
 
+		$LogFile = $null
+        If ( $Package | test-cs-package-is.ps1 -Bagged ) {
+			$LogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-sync" -Timestamp:( Get-Date ) -Force )
+			"LOG: {0}" -f $LogFile | Write-Host -ForegroundColor:Green -BackgroundColor:Black
+        }
+
         If ( ( -Not $NoMirror ) -and ( $Package | test-cs-package-is -Unmirrored ) ) {
 
             $DoIt = $Batch
@@ -32,11 +69,11 @@ Process {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "CONFIRM: Mirror package {0}?" -f $Package.Name ) -Timeout:$InputTimeout -DefaultInput:N -DefaultTimeout:60 -DefaultAction:"leave unmirrored" )
             }
             If ( $DoIt ) {
-                $Package | & coldstorage mirror -Items
+                $Package | & coldstorage mirror -Items -RoboCopy | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage mirror -Items -RoboCopy"
                 $PassThru = $true
             }
             Else {
-                ( "{0} | & coldstorage mirror -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+                ( "{0} | & coldstorage mirror -Items -RoboCopy" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
             }
 
         }
@@ -81,7 +118,7 @@ Process {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "CONFIRM: Zip package {0}?" -f $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
-                $Package | & coldstorage zip -Items
+                $Package | & coldstorage zip -Items | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage zip -Items"
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false
@@ -104,7 +141,7 @@ Process {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "CONFIRM: Upload {0} to cloud?" -f $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
-                $Package | & coldstorage to cloud -Items
+                $Package | & coldstorage to cloud -Items | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage to cloud -Items"
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false
@@ -115,7 +152,7 @@ Process {
         }
     
         If ( $DoIt ) {
-            $Package | write-packages-report-cs.ps1 | Write-Host -ForegroundColor Green -BackgroundColor Black
+            $Package | write-packages-report-cs.ps1 | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & write-packages-report-cs.ps1" | Write-Host -ForegroundColor Green -BackgroundColor Black
         }
     }
 }

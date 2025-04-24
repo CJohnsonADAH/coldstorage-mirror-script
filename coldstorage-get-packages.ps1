@@ -29,6 +29,7 @@ param (
     [switch] $Quiet = $false,
 	[switch] $Batch = $false,
     [switch] $Interactive = $false,
+    [switch] $Fast = $false,
     [switch] $Repository = $true,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
@@ -315,7 +316,7 @@ param (
 
 Function Get-CSItemValidation {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false, [switch] $Fast=$false )
 
 Begin {
     $nChecked = 0
@@ -328,7 +329,7 @@ Process {
 
         $Validated = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
-            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose -NoLog:$NoLog )
+            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose -NoLog:$NoLog -Fast:$Fast )
             $ValidationMethod = "BagIt"
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
@@ -529,7 +530,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
                         $BagPath = Get-FileLiteralPath -File $_
                         $Progress.Update( ( "#{0:N0}. Validating: {1}" -f $Progress.I, $BagPathLeaf ), 0 )
 
-                        $Validated = ( $BagPath | Get-CSItemValidation -Verbose:$Verbose -Summary:$false -NoLog:$NoLog )
+                        $Validated = ( $BagPath | Get-CSItemValidation -Verbose:$Verbose -Summary:$false -NoLog:$NoLog -Fast:$Fast )
                         
                         $nChecked = $nChecked + 1
                         $nValidated = $nValidated + $Validated.Count
@@ -905,7 +906,7 @@ Else {
     }
     ElseIf ( $Verb -eq "validate" ) {
         If ( $Items ) {
-            $allObjects | Get-CSItemValidation -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -PassThru:$PassThru
+            $allObjects | Get-CSItemValidation -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -PassThru:$PassThru
         }
         Else {
             Invoke-ColdStorageValidate -Pairs $allObjects -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped

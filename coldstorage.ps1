@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2024.0117
+@version 2025.0424
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -27,6 +27,7 @@ param (
     [Parameter(Position=0)] [string] $Verb,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
+    [switch] $Fast = $false,
     [switch] $Diff = $false,
     [switch] $SizesOnly = $false,
 	[switch] $Batch = $false,
@@ -446,7 +447,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
         $oManifest = ( $Bag | New-BagItManifestContainer )
         $OldManifest = $oManifest.FullName
 
-        Get-ChildItem -LiteralPath $Bag.FullName |? { ( $_.Name -ne $Payload.Name ) } |? { -Not ( $_.Name -match "^bagged-[0-9]+$" ) } |% {
+        Get-ChildItem -LiteralPath $Bag.FullName |? { $_ | Test-BagItManifestFile -Bag:$File } |% {
+            
             $Src = $_.FullName
             If ( Test-Path -LiteralPath $OldManifest ) {
                 $Dest = ( "${OldManifest}" | Join-Path -ChildPath $_.Name )
@@ -994,7 +996,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
 
             $sSrc = ( "${Src}" | ConvertTo-CSFileSystemPath )
             $sDest = ( "${Dest}" | ConvertTo-CSFileSystemPath )
-            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Host -ForegroundColor Yellow
+            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Host -BackgroundColor:Black -ForegroundColor:White
             If ( ( "${sSrc}" -ne '' ) -and ( "${sDest}" -ne '' ) ) {
                 If ( -Not $WhatIf ) {
                     Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
@@ -1913,6 +1915,30 @@ Else {
             Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
         }
     }
+    ElseIf ( $Verb -eq "consider" ) {
+        $allObjects | get-itempackage-cs.ps1 |% {
+
+            "Checking for crud files..." | Write-Warning
+            If ( $_ | test-cs-package-is.ps1 -Bagged ) {
+
+                $Bag = $_.CSPackageBagLocation
+                $Payload = ( $Bag | get-bagitbagcomponent-cs.ps1 -Payload )
+                
+                $Payload | & get-crud-files.ps1 |% {
+                    "[{0}] found common, system-generated crud file in payload: {1}" -f ( Get-CommandWithVerb ),$_.Name | Write-Warning
+                    If ( $Interactive ) {
+                        If ( & read-yesfromhost-cs.ps1 -Prompt ( "Delete possible crud file {0}?" -f $_.FullName ) ) {
+                            Remove-Item $_.FullName -Verbose -Force
+                        }
+                    }
+                }
+
+            }
+
+        }
+
+        "consider repairs!" | Write-Warning
+    }
     ElseIf ( $Verb -eq "check" ) {
         If ( $Items ) {
             $allObjects | Invoke-ColdStorageItemCheck
@@ -1925,6 +1951,7 @@ Else {
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words } )
         $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $Locations | & "${CSGetPackages}" "${Verb}" -Items:$Items -Repository:$Repository `
+            -Fast:$Fast `
             -Recurse:$Recurse `
             -At:$At `
             -Verbose:$Verbose `

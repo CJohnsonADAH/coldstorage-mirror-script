@@ -416,6 +416,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
     Begin { $sContext = $( If ( $Context ) { $Context } Else { "Get-LooseFileOfBaggedCopy" } ) }
 
     Process {
+		$Output = @{ }
         $oFile = Get-FileObject($File)
         If ( Test-BagItFormattedDirectory -File $oFile ) {
             $BagDir = $oFile.FullName
@@ -428,7 +429,6 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
                     $Counterpart = $null
                     $BagContainers = ( Get-BaggedCopyContainerSubdirectories )
                     $BagContainers | ForEach-Object {
-                        
                         If ( '.' -eq $_ ) {
                             $sContainer = $oContainer.FullName
                         }
@@ -458,7 +458,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Context=$null, [Int] $DiffL
                             }
 
                             If ( $Counterpart ) {
-                                $Counterpart
+								If ( -Not $Output.Contains( $Counterpart.FullName ) ) {
+									$Counterpart
+									$Output[ $Counterpart.FullName ] = $Counterpart
+								}
                             }
                         }
                     }
@@ -662,8 +665,30 @@ Process {
 End { }
 }
 
+Function Test-BagItManifestFile {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Bag )
+
+    Begin {
+        $Payload = ( $Bag | Select-BagItPayloadDirectory )
+        $ExcludeRegex = ( "^(bagged-[0-9]+|logs|manifest[.]html)$" )
+    }
+
+    Process {
+        If ( $File ) {
+            $IsPayload = ( $Payload -ne $null -and ( $File.Name -eq $Payload.Name ) )
+            $IsExcluded = ( $File.Name -match $ExcludeRegex )
+            $IsDirectory = ( Test-Path -LiteralPath $File.FullName -PathType Container )
+
+            ( -Not ( $IsDirectory -or ( $IsPayload -or $IsExcluded ) ) ) | Write-Output
+        }
+    }
+
+    End { }
+
+}
+
 Function New-BagItManifestContainer {
-Param( [Parameter(ValueFromPipeline=$true)] $Bag )
+Param( [Parameter(ValueFromPipeline=$true)] $Bag, [switch] $WhatIf=$false )
 
     Begin { }
 
@@ -671,11 +696,11 @@ Param( [Parameter(ValueFromPipeline=$true)] $Bag )
         $oFile = ( $Bag | Get-FileObject | Get-ItemFileSystemLocation )
 
         # Let's check out the contents of the BagIt top-level directory for viable creation dates.
-        $CreationTime = ( Get-ChildItem -LiteralPath $oFile.FullName |% { $_.CreationTime } ) | Sort-Object -Descending | Select-Object -First 1
+        $CreationTime = ( Get-ChildItem -LiteralPath $oFile.FullName |? { $_ | Test-BagItManifestFile -Bag:$oFile } |% { $_.CreationTime } ) | Sort-Object -Descending | Select-Object -First 1
 
         # If for any reason we don't have a creation time, fall back to the current time
         If ( $CreationTime.Count -eq 0 ) {
-            $CreationTime = Get-Date
+            $CreationTime = ( Get-Date )
         }
 
         # 1st, let's construct a short (date only) name for this path:
@@ -691,7 +716,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Bag )
         }
 
         # 3rd, create the container with New-Item and pass thru to output
-        New-Item -Path $Here -ItemType Directory | Write-Output
+        New-Item -Path $Here -ItemType Directory -WhatIf:$WhatIf | Write-Output
     }
 
     End { }
@@ -703,7 +728,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $PassThru=$false
 
     Begin { }
 
-    Process {
+    Process {1
         $oFile = Get-FileObject($Package)
         If ( $oFile ) {
 
@@ -1013,6 +1038,38 @@ Param (
     End { }
 }
 
+Function Add-ItemPackageContentsAndZip {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    [switch] $Bagged=$false,
+    [switch] $CheckZipped=$false,
+    $Contents=@( ),
+    $Zip=$null,
+    [switch] $PassThru=$false
+)
+
+    Begin { }
+
+    Process {
+        $Package | Add-Member -MemberType:NoteProperty -Name:CSIPCAZPackageContents -Value:$Contents -Force
+
+        If ( ( $Bagged -and $CheckZipped ) -and ( $Zip -eq $null ) ) {
+            $Zip = ( $Package | Get-ZippedBagOfUnzippedBag )
+        }
+
+        If ( $CheckZipped -and ( $Zip -ne $null ) ){
+            $Package | Add-Member -MemberType:NoteProperty -Name:CSIPCAZPackageZip -Value:$Zip -Force
+        }
+
+        If ( $PassThru ) {
+            $Package | Write-Output
+        }
+    }
+
+    End { }
+
+}
+
 Function Get-ItemPackage {
 Param (
     [Parameter(ValueFromPipeline=$true)] $File,
@@ -1020,6 +1077,7 @@ Param (
     [switch] $Recurse=$false,
     [switch] $Ascend=$false,
     $AscendTop=$null,
+	[switch] $Force=$false,
     [switch] $CheckZipped=$false,
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
@@ -1041,20 +1099,25 @@ Param (
         $bBagged = ( Test-BagItFormattedDirectory -File $File )
         $oBagLocation = $null
         $aZipped = $false
-        $aContents = @( )
-        $aWarnings = @( )
         
+        $oFile = ( $File.FullName | Get-FileObject )
+        $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageContentFiles -Value:@( ) -Force
+        $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageContentWarnings -Value:@( ) -Force
+
         $nonpackaged = ( $File | Test-CSNonpackagedItem )
         If ( $nonpackaged ) {
-            $aWarnings += @( "SKIPPED -- {0}" -f $nonpackaged.CSNonpackagedReason )
+            $oFile.CSPackageContentWarnings += @( "SKIPPED -- {0}" -f $nonpackaged.CSNonpackagedReason )
         }
         ElseIf ( Test-BaggedCopyOfLooseFile -File $File -DiffLevel 1 ) {
 
-            If ( $Ascend ) {
-                $aContents = ( $File | Get-LooseFileOfBaggedCopy )
+            If ( $At -and $Force ) {
+				$oFile = ( $File | Get-LooseFileOfBaggedCopy | Get-ItemPackage -At:$At -Force:$Force -Recurse:$Recurse -Ascend:$Ascend -AscendTop:$AscendTop -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud )
+			}
+			ElseIf ( $Ascend ) {
+                $oFile.CSPackageContentFiles = ( $File | Get-LooseFileOfBaggedCopy )
             }
             Else {
-                $aWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $File.FullName )
+                $oFile.CSPackageContentWarnings += @( "SKIPPED -- BAGGED COPY OF LOOSE FILE: {0}" -f $File.FullName )
             }
 
             $oBagLocation = $File
@@ -1065,7 +1128,7 @@ Param (
         }
         ElseIf ( $File | Test-CSBaggedPackageItem ) {
             $t = ( $File | Get-CSPackageItemBagging -CheckZipped:$CheckZipped )
-            $aContents = @( $t['Contents'] )
+            $oFile.CSPackageContentFiles = @( $t['Contents'] )
             If ( $bBagged ) {
                 $oBagLocation = $t['Bag']
                 If ( $CheckZipped ) {
@@ -1075,7 +1138,7 @@ Param (
 
         }
         ElseIf ( Test-IndexedDirectory -File $File -UnbaggedOnly:$Ascend ) {
-            $aContents = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
+            $oFile.CSPackageContentFiles = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
         }
         ElseIf ( Test-LooseFile -File $File ) {
             $oBagLocation = ( Get-BaggedCopyOfLooseFile -File $File )
@@ -1083,29 +1146,26 @@ Param (
             If ( $bBagged -and $CheckZipped ) {
                 $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
             }
-            $aContents = @( $File )
+            $oFile.CSPackageContentFiles = @( $File )
         }
         ElseIf ( $Recurse -and ( Test-Path -LiteralPath $File.FullName -PathType Container ) ) {
             ( "RECURSE INTO DIRECTORY: {0}" -f $File.FullName ) | Write-Verbose
-            $aContents = @( )
             Get-ChildItemPackages -File $File.FullName -Recurse:$Recurse -CheckZipped:$CheckZipped -CheckCloud:$CheckCloud -CheckMirrored:$CheckMirrored -ShowWarnings:$ShowWarnings -Progress:$Progress
         }
         ElseIf ( $Ascend ) {
-            $aWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )
-            $aContents = @( )
+            $oFile.CSPackageContentWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )
         }
         Else {
-            $aContents = @( )
-            $aWarnings += @( "SKIPPED -- MISC: {0}" -f $File.FullName )
+            $oFile.CSPackageContentWarnings += @( "SKIPPED -- MISC: {0}" -f $File.FullName )
         }
 
         If ( $ShowWarnings ) {
-            $aWarnings | Write-Warning
+            $oFile.CSPackageContentWarnings | Write-Warning
         }
 
-        If ( $aContents.Count -gt 0 ) {
-            $Package = $File
-            $Package | Add-ItemPackageBagData -Contents:$aContents -Bagged:$bBagged -BagLocation:$oBagLocation 
+        If ( $oFile.CSPackageContentFiles.Count -gt 0 ) {
+            $Package = $oFile
+            $Package | Add-ItemPackageBagData -Contents:$oFile.CSPackageContentFiles -Bagged:$bBagged -BagLocation:$oBagLocation 
 
             $oCloudCopy = $null
             If ( $aZipped -ne $false ) {
@@ -1137,7 +1197,6 @@ Param (
             }
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageChecked" -Value:( $PackageChecked | Select-Object -Unique ) -Force
 
-
             $Package | Write-Output
         }
         ElseIf ( $Ascend ) {
@@ -1152,7 +1211,7 @@ Param (
             }
         }
 
-        Write-Debug ( "Exited Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
+        ( "Exited Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings ) | Write-Debug
 
     }
 
@@ -1480,6 +1539,7 @@ Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
 Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
 Export-ModuleMember -Function Add-BaggedCopyContainer
+Export-ModuleMember -Function Test-BagItManifestFile
 Export-ModuleMEmber -Function New-BagItManifestContainer
 Export-ModuleMember -Function Undo-CSBagPackage
 Export-ModuleMember -Function Test-ERInstanceDirectory

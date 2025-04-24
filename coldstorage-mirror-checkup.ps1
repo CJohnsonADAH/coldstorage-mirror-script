@@ -6,6 +6,7 @@
     [switch] $Loop=$false,
     [switch] $SU=$false,
     [switch] $Catchup=$false,
+    [switch] $Validate=$false,
     $InputTimeout=60,
     $Path=@()
 )
@@ -61,7 +62,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File )
 }
 
 Function Invoke-CSMirrorCheckup {
-    Param ( $BakedAt=$null, [switch] $Batch=$false, [switch] $SU=$false )
+    Param ( $BakedAt=$null, [switch] $Batch=$false, [switch] $SU=$false, [switch] $Validate=$false )
 
     Begin {
         $modSource = ( $global:gColdStorageMirrorCheckupCmd.Source | Get-Item -Force )
@@ -203,6 +204,7 @@ $Automat = $false
 $ContinueLoop = $Loop
 
 $dirQNumbers = "H:\Digitization\Masters\Q_numbers"
+$dirSC = "H:\Digitization\Masters\Supreme_Court"
 $dirERUnprocessed = "H:\ElectronicRecords\Unprocessed"
 $dirERProcessed = "H:\ElectronicRecords\Processed"
 
@@ -271,10 +273,18 @@ Do {
 
         Push-Location $dirQNumbers
         Get-Item Master,Altered |% {
-            "DA-Q {0}: {1}" -f $_.Name,( Get-Date )
-            Push-Location $_.FullName ;
-            &coldstorage-mirror-checkup.ps1 -SU:$SU -InputTimeout:$InputTimeout ;
+            "DA-Q {0}: {1}" -f $_.Name,( Get-Date ) | Write-Host -ForegroundColor White -BackgroundColor Black
+            Push-Location $_.FullName
+            & coldstorage-mirror-checkup.ps1 -SU:$SU -Validate:$Validate -InputTimeout:$InputTimeout
             Pop-Location
+        }
+        Pop-Location
+
+        Push-Location $dirSC
+        "DA-SC: {0}" -f ( Get-Date ) | Write-Host -ForegroundColor White -BackgroundColor Black
+        & coldstorage.ps1 packages -Zipped -Mirrored -InCloud -Items . |? { Test-Path -LiteralPath $_.FullName -PathType Container } |% {
+            Write-Progress -Activity "Preservation Checkup" -Status ( "{0}" -f ( $_ | & write-packages-report-cs.ps1 ) ) 
+            $_ | & sync-cs-packagetopreservation.ps1 -InputTimeout:$InputTimeout
         }
         Pop-Location
     }
@@ -294,5 +304,5 @@ If ( -Not $Automat ) {
     }
 
     $aPaths = ( $allObjects |% { $o = ( $_ | Get-FileObject ) ; If ( ( $o -is [Object] ) -and ( $o | Get-Member -Name "FullName" ) ) { $o } Else { Write-Warning ( "FAILED: {0}" -f $_ ) } } )
-    $aPaths |? { -Not ( $_.Name -like '.*' ) } | Invoke-CSMirrorCheckup -BakedAt:$FullAt -Batch:$Batch
+    $aPaths |? { -Not ( $_.Name -like '.*' ) } | Invoke-CSMirrorCheckup -BakedAt:$FullAt -Batch:$Batch -Validate:$Validate
 }

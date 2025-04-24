@@ -15,6 +15,7 @@ Using Module ".\ColdStorageProgress.psm1"
 
 Param (
     [switch] $Items = $false,
+    [switch] $Container = $false,
     [switch] $Help = $false,
     [switch] $Quiet = $false,
 	[switch] $Batch = $false,
@@ -60,6 +61,7 @@ Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDir
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageBaggedChildItems.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageStats.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageZipArchives.psm1" )
+Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageInteraction.psm1" )
 
 $global:gCSScriptName = $MyInvocation.MyCommand
 $global:gCSScriptPath = $MyInvocation.MyCommand.Definition
@@ -106,6 +108,10 @@ Process {
         $oFile = Get-FileObject -File $File
         $sFile = Get-FileLiteralPath -File $File
 
+		$oPackage = ( $sFile | Get-ItemPackage -At -Force )
+		$vLogFile = ( $oPackage | & get-itempackageeventlog-cs.ps1 -Event:"preservation-zip" -Timestamp:( Get-Date ) -Force )
+		"LOG: {0}" -f $vLogFile | Write-Host -ForegroundColor:Green -BackgroundColor:Black				
+
         $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip -NoLog )
 
         $Progress.Update( "Validated bagged preservation package" )
@@ -139,9 +145,9 @@ Process {
                     $sArchive = ( $sRepository | Join-Path -ChildPath:$sZipName )
 
                     $Progress.Update( "Compressing archive {0}" -f $sArchive )
-                    $Package = ( $sFile | Get-ItemPackage -Ascend )
-
-                    $Package | Add-ZippedBagOfPreservationPackage -Force
+					
+					$Package = ( $sFile | Get-ItemPackage -Ascend )
+                    $Package | Add-ZippedBagOfPreservationPackage -LogFile:$vLogFile -Force
 
                     If ( $Package.CSPackageZip ) {
                         $Package.CSPackageZip |% {
@@ -178,7 +184,7 @@ Process {
                 
                 $Result |% {
                     $_ | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed -Skip:$Skip )
-                    $_ | Write-Output
+                    $_ | Write-CSOutputWithLogMaybe -Package:$Package -Command:( "'{0}' | & coldstorage zip -Items" -f $Package.FullName ) -Log:$vLogFile | Write-Output
                 }
 
             }
@@ -197,6 +203,102 @@ Process {
 End { }
 
 }
+
+Function Get-AWSHeaderValueHashTable {
+Param ( [Parameter(ValueFromPipeline=$true)] $Header )
+
+    Begin { }
+
+    Process {
+        $asReplacements = @()
+        $sHeader = $Header.Replace('{','{{').Replace('}','}}')
+        While ( $sHeader -match '["]((\\["]|[^"])*)["]' ) {
+            $ReplacedString = $Matches[0]
+            $asReplacements += @( $ReplacedString )
+            $sReplacement = ( '{0}{1}{2}' -f '{', ( $asReplacements.Length - 1 ), '}' )
+            $sHeader = ( $sHeader.Replace($ReplacedString, $sReplacement) )
+        }
+
+
+        $Pairs = ( $sHeader -split ',\s*' |% { $Key, $Value = (
+            ( $_ -split '=' ) |% {
+                $_ -f $asReplacements
+            } |% {
+                If ( $_ -match '^["].*["]$' ) {
+                    $_ | ConvertFrom-Json
+                }
+                Else {
+                    $_
+                }
+            } )
+            @{ $Key=$Value }
+        } )
+
+        $Pairs | ForEach { $o = @{ } } { $o += $_ } { $o }
+    }
+
+    End { }
+}
+
+Function Start-CSZPCachePackage {
+Param( [Parameter(ValueFromPipeline=$true)] $Package, $CmdName='Start-CSZPCachePackage' )
+
+    Begin { }
+
+    Process {
+        $json = $null
+        $s3Head = $null
+        
+        If ( $Package.CloudCopy ) {
+            $Bucket, $Key = ( "{0}" -f $Package.CloudCopy.Bucket ), ( "{0}" -f $Package.CloudCopy.Key )
+
+            $json = ( & aws.exe s3api head-object --bucket "${Bucket}" --key "${Key}" )
+            If ( $json ) {
+                $s3Head =  ( $json | ConvertFrom-Json )
+            }
+            If ( $s3Head -ne $null ) {
+                If ( $s3Head | Get-Member Restore ) {
+                    $hRestore = ( $s3Head.Restore | Get-AWSHeaderValueHashTable )
+
+                    If ( ( $hRestore[ 'ongoing-request' ] -eq 'false' ) ) {
+                        If ( $hRestore.Contains( 'expiry-date' ) ) {
+                            $dExpiration = [DateTime]::Parse( $hRestore[ 'expiry-date' ] )
+                            $dNow = ( Get-Date )
+
+                            $sExpiration = $dExpiration.ToString( 'dddd MM/dd/yyyy HH:mm K' )
+
+                            If ( $dExpiration -gt $dNow ) {
+                                "[{0}] Retrieved to restore. Expiration: {1}" -f $CmdName, $sExpiration | Write-Host -ForegroundColor Green
+                                $s3Url = ( "s3://{0}/{1}" -f "${Bucket}","${Key}" )
+                                $RestoreContainer = "."
+                                & aws.exe s3 cp $s3Url $RestoreContainer
+                            }
+                            Else {
+                                "[{0}] Retrieval expired: {1}" -f $CmdName, $sExpiration | Write-Warning
+                            }
+
+                        }
+                    }
+                    Else {
+                        "PENDING RETRIEVAL: {0}" -f $s3Head.Restore | Write-Warning
+                        $hRestore[ 'ongoing-request' ]
+                    }
+                }
+                Else {
+                    "STORAGE CLASS: {0}" -f $s3Head.StorageClass
+                }
+                $s3Head
+            }
+            Else {
+                $json | Write-Warning
+            }
+        }
+
+    }
+
+    End { }
+}
+
 
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
@@ -220,7 +322,7 @@ Else {
         $global:gScriptContextName = $sCommandWithVerb
     }
 
-    If ( $Verb -iin ( "test", "uncache", "get", "compress" ) ) {
+    If ( $Verb -iin ( "test", "cache", "uncache", "json", "get", "compress" ) ) {
         $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
     }
     Else {
@@ -228,7 +330,11 @@ Else {
         $Verb = "compress"
     }
 
-    If ( $Verb -ieq "uncache" ) {
+    If ( $Verb -ieq "cache" ) {
+        $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
+        $allObjects | & "${CSGetPackages}" -Items -Zipped -InCloud | Start-CSZPCachePackage -CmdName:"coldstorage-zip-packages cache"
+    }
+    ElseIf ( $Verb -ieq "uncache" ) {
         $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $allObjects | & "${CSGetPackages}" -Items -Zipped -InCloud | ForEach-Object {
             $pack = $_ 
@@ -255,10 +361,35 @@ Else {
         }
         #|% { $pack = $_ ; $pack.CSPackageZip |% { $ZipName = $_.FullName ; If ( $ZipName -like '*.json' ) { $NewName = $ZipName } Else { $ZipName | Write-Warning ; $NewName = ( "{0}.json" -f $ZipName ) ; $pack.CloudCopy | ConvertTo-Json > $ZipName ; Move-Item $ZipName $NewName -Verbose } } }
     }
+    ElseIf ( $Verb -eq "json" ) {
+        
+        $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
+        $allObjects | & "${CSGetPackages}" -Items -Zipped -InCloud | ForEach-Object {
+            $pack = $_
+            $pack.CSPackageZip | Select-Object -First 1 | ForEach-Object {
+                $ZipName = $_.FullName
+                If ( $ZipName -like '*.json' ) {
+                    ( "JSON: {0}" -f $ZipName ) | Write-Warning
+                    $pack.CloudCopy
+                }
+                Else {
+                    ( "ZIP: {0}" -f $ZipName ) | Write-Warning
+                    $pack.CloudCopy
+                }
+
+            }
+        }
+
+    }
     ElseIf ( $Verb -eq "get" ) {
         $allObjects |% {
             $Package = ( $_ | Get-ItemPackage )
-            $Package | Get-ZippedBagOfUnzippedBag
+            If ( -Not $Container ) {
+                $Package | Get-ZippedBagOfUnzippedBag
+            }
+            Else {
+                $Package | Get-ZippedBagsContainer
+            }
         }
     }
     ElseIf ( $Verb -eq "compress" ) {

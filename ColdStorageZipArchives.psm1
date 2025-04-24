@@ -22,6 +22,7 @@ Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchiv
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageFiles.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
 Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module -Verbose:$false $( My-Script-Directory -Command $global:gZipArchivesModuleCmd -File "ColdStorageInteraction.psm1" )
 
 ######################################################################################################
 ## ZIP ###############################################################################################
@@ -312,13 +313,26 @@ End { }
 
 Function Add-ZippedBagOfPreservationPackage {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Force=$false, [switch] $PassThru=$false, [switch] $WhatIf )
+Param (
+	[Parameter(ValueFromPipeline=$true)] $Package,
+	$LogFile=$null,
+	[switch] $Force=$false,
+	[switch] $PassThru=$false,
+	[switch] $WhatIf
+)
 
     Begin { }
 
     Process {
 
-        $oFile = ( $Package | Get-FileObject )
+		$oPackage = $Package
+		If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.Count -gt 0 ) ) {
+			$Package.CSPackageBagLocation | Sort-Object -Property LastWriteTime -Descending | Select-Object -First:1 |% {
+				$oPackage = $_
+			}
+		}
+		
+        $oFile = ( $oPackage | Get-FileObject )
 
         $oZip = @( )
         If ( -Not $Force ) {
@@ -340,7 +354,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Force=$false, [
                 $sZipName = ( Get-ZippedBagNamePrefix -File $oFile -Extension:'zip' )
                 $sZipPath = ( $sRepository | Join-Path -ChildPath:$sZipName )
 
-                $CAResult = ( $oFile.FullName | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath:$sZipPath )
+				$oPackage = ( $oFile | Get-ItemPackage -At )
+                $CAResult = ( $oFile.FullName | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath:$sZipPath | Write-CSOutputWithLogMaybe -Package:$oPackage -Command:("'{0}' | Compress-ArchiveWith7z"  -f $oFile.FullName ) -Log:$LogFile )
                 $CACompleted = ( Get-Date )
 
                 If ( $CAResult[0] -eq 0 ) {
@@ -535,7 +550,11 @@ End { }
 }
 
 Function Compress-ArchiveWith7z {
-Param ( [switch] $WhatIf=$false, [Parameter(ValueFromPipeline=$true)] $LiteralPath, $DestinationPath )
+Param (
+	[switch] $WhatIf=$false,
+	[Parameter(ValueFromPipeline=$true)] $LiteralPath,
+	$DestinationPath 
+)
 
     $ZipExe = Get-ExeFor7z
     $add = "a"

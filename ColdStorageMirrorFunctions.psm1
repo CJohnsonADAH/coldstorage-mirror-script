@@ -39,6 +39,31 @@ Param ( $Command=$null, $File=$null )
     $Path
 }
 
+Function Get-CSSyncOptionsLogFile {
+Param( [Parameter(ValueFromPipeline=$true)] $SyncOptions )
+
+	Begin { }
+	
+	Process {
+		$LogFile = $null
+		If ( ( $SyncOptions -ne $null ) -and $SyncOptions.Contains( "LogFile" ) ) {
+			$LogFile = $SyncOptions[ "LogFile" ]
+			
+			$TempKey = ( "Temp:{0}" -f $LogFile )
+			If ( $SyncOptions.Contains( $TempKey ) ) {
+				$TempLogFile = $SyncOptions[ $TempKey ]
+				$TempLogFile | Write-Output
+			}
+			Else {
+				$LogFile | Write-Output
+			}
+		}
+	}
+	
+	End { }
+	
+}
+
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
@@ -130,6 +155,8 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
     $DestinationContainer = $To
     $FileName = $File
 
+	$LogFile = ( $SyncOptions | Get-CSSyncOptionsLogFile )
+	
     $Source = $SourceContainer
     $Destination = $DestinationContainer
     If ( $FileName -ne $null ) {
@@ -157,7 +184,8 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
     }
 
     If ( $o1.Count -gt 0 ) {
-        
+		"copying file: {0} to {1}" -f "${Source}","${Destination}"| Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-Host -ForegroundColor White -BackgroundColor Black
+
         # 0. Overwrite if present -- save the copy about to be obliterated to the Trash
         If ( ( Test-Path "${Destination}" ) -And ( -Not $Discard ) ) {
             Remove-ItemToTrash -From "${Source}"
@@ -187,11 +215,11 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
                 $rcDestination = ( Convert-Path -LiteralPath "${DestinationContainer}" )
                 
                 If ( $File -ne $null ) {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${File}" | Write-RoboCopyOutput
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
                     $RoboCode = $LASTEXITCODE
                 }
                 Else {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" | Write-RoboCopyOutput
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
                     $RoboCode = $LASTEXITCODE
                 }
                 $Fallback = ( $RoboCode -ge 5 )
@@ -218,14 +246,24 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
 }
 
 Function Copy-MirroredFilesWithMetadata {
-Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, [switch] $RoboCopy=$false, $DiffLevel=1, $Depth=0, $Progress=$null)
+Param (
+	$From,
+	$To,
+	$SyncOptions=$null,
+	[switch] $Batch=$false,
+	[switch] $RoboCopy=$false,
+	$DiffLevel=1,
+	$Depth=0,
+	$Progress=$null
+)
 
     $sStatus = "*.*"
 
     $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
     $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe )
 
-
+	$LogFile = ( $SyncOptions | Get-CSSyncOptionsLogFile )
+	
     If ( "${To}" -eq "" ) {
         "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
         Return
@@ -252,22 +290,22 @@ Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, [switch] $RoboCop
                     $rcFile = ( Split-Path "${From}" -Leaf )
 
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-RoboCopyOutput -Prolog -Epilog
+                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog
                     }
                 }
                 Else {
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-RoboCopyOutput -Prolog -Epilog
+                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog
                     }
                 }
 
             }
             Else {
-                "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+                "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ERROR MESSAGE" -Log:$LogFile | Write-Error
             }
         }
         Else {
-            "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+            "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ERROR MESSAGE" -Log:$LogFile | Write-Error
         }
 
     }
@@ -278,7 +316,7 @@ Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, [switch] $RoboCop
         ##################################################################################################################
 
         $Progress.Update( "${sStatus} (cp)" )
-        Copy-MirroredFiles -From:$From -To:$To -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth # -Progress:$Progress
+        Copy-MirroredFiles -From:$From -To:$To -SyncOptions:$SyncOptions -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth # -Progress:$Progress
 
         ##################################################################################################################
         ## METADATA: Synchronize source file system meta-data to destination #############################################
@@ -296,6 +334,8 @@ Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, $DiffLevel=1, $De
 
     "Copy-MirroredFiles FROM: {0}" -f $From | Write-Debug
     "Copy-MirroredFiles TO: {0}" -f $To | Write-Debug
+
+	$LogFile = ( $SyncOptions | Get-CSSyncOptionsLogFile )
 
     If ( "${To}" -eq "" ) {
         "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
@@ -370,7 +410,7 @@ Param ($From, $To, $SyncOptions=$null, [switch] $Batch=$false, $DiffLevel=1, $De
             "Copy-MirroredFiles CopyTo: {0}" -f $CopyTo | Write-Debug
 
             If ( -Not ( $_ | Test-UnmirroredDerivedItem -MirrorBaggedCopies ) ) {
-                Copy-MirroredFile -From:${CopyFrom} -To:${CopyTo} -File:$CopyFile -Batch:${Batch} -Progress:${Progress}
+                Copy-MirroredFile -From:${CopyFrom} -To:${CopyTo} -File:$CopyFile -SyncOptions:$SyncOptions -Batch:${Batch} -Progress:${Progress}
             }
         }
     }
@@ -403,7 +443,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $From, [switch] $Copy=$false, $Sync
                 "[Remove-ItemsToTrash] Create destination container: ${TrashContainer}" | Write-Verbose
                 $TrashContainer = ( New-Item -ItemType Directory -Path $TrashContainer -Force )
             }
-
+            
+            $To | Write-Warning
             If ( $Copy ) {
                 Copy-Item $LiteralPath $From -Destination $To -Force
             }
@@ -490,6 +531,8 @@ Param (
     $From,
     $To,
     $DiffLevel=1,
+	[switch] $NoLog=$false,
+	$LogFile=$null,
     [switch] $Batch=$false,
     [switch] $Scheduled=$false,
     $SyncOptions=$null,
@@ -585,6 +628,8 @@ Param (
     [switch] $Batch=$false,
     [switch] $Force=$false,
     [switch] $NoScan=$false,
+	[switch] $NoLog=$false,
+	$LogFile=$null,
     $RepositoryOf=$null,
     [switch] $RoboCopy=$false,
     [switch] $AlreadyCopied=$false,
@@ -662,94 +707,73 @@ Param (
     }
 
     $sTo = $To
-    If ( Test-BagItFormattedDirectory -File $To ) {
+	
+	# SCANNING: for validation of SOURCE ($From) package
+	$Bag = $null
+	If ( -Not $NoScan ) {
+		$CSGetPackages = $( Get-ScriptPath -File "coldstorage-get-packages.ps1" )
+		$OKBagIt = 0
+		
+		If ( Test-BagItFormattedDirectory -File $From ) {
+			$Bag = ( $From | & "${CSGetPackages}" validate -Items -NoValidateLog -PassThru ); $OKBagIt = $LastExitCode
+			If ( $OKBagIt -gt 0 ) {
+                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' no longer validates and SHOULD NOT overwrite Destination '{2}' !!!" -f $global:gCSSCriptName, $From, $To )
+                Write-Error $ErrMesg
+                Return
+			}
+		}
+		
+    }
+	
+	If ( Test-BagItFormattedDirectory -File $To ) {
 
         If ( -Not ( Test-BagItFormattedDirectory -File $From ) ) {
             $oPayload = ( Get-FileObject($To) | Select-BagItPayloadDirectory )
             $To = $oPayload.FullName
         }
-        Else {
-            $CSGetPackages = $( Get-ScriptPath -File "coldstorage-get-packages.ps1" )
 
-            $OKBagIt = 0
-            If ( -Not $NoScan ) {
-                $Bag = ( $From | & "${CSGetPackages}" validate -Items -NoValidateLog -PassThru ); $OKBagIt = $LastExitCode
-            }
-
-            If ( $OKBagIt -gt 0 ) {
-
-                $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' no longer validates and SHOULD NOT overwrite Destination '{2}' !!!" -f $global:gCSSCriptName, $From, $To )
-                Write-Error $ErrMesg
-                Return
-
-            }
-
-        }
     }
     ElseIf ( Test-BagItFormattedDirectory -File $From ) {
+	# MIRROR: copying from a bagged SOURCE [$From] --> currently unbagged DESTINATION [$To]
 
-        $CSGetPackages = $( Get-ScriptPath -File "coldstorage-get-packages.ps1" )
+		$Items = ( Get-ChildItem -Force -LiteralPath "${To}" )
+		If ( $Items.Count -gt 0 ) {
+			$DoTheMove = $Force
+			$DoTheRepair = $false
 
-        $OKBagIt = 0
-        If ( -Not $NoScan ) {
-            
-            $bagProgress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
-            $bagProgress.Open( $sActScanning, "${From} (validating)" )
+			If ( -Not $DoTheMove ) {
+				If ( -Not $Batch ) {
+					$DoTheMove = ( $TestMoveIntoBag.Invoke( $Scheduled ) )
+				}
+			}
+			If ( -Not $DoTheMove ) {
+				If ( -Not $Batch ) {
+					$DoTheRepair = ( Read-YesFromHost -Prompt ( "Repair {0} contents from BagIt data payload directory?" -f "${To}" ) )
+				}
+			}
 
-            $bagProgress.Update( $sActScanning, "${sStatus} (bagit)" )
-            $Bag = ( $From | & "${CSGetPackages}" validate -Items -PassThru ); $OKBagIt = $LastExitCode
-            $bagProgress.Complete()
+			If ( $DoTheMove ) {
 
-        }
+				$sPayload = ( Join-Path "${To}" -ChildPath "data" )
+				$oPayload = ( New-Item -Path $sPayload -ItemType Directory -Force )
+				$Items |% {
+					Move-Item $_.FullName -Destination $oPayload.FullName
+				}
 
-        If ( $OKBagIt -gt 0 ) {
+			}
+			Else {
+				If ( -Not $DoTheRepair ) {
+					$oPayload = ( Get-FileObject($From) | Select-BagItPayloadDirectory )
+					$From = $oPayload.FullName
+				}
+				Else {
+					# NOOP
+				}
+			}
 
-            $ErrMesg = ( "[{0}] Sync-MirroredFiles: Source '{1}' no longer validates and SHOULD NOT overwrite Destination '{2}' !!!" -f $global:gCSSCriptName, $From, $To )
-            Write-Error $ErrMesg
-            Return
-
-        }
-        Else {
-            $Items = ( Get-ChildItem -Force -LiteralPath "${To}" )
-            If ( $Items.Count -gt 0 ) {
-                $DoTheMove = $Force
-                $DoTheRepair = $false
-
-                If ( -Not $DoTheMove ) {
-                    If ( -Not $Batch ) {
-                        $DoTheMove = ( $TestMoveIntoBag.Invoke( $Scheduled ) )
-                    }
-                }
-                If ( -Not $DoTheMove ) {
-                    If ( -Not $Batch ) {
-                        $DoTheRepair = ( Read-YesFromHost -Prompt ( "Repair {0} contents from BagIt data payload directory?" -f "${To}" ) )
-                    }
-                }
-
-                If ( $DoTheMove ) {
-
-                    $sPayload = ( Join-Path "${To}" -ChildPath "data" )
-                    $oPayload = ( New-Item -Path $sPayload -ItemType Directory -Force )
-                    $Items |% {
-                        Move-Item $_.FullName -Destination $oPayload.FullName
-                    }
-
-                }
-                Else {
-                    If ( -Not $DoTheRepair ) {
-                        $oPayload = ( Get-FileObject($From) | Select-BagItPayloadDirectory )
-                        $From = $oPayload.FullName
-                    }
-                    Else {
-                        # NOOP
-                    }
-                }
-
-            }
         }
 
     }
-
 
     $Steps = @(
         "Copy-MirroredFiles"
@@ -762,13 +786,40 @@ Param (
 
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( $sActScanning, "${sStatus} (sync)", $nSteps + 1 )
+	
+	$StartedLog = $false
+	$vLogFile = $LogFile
+	If ( $vLogFile -eq $null ) {
+		If ( -Not $NoLog ) {
+			If ( $Bag -ne $null ) {
+			# $Bag is set above; this ONLY happens when SOURCE ($From) has
+			# a BagIt-formatted directory AND the contents of that DIRECTORY
+			# have successfully validated.
+				$Package = ( $Bag | Get-ItemPackage -At -Force )
+				
+				$vLogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-mirror" -Timestamp:( Get-Date ) -Force )
+				$StartedLog = $true
+			}
+		}
+	}
+
+	If ( $vLogFile -ne $null ) {
+		If ( $SyncOptions -eq $null ) {
+			$SyncOptions = @{ }
+		}
+		$SyncOptions[ "LogFile" ] = $vLogFile
+		$TempName = ( "Temp:{0}" -f $vLogFile )
+		If ( -Not $SyncOptions.Contains( $TempName ) ) {
+			$SyncOptions[ $TempName ] = ( New-TemporaryFile ).FullName
+		}
+	}
 
     If ( -Not $AlreadyCopied ) {
-        Copy-MirroredFilesWithMetadata -From:$From -To:$To -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth -RoboCopy:$RoboCopy -Progress:$Progress
+        Copy-MirroredFilesWithMetadata -From:$From -To:$To -SyncOptions:$SyncOptions -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth -RoboCopy:$RoboCopy -Progress:$Progress
     }
 
     If ( Test-MirrorSyncBidirectionally -LiteralPath $From ) {
-        Copy-MirroredFilesWithMetadata -From:$To -To:$From -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth -RoboCopy:$RoboCopy -Progress:$Progress
+        Copy-MirroredFilesWithMetadata -From:$To -To:$From -SyncOptions:$SyncOptions -Batch:$Batch -DiffLevel:$DiffLevel -Depth:$Depth -RoboCopy:$RoboCopy -Progress:$Progress
         Remove-MirroredFilesWhenObsolete -From:$From -To:$To -Batch:$Batch -Depth:$Depth -RepositoryOf:$RepositoryOf -FromTombstone
         Remove-MirroredFilesWhenObsolete -From:$To -To:$From -Batch:$Batch -Depth:$Depth -RepositoryOf:$RepositoryOf -FromTombstone
     }
@@ -817,11 +868,31 @@ Param (
         $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
         $Progress.Update( $Mesg, 0 )
         $Mesg | Write-Debug
-        Sync-MirroredFiles -From "${MirrorFrom}" -To "${MirrorTo}" -DiffLevel $DiffLevel -Depth ($Depth + 1) -SyncOptions:$SyncOptions -Batch:$Batch -NoScan:$NoScan -RoboCopy:$RoboCopy -AlreadyCopied:$RoboCopy
+        Sync-MirroredFiles -From:"${MirrorFrom}" -To:"${MirrorTo}" -DiffLevel:$DiffLevel -Depth:($Depth + 1) -SyncOptions:$SyncOptions -Batch:$Batch -NoScan:$NoScan -NoLog:$NoLog -LogFile:$vLogFile -RoboCopy:$RoboCopy -AlreadyCopied:$RoboCopy
         $Progress.Update( $Mesg )
     }
 
     $Progress.Complete()
+
+	If ( $StartedLog ) {
+		If ( ( $SyncOptions -ne $null ) -and ( $SyncOptions.Keys.Count -gt 0 ) ) {
+			If ( $SyncOptions.Contains( "LogFile" ) ) {
+				$outLogFile = $SyncOptions[ "LogFile" ]
+				$TempKey = ( "Temp:{0}" -f $outLogFile )
+				If ( $SyncOptions.Contains( $TempKey ) ) {
+					$inLogFile = $SyncOptions[ $TempKey ]
+					Get-Content $inLogFile >> $outLogFile
+					Remove-Item $inLogFile
+				}
+				Else {
+					"NAH!"|Write-Warning
+				}
+			}
+			Else {
+				"WUT"|Write-Warning
+			}
+		}
+	}
 }
 
 

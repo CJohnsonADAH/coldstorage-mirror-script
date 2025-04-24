@@ -30,7 +30,6 @@ $ColdStorageDataER = "${ColdStorageData}\ElectronicRecords"
 $ColdStorageDataDA = "${ColdStorageData}\Digitization"
 $ColdStorageER = "\\ADAHColdStorage\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\Digitization"
-$ColdStorageBackup = "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
 
 $global:gColdStorageMirrors = @{
     Processed=( "ER", "\\ADAHFS3\Data\Permanent", "${ColdStorageDataER}\Processed", "${ColdStorageDataER}\Processed" )
@@ -283,6 +282,13 @@ Param (
 
 }
 
+Function Get-ColdStorageTrashLocationContainer {
+
+    # formerly, was hardcoded as "\\ADAHColdStorage\Share\ColdStorageMirroredBackup"
+    Get-ColdStorageSettings -Name "Repository-Trashcan" | Write-Output
+    
+}
+
 Function Get-ColdStorageTrashLocation {
 Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=$false, $Mirrors=$null, [switch] $Passive=$false )
 
@@ -297,7 +303,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Repository, [switch] $NoTimestamp=
     }
 
     Process {
-        $TrashLocation = "${ColdStorageBackup}"
+        $TrashLocation = ( Get-ColdStorageTrashLocationContainer )
         
         If ( $Repository -ne $null ) {
             If ( $aMirrors.ContainsKey($Repository) ) {
@@ -982,6 +988,7 @@ Export-ModuleMember -Function Get-ColdStorageRepositories
 Export-ModuleMember -Function Get-ColdStorageLocation
 Export-ModuleMember -Function Get-ColdStorageZipLocation
 Export-ModuleMember -Function Get-FileNameSlug
+Export-ModuleMember -Function Get-ColdStorageTrashLocationContainer
 Export-ModuleMember -Function Get-ColdStorageTrashLocation
 Export-ModuleMember -Function Get-FileRepository
 Export-ModuleMember -Function Get-FileRepositoryName

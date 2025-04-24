@@ -1,9 +1,9 @@
 {
-	"BagIt": "//ADAHColdStorage/Share/Scripts/bagit",
-	"ClamAV": "//ADAHColdStorage/Share/Binaries/clamav-0.103.7-2-win-x64-portable",
-    "7za": "//ADAHColdStorage/Share/Binaries/7z-1900/x64",
-	"Python": "//ADAHColdStorage/Share/Binaries/WinPython64/python-3.9.0rc1.amd64",
-    "AWS": "//ADAHColdStorage/Share/Binaries/AWS-CLI",
+	"BagIt": "//ADAHMainStorage_22B/ADAHServerTools/Scripts/bagit",
+	"ClamAV": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/clamav-1.4.2.win.x64",
+    "7za": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/7z-1900/x64",
+	"Python": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/WinPython64/python-3.9.0rc1.amd64",
+    "AWS": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/AWS-CLI",
     "Script-Queue": "//ADAHColdStorage/Share/Scripts/.coldqueue",
 	"Institution": "Alabama Department of Archives and History",
 	"Drop-Server-SFTP": "adah@drop.adpn.org",
@@ -20,6 +20,7 @@
 			"./Q_numbers/Altered/Q*": "Q-Numbers Altered: {0}//[^A-Za-z0-9]+/-/"
 		}
 	},
+	"Repository-Trashcan": "//ADAHMainStorage/ADAHColdStorage-Diffs",
     "Repository-Groups": {
         "ER": [ "//ADAHColdStorage/ADAHDATA/ElectronicRecords", "//ADAHColdStorage/ElectronicRecords", "//ADAHMainStorage_22B/ElectronicRecords" ],
         "DA": [ "//ADAHColdStorage/ADAHDATA/Digitization", "//ADAHColdStorage/Digitization" ],

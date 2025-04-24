@@ -70,7 +70,7 @@ Param ( $LiteralPath, [switch] $NoLog = $false )
 }
 
 Function Add-CSBaggedPackageValidationLog {
-Param ( $LiteralPath, [switch] $NoLog = $false )
+Param ( $LiteralPath, [switch] $NoLog = $false, [switch] $Fast = $false )
 
     $LogFile = $null
 
@@ -78,7 +78,8 @@ Param ( $LiteralPath, [switch] $NoLog = $false )
         $LogDirItem = ( Get-CSBaggedPackageLogDirectory -LiteralPath $DIRNAME -NoLog:$NoLog )
         If ( $LogDirItem ) {
             $Timestamp = @( ( Get-Date -Format 'yyyyMMdd' ), ( Get-Date -Format 'HHmmss' ) )
-            $LogFile = ( Join-Path -Path $LogDirItem.FullName -ChildPath ( "validation-{0}-{1}-{2}-{3}.txt" -f "bagit",$Timestamp[0], $Timestamp[1], $env:COMPUTERNAME ) )
+            $Method = $( If ( $Fast ) { "-FAST" } Else { "" } )
+            $LogFile = ( Join-Path -Path $LogDirItem.FullName -ChildPath ( "validation-{0}-{1}-{2}-{3}{4}.txt" -f "bagit",$Timestamp[0], $Timestamp[1], $env:COMPUTERNAME, $Method ) )
         }
     }
 
@@ -107,13 +108,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Line, $Log, [switch] $NoLog = $fal
 
 }
 
-Function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false, [switch] $NoLog = $false ) {
+Function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false, [switch] $NoLog = $false, [switch] $Fast=$false ) {
 
     $CSBagIt= ( Join-Path $global:CSBIDScriptDirectory -ChildPath "coldstorage-bagit.ps1" )
 
     Push-Location $DIRNAME
 
-    $LogFile = ( Add-CSBaggedPackageValidationLog -LiteralPath:$DIRNAME -NoLog:$NoLog )
+    $LogFile = ( Add-CSBaggedPackageValidationLog -LiteralPath:$DIRNAME -NoLog:$NoLog -Fast:$Fast )
     
     If ( -Not ( -Not ( ( $Skip |% { $_.ToLower().Trim() } ) | Select-String -Pattern "^bagit$" ) ) ) {
         "BagIt Validation SKIPPED for path ${DIRNAME}" | Write-Verbose -InformationAction Continue
@@ -121,12 +122,16 @@ Function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch
     }
     Else {
         If ( $Verbose ) {
-            "bagit.py --validate ${DIRNAME}" | Write-Verbose
+            "${CSBagIt} --validate ${DIRNAME}" | Write-Verbose
         }
         [PSCustomObject] @{ "Location"=( ( Get-Location ).Path ) } | ConvertTo-Json -Compress |% { "! JSON[Start]:`t $_" | Write-CSBagItValidationMessage -Log:$LogFile -NoLog:$NoLog -ForLogOnly }
 
         $Output = @( )
-        & "${CSBagIt}" --validate . -Progress -Stdout -DisplayResult |% {
+        $ValidationFlags = @( "--validate", '--dangerously' )
+        If ( $Fast ) {
+            $ValidationFlags += @( "--fast" )
+        }
+        & "${CSBagIt}" @ValidationFlags . -Progress -Stdout -DisplayResult |% {
             $Output = @( $Output ) + @( "$_" -split "[`r`n]+" )
             "$_" | Write-CSBagItValidationMessage -Log:$LogFile -NoLog:$NoLog -Verbose:$Verbose
         }
@@ -173,7 +178,9 @@ Begin { }
 Process {
     If ( $File -ne $null ) {
         $sPath = ( ( Get-FileObject($File).FullName ) | Join-Path -ChildPath "data" )
-        Get-Item -Force -LiteralPath "${sPath}"
+        If ( Test-Path -LiteralPath "${sPath}" -PathType Container ) {
+            Get-Item -Force -LiteralPath "${sPath}"
+        }
     }
 }
 

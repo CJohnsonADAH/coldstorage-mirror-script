@@ -333,6 +333,46 @@ Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singul
 
 }
 
+Function Write-CSOutputWithLogMaybe {
+Param ( [Parameter(ValueFromPipeline)] $Line, $Package, $Command=$null, $Log )
+
+	Begin {
+		If ( $Log -ne $null ) {
+			If ( ( -Not ( Test-Path -LiteralPath $Log ) ) -or ( ( Get-Item -LiteralPath $Log -Force ).Length -eq 0 ) ) {
+				$StartMessage = @{ "Location"=$Package.FullName; "User"=( $env:USERNAME ); "Time"=( Get-Date ).ToString() }
+				( "! JSON[Start]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+			}
+		}
+		If ( $Command -ne $null ) {
+			If ( $Log -ne $null ) {
+				$StartMessage = @{ "Command"=( $Command -f ( "Get-Item -LiteralPath '{0}' -Force" -f $Package.FullName ) ); "User"=( $env:USERNAME ); "Time"=( Get-Date ).ToString() }
+				( "! JSON[Command]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+			}
+		}
+	}
+
+	Process {
+		If ( $Line -ne $null ) {
+			$Line | Write-Output
+			If ( $Log -ne $null ) {
+				If ( ( $Line -is [string] ) -or ( $Line -is [DateTime] ) ) {
+					"$Line" >> $Log
+				}
+				Else {
+					$Line | ConvertTo-Json -Compress >> $Log
+				}
+			}
+		}
+	}
+
+	End {		
+
+		$ExitMessage = @{ "Location"=$Package.FullName; "Time"=( Get-Date ).ToString() }
+		( "! JSON[Exit]: {0}" -f ( $ExitMessage | ConvertTo-Json -Compress ) ) >> $Log
+		
+	}
+
+}
 
 Function Write-RoboCopyOutput {
 Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [switch] $Epilog=$false, [switch] $Echo=$false )
@@ -396,3 +436,4 @@ Export-ModuleMember -Function Read-YesFromHost
 Export-ModuleMember -Function Get-PluralizedText
 
 Export-ModuleMember -Function Write-RoboCopyOutput
+Export-ModuleMember -Function Write-CSOutputWithLogMaybe

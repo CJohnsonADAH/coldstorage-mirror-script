@@ -18,6 +18,7 @@ Param ( $Command, $File=$null )
 Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageSettings.psm1" )
 Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageFiles.psm1" )
 Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageRepositoryLocations.psm1" )
+Import-Module $( My-Script-Directory -Command $MyInvocation.MyCommand -File "ColdStorageInteraction.psm1" )
 
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
@@ -598,7 +599,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
         $oFile = $null
         $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:("{0} to cloud" -f $global:gCSScriptName) |% {
             $oFile = $_
-            $sFile = $oFile.FullName
+			$Package = ( $File | Get-ItemPackage -At )
+			$vLogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-to-cloud" -Timestamp:( Get-Date ) -Force )
+            
+			$sFile = $oFile.FullName
             $Bucket = ($sFile | Get-CloudStorageBucket)
 
             If ( $Bucket ) {
@@ -612,7 +616,18 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                     $sFile = ( '\\?\{0}' -f $sFile )
                 }
                 
-                & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf}
+				$sCmd = ( '& {0} s3 cp "{1}" "s3://{2}/" --storage-class DEEP_ARCHIVE {3}' -f ${AWS},${sFile},${Bucket},${sWhatIf} )
+                & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
+                    # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
+                    If ( "$_" -match "Completed\s+[0-9.]+\s+.*\s+with\s+[0-9]+.*\s+remaining\s*" ) {
+                        Write-Progress -Id 107 -Status "$_" -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} )
+                    }
+                    Else {
+                        $_ | Write-Output
+                    }
+                } | Write-CSOutputWithLogMaybe -Package:$oFile -Command:$sCmd -Log:$vLogFile
+                Write-Progress -Id 107 -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} ) -Completed
+
             }
             Else {
                 Write-Warning ( "[{0} to cloud] Could not identify bucket: {1}" -f $global:gCSScriptName,$File )
