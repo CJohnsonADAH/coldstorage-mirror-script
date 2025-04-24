@@ -7,8 +7,8 @@ $global:gColdStorageInteractionModuleCmd = $MyInvocation.MyCommand
     $modSource = ( $global:gColdStorageInteractionModuleCmd.Source | Get-Item -Force )
     $modPath = ( $modSource.Directory | Get-Item -Force )
 
-Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
-Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageZipArchives.psm1" )
+#Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
+#Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageZipArchives.psm1" )
 
 Function Get-ScriptPath {
 Param ( $Command, $File=$null )
