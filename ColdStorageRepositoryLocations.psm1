@@ -819,7 +819,11 @@ Process {
             $Range |% {
                 $PropName = $_
                 $PropValue = $Locations.${PropName}
-                $ItsMe = ( $PropValue -eq $Stock )
+
+                $PropValueUNC = ( $PropValue | Get-LocalPathFromUNC ) -join ""
+
+                $ItsMe = ( $Stock -iin @( $PropValue, $PropValueUNC ) )
+
                 $Include = ( ( -Not $Implicit ) -or ( $All ) -or ( $ItsMe -eq $Self ) )
 
                 $HereThereDiagLines = @( $HereThereDiagLines ) + @(
