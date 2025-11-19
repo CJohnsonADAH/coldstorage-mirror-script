@@ -60,7 +60,9 @@ Else {
     }
 
     $Original = $_.FullName
-    Move-Item $_.FullName ( $Destination | Join-Path -ChildPath ( "{0}.ps1" -f ( $_.Name -replace "[^0-9A-Za-z]","_" ) ) ) -Verbose
+    $ScriptName = ( $Destination | Join-Path -ChildPath ( "{0}.ps1" -f ( $_.Name -replace "[^0-9A-Za-z]","_" ) ) )
+    Get-Content $_.FullName | Select-Object -Unique | Out-File -LiteralPath $ScriptName
+    Remove-Item $_.FullName -Verbose
     Get-ChildItem $Destination -File |? { $_.Name -like "*.ps1" } |% {
         $Script = $_.FullName
 
@@ -80,7 +82,7 @@ Else {
             $DefaultDismiss = 'Y'
         }
         Else {
-            $DefaultDismiss = 'N'
+            $DefaultDismiss = 'Y'
         }
 
         If ( $IsToBeExecuted ) {

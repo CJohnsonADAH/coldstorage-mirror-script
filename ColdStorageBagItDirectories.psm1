@@ -111,8 +111,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Line, $Log, [switch] $NoLog = $fal
 Function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch] $Verbose = $false, [switch] $NoLog = $false, [switch] $Fast=$false ) {
 
     $CSBagIt= ( Join-Path $global:CSBIDScriptDirectory -ChildPath "coldstorage-bagit.ps1" )
-
-    Push-Location $DIRNAME
+    #Dir 
+    Push-Location -LiteralPath:$DIRNAME
 
     $LogFile = ( Add-CSBaggedPackageValidationLog -LiteralPath:$DIRNAME -NoLog:$NoLog -Fast:$Fast )
     

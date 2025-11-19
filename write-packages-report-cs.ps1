@@ -110,7 +110,7 @@ Begin {
 
             $oContext = ( Get-FileObject $Context )
 
-            Push-Location ( $oContext | Get-ItemFileSystemLocation ).FullName
+            Push-Location -LiteralPath ( $oContext | Get-ItemFileSystemLocation ).FullName
 
             $sFullName = $Package.FullName
         

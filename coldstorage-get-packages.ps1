@@ -63,6 +63,7 @@ param (
     [switch] $Version = $false,
     [string] $From,
     [string] $To,
+    $Copy = $null,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
 )
@@ -316,25 +317,68 @@ param (
 
 Function Get-CSItemValidation {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false, [switch] $Fast=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, $Copy=$null, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false, [switch] $Fast=$false )
 
 Begin {
     $nChecked = 0
     $nValidated = 0
+
+    If ( $Copy -eq $null ) {
+        $Copy = "self"
+    }
+    $Cmd = "Get-CSItemValidation"
 }
 
 Process {
-    $Item | Get-Item -Force | %{
+    $Item | Get-ItemPackage -At -Force -CheckMirrored |% {
+        
+        $ToValidate = $null
+        If ( $Copy -eq "mirror" ) {
+            $ToValidate = ( $_ | Get-MirrorMatchedItem -Other -Passive )
+        }
+        Else {
+            $ToValidate = $_
+        }
+        
+        If ( $ToValidate ) {
+            $ToValidate
+        }
+        Else {
+            "[{0}] COPY UNAVAILABLE: {1}( '{2}' )" -f $Cmd, $Copy, $Item | Write-Warning
+        }
+
+    } |% {
+
+        $oBag = $_
         $sLiteralPath = Get-FileLiteralPath -File $_
+        "[{0}] Initial sLiteralPath: {1}" -f $Cmd, $sLiteralPath | Write-Debug
 
         $Validated = $null
+        If ( -Not ( Test-BagItFormattedDirectory -File $sLiteralPath ) ) {
+            If ( $_.CSPackageBagLocation ) {
+                $_.CSPackageBagLocation |% {
+                    $oBagLocation = $_
+                    "[{0}] oBagLocation: {1}" -f $Cmd, $oBagLocation.FullName | Write-Host -ForegroundColor Cyan
+                    $sBagLocation = ( Get-FileLiteralPath -File $oBagLocation )
+                    If ( $sBagLocation ) {
+                        $oBag = $oBagLocation
+                        $sLiteralPath = $sBagLocation
+                    }
+                }
+            }
+        }
+        "[{0}] Final sLiteralPath: {1}" -f $Cmd, $sLiteralPath | Write-Debug
+
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
-            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $_ -Verbose:$Verbose -NoLog:$NoLog -Fast:$Fast )
+            $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sLiteralPath -Verbose:$Verbose -NoLog:$NoLog -Fast:$Fast )
             $ValidationMethod = "BagIt"
         }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
             $Validated = ( $_ | Test-ZippedBagIntegrity  )
             $ValidationMethod = "ZIP/MD5"
+        }
+        Else {
+            "[{0}] I do not know how to validate this: {1}" -f "Get-CSItemValidation",$sLiteralPath | Write-Warning
         }
 
         $nChecked = $nChecked + 1
@@ -345,7 +389,7 @@ Process {
                 $_ | Add-Member -MemberType NoteProperty -Name CSItemValidated -Value $Validated -PassThru | Add-Member -MemberType NoteProperty -Name CSItemValidationMethod -Value $ValidationMethod -PassThru
             }
             Else {
-                $Validated | Write-Warning
+                "[{0}] Empty return from Validation process." -f "Get-CSItemValidation" | Write-Warning
             }
         }
         Else {
@@ -461,7 +505,7 @@ Param ( $Pairs=$null )
 
 }
 
-Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false, [switch] $NoLog=$false ) {
+Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false, [switch] $NoLog=$false, $Copy=$null ) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     If ( $Pairs.Count -lt 1 ) {
@@ -530,7 +574,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
                         $BagPath = Get-FileLiteralPath -File $_
                         $Progress.Update( ( "#{0:N0}. Validating: {1}" -f $Progress.I, $BagPathLeaf ), 0 )
 
-                        $Validated = ( $BagPath | Get-CSItemValidation -Verbose:$Verbose -Summary:$false -NoLog:$NoLog -Fast:$Fast )
+                        $Validated = ( $BagPath | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$false -NoLog:$NoLog -Fast:$Fast )
                         
                         $nChecked = $nChecked + 1
                         $nValidated = $nValidated + $Validated.Count
@@ -571,7 +615,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Invoke-ColdStorageValidate -Pairs $recurseInto -Verbose:$Verbose -Zipped:$Zipped
+                Invoke-ColdStorageValidate -Copy:$Copy -Pairs $recurseInto -Verbose:$Verbose -Zipped:$Zipped
             }
         } # if
 
@@ -906,10 +950,10 @@ Else {
     }
     ElseIf ( $Verb -eq "validate" ) {
         If ( $Items ) {
-            $allObjects | Get-CSItemValidation -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -PassThru:$PassThru
+            $allObjects | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -PassThru:$PassThru
         }
         Else {
-            Invoke-ColdStorageValidate -Pairs $allObjects -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped
+            Invoke-ColdStorageValidate -Pairs $allObjects -Copy:$Copy -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped
         }
     }
     ElseIf ( $Verb -eq "stats" ) {

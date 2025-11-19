@@ -54,6 +54,9 @@ start PowerShell -WindowStyle Maximized { $Host.UI.RawUI.BackgroundColor = 'Dark
 #Start PowerShell -WindowStyle Maximized { $Host.UI.RawUI.BackgroundColor = 'DarkGreen' ; Clear-Host ; ( '>>> Running ER checkup as {0}' -f $env:USERNAME ) | Write-Host ; Get-ChildItem H:\ElectronicRecords ; & coldstorage-mirror-checkup.ps1 -ER -Loop }
 
 Do {
+    ( ">>> Updating repository packaging database tables." ) | Write-Host -ForegroundColor Yellow
+    & sync-repositorytable-digitalmasters.ps1
+
     ( ">>> Updating ClamAV database." ) | Write-Host -ForegroundColor Yellow
     & coldstorage update clamav
 
@@ -71,8 +74,8 @@ Do {
     ( '>>> Checking locations for regular checksum validation' ) | Write-Host -ForegroundColor Yellow
     $jobs = ( & get-deferred-validation-jobs-cs.ps1 -Items )
     If ( $jobs.Count -gt 0 ) {
-        $Fast25pct = [Math]::Max( 100, [int] ( $jobs.Count / 4 ) )
-        $Full1pct = [Math]::Max( 20, [int] ( $jobs.Count / 20 ) )
+        $Fast25pct = [Math]::Max( 50, [int] ( $jobs.Count / 4 ) )
+        $Full1pct = [Math]::Max( 1, [int] ( $jobs.Count / 20 ) )
         ( '>>> {0:N0} locations found in need of validation. {1} will be validated fast; {2} will be validated in full' -f $jobs.Count,$Fast25pct,$Full1pct ) | Write-Host -ForegroundColor Yellow
         & invoke-deferred-validation-jobs-cs.ps1 -N:$Fast25pct -Fast -Verbose:$Verbose -Debug:$Debug
         & invoke-deferred-validation-jobs-cs.ps1 -N:$Full1pct -Verbose:$Verbose -Debug:$Debug

@@ -110,12 +110,11 @@ Process {
 
 		$oPackage = ( $sFile | Get-ItemPackage -At -Force )
 		$vLogFile = ( $oPackage | & get-itempackageeventlog-cs.ps1 -Event:"preservation-zip" -Timestamp:( Get-Date ) -Force )
-		"LOG: {0}" -f $vLogFile | Write-Host -ForegroundColor:Green -BackgroundColor:Black				
+		"LOG: {0}" -f $vLogFile | Write-Verbose
 
         $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip -NoLog )
 
         $Progress.Update( "Validated bagged preservation package" )
-        
         If ( $Validated | Test-CSOutputForValidationErrors | Test-ShallWeContinue ) {
 
             $oZip = ( Get-ZippedBagOfUnzippedBag -File $oFile )
@@ -151,7 +150,6 @@ Process {
 
                     If ( $Package.CSPackageZip ) {
                         $Package.CSPackageZip |% {
-
                             $oZip = $_
                             $Progress.Update( ( "Computing {0} checksum" -f $sAlgorithm ) )    
                             
@@ -184,7 +182,7 @@ Process {
                 
                 $Result |% {
                     $_ | Add-Member -MemberType NoteProperty -Name "Validated-Zip" -Value ( Test-ZippedBagIntegrity -File $sArchiveHashed -Skip:$Skip )
-                    $_ | Write-CSOutputWithLogMaybe -Package:$Package -Command:( "'{0}' | & coldstorage zip -Items" -f $Package.FullName ) -Log:$vLogFile | Write-Output
+                    $_ | Write-CSOutputWithLogMaybe -Package:$Package -Command:( "'{0}' | & coldstorage zip -Items" -f $Package.FullName ) -Log:$( If ( $_.New ) { $vLogFile } Else { $null } ) | Write-Output
                 }
 
             }

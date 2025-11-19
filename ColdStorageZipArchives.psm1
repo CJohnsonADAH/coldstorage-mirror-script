@@ -101,7 +101,7 @@ Process {
     $sRepository = $oRepository.FullName
     $sRepositoryNode = ( $File | Get-FileRepositoryPrefix -Fallback )
     
-    $sFileName = $oFile.Name
+    $sFileName = ( $oFile.Name -replace "[^A-Za-z0-9_]+","-" )
 
     $reUNCRepo = [Regex]::Escape($sRepository)
     $sZipPrefix = ( $sFileUNCPath -ireplace "^${reUNCRepo}","${sRepositoryNode}" )
@@ -367,7 +367,9 @@ Param (
                     $oZip | Add-Member -MemberType NoteProperty -Name:CSCompressArchiveTimestamp -Value:$CACompleted -Force
 
                     If ( $Package | Get-Member -Name:CSPackageZip ) {
-                        $oZip = @( $oZip ) + ( $Package.CSPackageZip )
+                        If ( $Package.CSPackageZip -ne $null ) {
+                            $oZip = @( $oZip ) + ( $Package.CSPackageZip )
+                        }
                     }
 
                     $Package | Add-Member -MemberType:NoteProperty -Name:CSPackageZip -Value:@( $oZip ) -Force
@@ -397,13 +399,16 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Location, [switch] $All=$false )
     Process {
         $Props = ( $Location.FullName | Get-ItemColdStorageProps -Cascade )
         $ZipUniverse = $Props["Zip"]
+
         $JunctionDestination = $null
         If ( $ZipUniverse ) {
             $ZipUniverse = ( $ZipUniverse | ConvertTo-ColdStorageSettingsFilePath | Get-LocalPathFromUNC )
+        "ZIP UNIVERSE: {0}" -f $ZipUniverse|Write-Warning
             $JunctionDestination = ( $Props.Cascade | Select-Object -First 1 | Split-MirrorMatchedPath -Stem |% { $ZipUniverse | Join-Path -ChildPath $_ } )
             If ( $JunctionDestination ) {
                 $JunctionDestination = $JunctionDestination | Join-Path -ChildPath "ZIP"
             }
+        "JUNCTION DESTINATION: {0}" -f $JunctionDestination|Write-Warning
         }
 
         $oZipDir = $null

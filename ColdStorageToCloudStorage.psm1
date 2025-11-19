@@ -58,23 +58,36 @@ Process {
         $sRepository = $oRepository.Repository
     }
     $Props = ( $oPackage | Get-ItemColdStorageProps -Order Nearest -Cascade )
-    
+    $sBucket = $null
     If ( $Props.ContainsKey("Bucket") -and ( -Not $Force ) ) {
         $packageName = ( $oPackage.Name )
         $packageSlug = ( ( $packageName.ToLower() ) -replace "[^A-Za-z0-9\-]+","-" )
-        ( $Props["Bucket"] -f $packageName,$packageSlug ) | Write-Output
+        $sBucket = ( $Props["Bucket"] -f $packageName,$packageSlug )
     }
     Else {
         Switch ( $sRepository ) {
             'Processed' {
                 $RepositorySlug = $sRepository.ToLower()
-                "er-collections-${RepositorySlug}" | Write-Output
+                $sBucket = ( "er-collections-${RepositorySlug}" )
+
+                $RelativePath = ( $oPackage.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location )
+                
+                If ( $RelativePath -like ".\*" ) {
+                    $RelativePathParts = ( $RelativePath | Split-PathEntirely )
+                    $BucketPath = @(
+                        ( $oRepository.Domain | Get-CloudStorageBucketNamePart ), #$SectionSlug
+                        ( $oRepository.Repository | Get-CloudStorageBucketNamePart ), #$RepositorySlug
+                        ( $RelativePathParts[0] | Get-CloudStorageBucketNamePart ) #$RelativePathTop
+                    ) 
+                    $sBucket = ( $BucketPath -join "-" )
+                }
             }
             'Unprocessed' {
                 $RepositorySlug = $sRepository.ToLower()
-                "er-collections-${RepositorySlug}" | Write-Output
+                $sBucket = ( "er-collections-${RepositorySlug}" )
             }
             'Masters' {
+                "WUT"|Write-Warning
                 $SectionSlug = "da"
 
                 $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
@@ -107,10 +120,14 @@ Process {
                 $RepositorySlug = ( $sRepository | Get-CloudStorageBucketNamePart )
                 $DirectorySlug = ( $RelativePath | Get-CloudStorageBucketNamePart )
 
-                ( "{0}-{1}-{2}" -f $SectionSlug,$RepositorySlug,$DirectorySlug ) |% { If ( $_.Length -lt 64 ) { $_ } Else { $_.Substring(0, 60) + "--" + $_.Substring($_.Length-1, 1)  } } |  Write-Output
+                $sBucket = (( "{0}-{1}-{2}" -f $SectionSlug,$RepositorySlug,$DirectorySlug ) |% { If ( $_.Length -lt 64 ) { $_ } Else { $_.Substring(0, 60) + "--" + $_.Substring($_.Length-1, 1)  } } )
             }
         }
 
+    }
+
+    If ( $sBucket ) {
+        $sBucket | Write-Output
     }
 
 }
@@ -403,6 +420,148 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [string] $From="", [string] 
 
 }
 
+Function Get-PackageCloudStorageBucketCacheDirectory {
+Param( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $Force )
+
+    Begin { }
+
+    Process {
+        $oPackage = $Package
+        If ( $oPackage -is [object] ) {
+            If ( -Not ( $oPackage | Get-Member FullName ) ) {
+                If ( $oPackage | Get-Member Bag ) {
+                    $oPackage = ( $oPackage.Bag | Get-ItemPackage -At -Force )
+                }
+            }
+        }
+
+        If ( $oPackage | Get-Member FullName ) {
+            $PropsDirectory = ( $oPackage | Get-ItemPropertiesDirectoryLocation -Name ".coldstorage" -Order:Highest )
+            If ( $PropsDirectory.Count -gt 0 ) {
+                $Container = ( $PropsDirectory | Select-Object -First:1 )
+                If ( Test-Path -LiteralPath $Container -PathType Container ) {
+                    $Subdirectory = ( Join-Path $Container -ChildPath "aws-cache" )
+                    If ( Test-Path -LiteralPath $Subdirectory -PathType Container ) {
+                        $Subdirectory | Write-Output
+                    }
+                    Else {
+                        "[{0}] No 'aws-cache' subdirectory in {1}" -f "Get-PackageCloudStorageBucketCacheDirectory", $Container | Write-Warning
+                    }
+                }
+                Else {
+                    "[{0}] No props directory for {1}" -f "Get-PackageCloudStorageBucketCacheDirectory", $oPackage | Write-Warning
+                }
+            }
+            Else {
+                "[{0}] No props directory for {1}" -f "Get-PackageCloudStorageBucketCacheDirectory", $oPackage | Write-Warning
+            }
+        }
+        Else {
+            "[{0}] No FullName property on {1}" -f "Get-PackageCloudStorageBucketCacheDirectory", $oPackage | Write-Warning
+        }
+    }
+
+    End { }
+
+}
+
+Function Get-CloudStorageBucketObjectList {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Bucket,
+    $Prefix=$null,
+    $Cache=$null,
+    $CacheExpiration=3600
+)
+
+    Begin {
+        $AWS = $( Get-ExeForAWSCLI )
+    }
+
+    Process {
+        $sCachePath = $null
+        $sCacheFile = $null
+        If ( $Cache -ne $null ) {
+            $sCachePath = $Cache
+            If ( Test-Path -LiteralPath $sCachePath -PathType Container ) {
+                "[{0}] BUCKET: {1}" -f "Get-CloudStorageBucketObjectList",$Bucket | Write-Debug
+                "[{0}] CACHE DIRECTORY: {1}" -f "Get-CloudStorageBucketObjectList",$sCachePath | Write-Debug
+            }
+        }
+
+        $awsSwitches = @( "s3api", "list-objects-v2", "--bucket", ( "{0}" -f $Bucket ) )
+        $awsSwitchesDebug = @( "s3api", "list-objects-v2", "--bucket", ( "'{0}'" -f $Bucket ) )
+
+        If ( $Prefix -ne $null ) {
+            $awsSwitches += @( '--prefix', ("{0}" -f $Prefix ) )
+            $awsSwitchesDebug += @( '--prefix', ("'{0}'" -f $Prefix ) )
+        }
+        $sCmdLine = ( "& {0} {1}" -f "${AWS}", ( $awsSwitchesDebug -join " " ) )
+
+        If ( $sCachePath -ne $null ) {
+            If ( Test-Path -LiteralPath $sCachePath -PathType Container ) {
+                $sCacheFileName = ( "aws-s3api-list-objects-v2-{0}.json" -f ( $awsSwitches -join " " | Get-StringMD5 )  )
+                $sCacheFile = ( Join-Path $sCachePath -ChildPath $sCacheFileName )
+                If ( Test-Path -LiteralPath $sCachePath -PathType Container ) {
+                    "[{0}] CACHE FILE: {1}" -f "Get-CloudStorageBucketObjectList",$sCacheFile | Write-Verbose
+                }
+            }
+        }
+
+        $jsonReply = $null
+        If ( $sCacheFile -ne $null ) {
+            If ( Test-Path -LiteralPath $sCacheFile -PathType Leaf ) {
+                $oCachedReply = ( Get-Content $sCacheFile -Raw | ConvertFrom-Json )
+
+                $CacheAge = ( [double] ( Get-Date -UFormat "%s" ) - [double] ( $oCachedReply.Timestamp ) )
+                "CACHED QUERY({0}): {1}" -f $CacheAge,$sCmdLine | Write-Verbose
+
+                If ( $CacheAge -lt $CacheExpiration ) {
+                    If ( $oCachedReply | Get-Member -Name Response ) {
+                        "GOT REPLY" | Write-Verbose
+                        $jsonReply = $oCachedReply.Response
+                    }
+                    If ( $oCachedReply | Get-Member -Name ExitCode ) {
+                        $awsExitCode = $oCachedReply.ExitCode
+                        "GOT EXIT CODE: {0}" -f $awsExitCode | Write-Verbose
+                    }
+                }
+                Else {
+                    "CACHE EXPIRED ({0:N0} > {1:N0})" -f $CacheAge,$CacheExpiration | Write-Verbose
+                }
+            }
+        }
+
+        If ( $jsonReply -eq $null ) {
+            "LIVE QUERY: {0}" -f $sCmdLine | Write-Verbose
+            $jsonReply = $( & "${AWS}" @awsSwitches ) ; $awsExitCode = $LastExitCode
+
+            $oCachedReply = [PSCustomObject] @{
+                "Request"=( $awsSwitches )
+                "Timestamp"=( Get-Date -UFormat "%s" )
+                "ExitCode"=( $awsExitCode )
+                "Response"=( $jsonReply -join "`n" )
+            }
+            If ( $sCacheFile -ne $null ) {
+                $oCachedReply | ConvertTo-Json | Out-File $sCacheFile -Encoding utf8 -Force
+                "CACHED TO: {0}" -f $sCacheFile | Write-Verbose
+            }
+            Else {
+                "NO CACHE FILE, NOT CACHED" | Write-Verbose
+            }
+        }
+
+        $bucketObject = ( $jsonReply | ConvertFrom-Json )
+        $bucketObject | Add-Member -MemberType NoteProperty -Name AWSCLIExitCode -Value $awsExitCode
+
+        $bucketObject | Write-Output
+
+    }
+
+    End { }
+
+}
+
+
 Function Get-CloudStorageListing {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $From="", [string] $To="", [string] $Context="Get-CloudStorageListing" )
 
@@ -417,7 +576,10 @@ Process {
     $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:$Context |% {
         $oFile = $_
         $sFile = $oFile.FullName
-        $Bucket = ($sFile | Get-CloudStorageBucket)
+
+		$Package = ( $File | Get-ItemPackage -At -FromZip )
+
+        $Bucket = ($Package | Get-CloudStorageBucket)
 
         If ( $Bucket -eq $null ) {
             Write-Warning ( "Get-CloudStorageListing: could not determine bucket for {0}" -f $sFile )
@@ -439,6 +601,7 @@ Process {
             $bucketFiles[$Bucket] = $bucketFiles[$Bucket] + $Files
         }
     }
+
 }
 
 End {
@@ -453,26 +616,39 @@ End {
             $isDataGood = $true
         }
         Else {
+            $sPropsDir = ( $Files | Select-Object -First 1 | Get-PackageCloudStorageBucketCacheDirectory )
+            
             If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
-                Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f ${AWS},$Bucket )
-                $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
+                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Cache:$sPropsDir -CacheExpiration:600 )
+                If ( $oReply ) {
+                    $awsExitCode = $oReply.AWSCLIExitCode
+                }
+
+                #Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f ${AWS},$Bucket )
+                #$jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
             }
             Else {
-                Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f ${AWS},$Bucket,$Files.Name )
-                $jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" --prefix $Files.Name ) ; $awsExitCode = $LastExitCode
+                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Prefix:$Files.Name -Cache:$sPropsDir -CacheExpiration:600 )
+                If ( $oReply ) {
+                    $awsExitCode = $oReply.AWSCLIExitCode
+                }
+
+                #Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f ${AWS},$Bucket,$Files.Name )
+                #$jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" --prefix $Files.Name ) ; $awsExitCode = $LastExitCode
             }
 
-            If ( $jsonReply ) {
+            #If ( $jsonReply ) {
+            If ( $oReply ) {
                 $oCloudContents = $null
                 $isDataGood = $false
-                $oReply = ( $jsonReply | ConvertFrom-Json )
+                #$oReply = ( $jsonReply | ConvertFrom-Json )
                 If ( $oReply ) {
                     If ( $oReply.Contents ) {
                         $oCloudContents = $oReply.Contents
                         $isDataGood = $true
                     }
                     Else {
-                        ( "${sContext}could not find contents in JSON reply: {0}; object:" -f $jsonReply ) | Write-Warning
+                        ( "${sContext}could not find contents in JSON reply: {0}; object:" -f ( $pReply | ConvertTo-Json -Compress ) ) | Write-Warning
                         $oReply | Write-Warning
                     }
                 }
@@ -544,16 +720,15 @@ End {
                     If ( $Side.Count -gt 1 ) {
                         $sHeader = "`r`n=== Cloud Storage (AWS) ==="
                     }
-                    $oCloudContents |% {
-                        $Match = ( @( ) + @( $FileNames ) ) -ieq $_.Key
-                        If ( $Match.Count -eq 0 ) {
-                            If ( $ReturnObject ) {
-                                $_
-                            }
-                            Else {
-                                If ( $sHeader ) { $sHeader; $sHeader = $null }
-                                $_.Key
-                            }
+                    $oCloudContents |? {
+                        $_.Key -iin $FileNames
+                    } |% {
+                        If ( $ReturnObject ) {
+                            $_
+                        }
+                        Else {
+                            If ( $sHeader ) { $sHeader; $sHeader = $null }
+                            $_.Key
                         }
                     }
                 }
@@ -595,15 +770,24 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
     Begin { $AWS = $( Get-ExeForAWSCLI ); If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
+        $sCacheDirectory = ( $File | Get-PackageCloudStorageBucketCacheDirectory )
+        If ( ( $sCacheDirectory -ne $null ) -and ( Test-Path -LiteralPath $sCacheDirectory -PathType Container ) ) {
+            Get-ChildItem $sCacheDirectory -File |% {
+                Remove-Item $_.FullName
+            }
+        }
 
         $oFile = $null
         $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:("{0} to cloud" -f $global:gCSScriptName) |% {
             $oFile = $_
-			$Package = ( $File | Get-ItemPackage -At )
+			$Package = ( $File | Get-ItemPackage -At -FromZip )
 			$vLogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-to-cloud" -Timestamp:( Get-Date ) -Force )
             
+            $sFileName = $oFile.Name
 			$sFile = $oFile.FullName
-            $Bucket = ($sFile | Get-CloudStorageBucket)
+
+            # Retrieve a bucket name based on the package object, using its props file cascade
+            $Bucket = ( $Package | Get-CloudStorageBucket )
 
             If ( $Bucket ) {
                 # AWS-CLI does not cope well with long path names even if Windows is configured to handle them.
@@ -616,17 +800,26 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                     $sFile = ( '\\?\{0}' -f $sFile )
                 }
                 
-				$sCmd = ( '& {0} s3 cp "{1}" "s3://{2}/" --storage-class DEEP_ARCHIVE {3}' -f ${AWS},${sFile},${Bucket},${sWhatIf} )
-                & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
-                    # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
-                    If ( "$_" -match "Completed\s+[0-9.]+\s+.*\s+with\s+[0-9]+.*\s+remaining\s*" ) {
-                        Write-Progress -Id 107 -Status "$_" -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} )
-                    }
-                    Else {
-                        $_ | Write-Output
-                    }
-                } | Write-CSOutputWithLogMaybe -Package:$oFile -Command:$sCmd -Log:$vLogFile
-                Write-Progress -Id 107 -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} ) -Completed
+                $s3Uri = ( "s3://{0}/{1}" -f $Bucket,$sFileName )
+                $s3Ls = ( & "${AWS}" s3 ls $s3Uri ) ; $s3LsExit = $LASTEXITCODE
+
+                If ( $s3LsExit -ne 0 ) {
+				    $sCmd = ( '& {0} s3 cp "{1}" "s3://{2}/" --storage-class DEEP_ARCHIVE {3}' -f ${AWS},${sFile},${Bucket},${sWhatIf} )
+                    & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
+                        # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
+                        If ( "$_" -match "Completed\s+[0-9.]+\s+.*\s+with\s+[0-9]+.*\s+remaining\s*" ) {
+                            Write-Progress -Id 107 -Status "$_" -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} )
+                        }
+                        Else {
+                            $_ | Write-Output
+                        }
+                    } | Write-CSOutputWithLogMaybe -Package:$oFile -Command:$sCmd -Log:$vLogFile
+                    Write-Progress -Id 107 -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} ) -Completed
+                }
+                Else {
+                    $s3Ls | Write-Warning
+                }
+
 
             }
             Else {
@@ -745,6 +938,8 @@ Export-ModuleMember -Function New-CloudStorageBucket
 Export-ModuleMember -Function Get-CloudStorageURI
 Export-ModuleMember -Function Get-CloudStorageTimestamp
 Export-ModuleMember -Function Get-CloudStorageBucketProperties
+Export-ModuleMember -Function Get-PackageCloudStorageBucketCacheDirectory
+Export-ModuleMember -Function Get-CloudStorageBucketObjectList
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket

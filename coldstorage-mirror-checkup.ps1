@@ -223,11 +223,11 @@ Do {
 
         If ( $Q ) {
             $ProcessedWindow=20
-            $ProcessedTimeout=( New-TimeSpan -Minutes:30 )
+            $ProcessedTimeout=( New-TimeSpan -Minutes:90 )
         }
         Else {
             $ProcessedWindow=60
-            $ProcessedTimeout=( New-TimeSpan -Minutes:60 )
+            $ProcessedTimeout=( New-TimeSpan -Minutes:120 )
         }
 
 
@@ -259,9 +259,8 @@ Do {
         "ER-Unprocessed: {0}" -f ( Get-Date )
         & coldstorage.ps1 packages -Zipped -Mirrored -InCloud -Items . |% {
             Write-Progress $_.FullName
-            If ( -Not ( $_.CSPackageMirrored ) ) { $_ | & coldstorage mirror -Items -Force }
-            If ( ( $_.CloudCopy -eq $null ) -or ( $_.CloudCopy.Count -eq 0 ) ) { & coldstorage zip -Items -PassThru $_.FullName | & coldstorage to cloud -Items }
-        }
+            $_ | Write-Output
+        } | & sync-cs-packagetopreservation.ps1 -InputTimeout:$InputTimeout
 
         Pop-Location
 

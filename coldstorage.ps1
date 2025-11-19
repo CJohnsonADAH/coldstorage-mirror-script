@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2025.0424
+@version 2025.0821
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -79,6 +79,8 @@ param (
     [switch] $RoboCopy = $false,
     [switch] $Progress = $false,
     [switch] $Scheduled = $false,
+    $Location = $null,
+    $Copy = $null,
     $Context = $null,
     [Parameter(ValueFromRemainingArguments=$true, Position=1)] $Words,
     [Parameter(ValueFromPipeline=$true)] $Piped
@@ -204,7 +206,7 @@ If provided, provides a [CSProgressMessenger] object to manage progress and logg
 
     [CmdletBinding()]
 
-Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false, $Progress=$null )
+Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false, $Log=$null, $LogPackage=$null, $Context=$null, $Progress=$null )
 
     Begin { }
 
@@ -212,7 +214,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false,
     
         $BagDir = $( If ( $DIRNAME -is [String] ) { $DIRNAME } Else { Get-FileObject($DIRNAME) |% { $_.FullName } } )
 
-        Push-Location ( $BagDir )
+        Push-Location -LiteralPath ( $BagDir )
 
         Get-SystemArtifactItems -LiteralPath "." | Remove-Item -Force -Verbose:$Verbose
 
@@ -227,6 +229,12 @@ Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false,
 
         # Execute bagit.py under python interpreter; capture stderr output and send it to $Progress if we have that
         $Output = ( & $( Get-ExeForPython ) "${BagItPy}" . 2>&1 |% { "$_" -replace "[`r`n]","" } |% { If ( $Progress ) { $Progress.Update( ( "Bagging {0}: {1}" -f $BagDir,"$_" ), 0, $null ) } ; "$_" } )
+        
+        If ( $Log -ne $null ) {
+            # Send the bagit.py console output to the log file, if provided
+            $Output | Write-CSOutputWithLogMaybe -Package:$LogPackage -Command:$Context -Log:$Log >$null
+        }
+
         $NotOK = $LASTEXITCODE
 
         If ( $NotOK -gt 0 ) {
@@ -295,7 +303,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$fa
         # If this is a single (loose) file, then we will create a parallel counterpart directory
         If ( Test-Path -LiteralPath $Item.FullName -PathType Leaf ) {
 
-            Push-Location $Item.DirectoryName
+            Push-Location -LiteralPath $Item.DirectoryName
 
             $OriginalFileName = $Item.Name
             $OriginalFullName = $Item.FullName
@@ -441,11 +449,15 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
     Begin { }
 
     Process {
+
         $Payload = ( $File | Select-BagItPayloadDirectory )
         $Bag = ( $Payload.Parent )
 
         $oManifest = ( $Bag | New-BagItManifestContainer )
         $OldManifest = $oManifest.FullName
+
+        $sCmd = ( Get-CommandWithVerb )
+		$vLogFile = ( $Bag | & get-itempackageeventlog-cs.ps1 -Event:"preservation-bag" -Timestamp:( Get-Date ) -Force )
 
         Get-ChildItem -LiteralPath $Bag.FullName |? { $_ | Test-BagItManifestFile -Bag:$File } |% {
             
@@ -457,24 +469,24 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
                 $Dest = ( $Src + "~" )
             }
 
-            Move-Item $Src -Destination $Dest -Verbose
+            Move-Item $Src -Destination $Dest -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
         }
 
         $RebagData = ( $Bag.FullName | Join-Path -ChildPath ( ( "rebag-data-{0}" -f ( Get-Date -UFormat "%s" ) ) -replace "[^A-Za-z0-9]+","-" ) )
 
         # Avoid name collision with data child directory when we pop out contents
-        Move-Item $Payload -Destination $RebagData -Verbose
-        $RebagData | Out-BagItFormattedDirectory -Progress:$Progress
+        Move-Item $Payload -Destination $RebagData -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
+        $RebagData | Out-BagItFormattedDirectory -Progress:$Progress -Log:$vLogFile -LogPackage:$Bag -Context:$sCmd
 
         # Pop out contents
         Get-ChildItem -LiteralPath $RebagData |% {
-            Move-Item $_.FullName -Destination $Bag.FullName -Verbose
+            Move-Item $_.FullName -Destination $Bag.FullName -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
         }
 
         # Get rid of temporary data container
-        Remove-Item $RebagData
+        Remove-Item $RebagData -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
 
-        $Bag.FullName | Write-Verbose
+        $Bag.FullName | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose
         If ( $PassThru ) {
             $Bag | Write-Output
         }
@@ -619,7 +631,7 @@ param (
             }
             ElseIf ( Test-ERInstanceDirectory($File) ) {
 
-                Push-Location $DirName
+                Push-Location -LiteralPath $DirName
                 $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BagItFormattedDirectory -Progress:$Progress
                 Pop-Location
 
@@ -717,7 +729,7 @@ param (
     Process {
         
         $Parent = $File.Directory
-        Push-Location $Parent
+        Push-Location -LiteralPath:$Parent.FullName
 
         $FileName = $File.Name
         $FilePath = $File.FullName
@@ -808,7 +820,7 @@ param (
         ElseIf ( Test-ERInstanceDirectory($File) ) {
         # Is this an ER Instance directory?
             
-            Push-Location $DirName
+            Push-Location -LiteralPath:$DirName
 
             If ( -not ( $BaseName -match $Exclude ) ) {
 
@@ -834,7 +846,7 @@ param (
         }
         Else {
 
-            Push-Location $DirName
+            Push-Location -LiteralPath:$DirName
             
             Get-ChildItem -File | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Invoke-ColdStorageCheckFile -Progress:$Progress -Quiet:$Quiet
             Get-ChildItem -Directory |? { -Not ( $_ | Test-BaggedCopyOfLooseFile ) } | Add-Member -NotePropertyName "CheckedSpace" -NotePropertyValue ( $File.CheckedSpace ) -PassThru | Invoke-ColdStorageCheckFolder -Progress:$Progress -Quiet:$Quiet
@@ -909,7 +921,7 @@ End {
 # Invoke-BagChildDirectories: Given a parent directory (typically a repository root), loop through each child directory and do a clear-and-bag
 # Formerly known as: Do-Bag-Repo-Dirs
 Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $Manifest=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
-    Push-Location $From
+    Push-Location -LiteralPath $From
     Get-ChildItem -Directory | Out-BagItFormattedDirectoryWhenCleared -Quiet -Exclude $null -Skip:$Skip -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
     Pop-Location
 }
@@ -950,7 +962,7 @@ function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $For
 function Invoke-ColdStorageDirectoryCheck {
 Param ($Pair, $From, $To, [switch] $Batch=$false)
 
-    Push-Location $From
+    Push-Location -LiteralPath:$From
 
     $Progress = [CSProgressMessenger]::new( -Not $Batch, $Batch )
     $Progress.Open( ( "Checking {0}" -f $From ), "Files" )
@@ -1372,7 +1384,7 @@ Function Sync-ADPNetPluginsDirectory {
 }
 
 Function Invoke-ColdStorageRepository {
-Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, [String] $Output="" )
+Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, $Location=$null, [String] $Output="" )
 
     Begin { }
 
@@ -1390,7 +1402,12 @@ Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, [String] $O
                 Else {
                     $repo = Get-ColdStorageRepositories -Repository:$Term -Tag
                     If ( $repo.Locations ) {
-                        $aItems += , $repo.Locations.ColdStorage
+                        If ( $Location -eq $null ) {
+                            $aItems += , $repo.Locations.ColdStorage
+                        }
+                        Else {
+                            $aItems += , $repo.Locations.${Location}
+                        }
                     }
                 }
             }
@@ -1462,7 +1479,37 @@ Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch
             If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
                 $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer |% {
                     $_ | Write-Output
-                    & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
+
+                    If ( $Bucket ) {
+                        $s3Uri = ( "s3://{0}" -f $sBucket )
+                        If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt ( "Create Cloud Storage bucket {0}?" -f $s3Uri ) ) ) {
+                            $oFile | & $global:gCSScriptPath bucket -Items -Make
+                        }
+                    }
+                    If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt ( "Move preservation package ZIP files from repository root to {0}?" -f $_.FullName ) ) ) {
+                        & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
+
+                        If ( ( -Not $Batch ) -and ( $Bucket ) ) {
+                            If ( & read-yesfromhost-cs.ps1 -Prompt ( "Upload preservation package ZIP files from {0} to cloud storage {1}?" -f $_.FullName, $s3Uri ) ) {
+                                
+                                $oHere = ( Get-Item . -Force )
+                                $oHere | & coldstorage packages -Items -Bagged -Zipped -Only -Recurse -PassThru | Select-Object -First 1 | & coldstorage to cloud -Items
+                                $oHere | & coldstorage packages -Items -Bagged -Zipped -NotInCloud -Recurse | & coldstorage to cloud -Items
+
+                                $oRepository = ( Get-FileRepositoryProps -File $oHere )
+                                $sRepositoryBucket = ( $oRepository.Location | & coldstorage bucket -Items -Force )
+                                $oldS3Uri = ( "s3://{0}" -f $sRepositoryBucket )
+                                If ( & read-yesfromhost-cs.ps1 -Prompt ( "Remove redundant preservation package ZIP files from cloud storage {0}?" -f $oldS3Uri ) ) {
+                                    $oo = ( & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Retrieve )
+                                    $oo | & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Remove -WhatIf -N:5
+
+                                    If ( & read-yesfromhost-cs.ps1 -Prompt ( "REALLY REALLY Remove redundant preservation package ZIP files from cloud storage {0}?!" -f $oldS3Uri ) ) {
+                                        $oo | & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Remove
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1874,6 +1921,68 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [string] $For, [string] $Out
     End { }
 }
 
+Function Invoke-CSConsiderPackageTests {
+Param(
+    $Test=$null,
+    [Parameter(ValueFromPipeline=$true)] $Item
+)
+
+    Begin {
+        If ( $Test -eq $null ) {
+            $sTest = "Oxum"
+        }
+        Else {
+            $sText = $Test
+        }
+    }
+
+    Process {
+        $PackageTest = @( )
+        
+        If ( -Not ( $Item | Get-Member CSPackageConsider ) ) {
+            $Item | Add-Member -MemberType NoteProperty -Name CSPackageConsider -Value:( [PSCustomObject] @{
+                "Consider"=$true
+                "Message"=$sTest
+                "MessageTest"=$sTest
+                "MessageSource"=( Get-CommandWithVerb )
+                "MessageTimestamp"=( Get-Date )
+            }) -Force
+        }
+
+        $Item.CSPackageConsider |% {
+            If ( ( $_ -is [PSCustomObject] ) -and ( $_ | Get-Member -Name Consider ) ) {
+                If ( $_.MessageTest -eq "Oxum" ) {
+                    $PackageTest += @( "Oxum" )
+                }
+                Else {
+                    $PackageTest += @( "checksum" )
+                }
+            }
+        }
+        $PackageTest |% {
+
+            $TestExit = $null
+            If ( $_ -eq "Oxum" ) {
+                Push-Location -LiteralPath:$Bag
+                & bagit.ps1 --validate --fast . -Progress ; $TestExit = $LASTEXITCODE
+                Pop-Location
+            }
+            ElseIf ( $_ -eq "checksum" ) {
+                Push-Location -LiteralPath:$Bag
+                & bagit.ps1 --validate . -Progress ; $TestExit = $LASTEXITCODE
+                Pop-Location
+            }
+
+            If ( $TestExit -ne $null ) {
+                $TestExit | Write-Output
+            }
+        }
+    }
+
+    End { }
+}
+
+
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
 $global:gCSCommandWithVerb = $sCommandWithVerb
 
@@ -1915,29 +2024,230 @@ Else {
             Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
         }
     }
+    ElseIf ( $Verb -eq "diff" ) {
+        
+        $allObjects |% {
+            $Location = ( $_ | Get-FileObject )
+            Push-Location -LiteralPath:$Location.FullName
+ 
+            $Combine = @{ }
+            #$Diff = @{ "Left"=@{ }; "Right"=@{ } }
+
+            "LEFT SIDE VALIDATION ({0}): " -f ( ( Get-Location ).Path ) | Write-Host -NoNewline
+            & bagit.ps1 --validate . --fast -Progress ; $bagExitLeft = $LASTEXITCODE
+            $PayloadLeft = ( Get-ChildItem .\data -Recurse )
+            $PayloadLeft |% {
+                $Rel = ( Resolve-Path -LiteralPath $_.FullName -Relative )
+                $Combine[ $Rel ] = @{ "Left"=$_; "Right"=$null }
+            }
+
+            & coldstorage cd
+
+            "RIGHT SIDE VALIDATION ({0}): " -f ( ( Get-Location ).Path ) | Write-Host -NoNewline
+            & bagit.ps1 --validate . --fast -Progress ; $bagExitRight = $LASTEXITCODE
+            $PayloadRight = ( Get-ChildItem .\data -Recurse )
+            $PayloadRight |% {
+                $Rel = ( Resolve-Path -LiteralPath $_.FullName -Relative )
+
+                If ( $Combine.ContainsKey( $Rel ) ) {
+                    $Combine[ $Rel ][ "Right" ] = $_
+                }
+                Else {
+                    $Combine[ $Rel ] = @{ "Left"=$null; "Right"=$_ }
+                }
+            }
+
+            & coldstorage cd
+
+            $I = 0 ; $N = $Combine.Count
+            $Combine.Keys | Sort-Object |% {
+
+                Write-Progress "$_" -PercentComplete:( (100.0*$I) / $N )
+                $I = $I + 1
+
+                $LeftFile = ( $Combine[ $_ ][ "Left" ] )
+                $RightFile = ( $Combine[ $_ ][ "Right" ] )
+                If ( $LeftFile -eq $null ) {
+                    "LEFT MISSING: {0}" -f $_
+                }
+                ElseIf ( $RightFile -eq $null ) {
+                    "RIGHT MISSING: {0}" -f $_
+                }
+                ElseIf ( Test-Path -LiteralPath $LeftFile.FullName -PathType Leaf ) {
+                    $sCopy1 = ( ".\copy1" )
+                    $sCopy2 = ( ".\copy2" )
+
+                    $SizeLeft = ( $LeftFile.Length )
+                    $SizeRight = ( $RightFile.Length )
+                    If ( $SizeLeft -ne $SizeRight ) {
+                        "LEFT SIZE /= RIGHT SIZE: {0} ({1} /= {2})" -f $_, $SizeLeft, $SizeRight | Write-Host -ForegroundColor Yellow
+                        $LeftFile, $RightFile
+
+                        If ( Test-Path -LiteralPath $sCopy1 -PathType Container ) {
+                            $copy1 = ( Get-Item -LiteralPath $sCopy1 -Force )
+                        }
+                        Else {
+                            $copy1 = ( New-Item -ItemType Directory -Path $sCopy1 )
+                        }
+                        If ( Test-Path -LiteralPath $sCopy2 -PathType Container ) {
+                            $copy2 = ( Get-Item -LiteralPath $sCopy2 -Force )
+                        }
+                        Else {
+                            $copy2 = ( New-Item -ItemType Directory -Path $sCopy2 )
+                        }
+
+                        If ( $copy1 ) {
+                            Copy-Item -LiteralPath $LeftFile.FullName -Destination $copy1.FullName
+                        }
+                        If ( $copy2 ) {
+                            Copy-Item -LiteralPath $RightFile.FullName -Destination $copy2.FullName
+                        }
+
+                    }
+                    Else {
+                        $HashLeft = ( Get-FileHash -LiteralPath:( $Combine[ $_ ][ "Left" ].FullName ) -Algorithm:MD5 )
+                        $HashRight = ( Get-FileHash -LiteralPath:( $Combine[ $_ ][ "Right" ].FullName ) -Algorithm:MD5 )
+                        If ( $HashLeft.Hash -ne $HashRight.Hash ) {
+                            "LEFT /= RIGHT: {0} ({1} /= {2})" -f $_, $HashLeft.Hash, $HashRight.Hash
+                            $LeftFile, $RightFile
+
+                            If ( Test-Path -LiteralPath $sCopy1 -PathType Container ) {
+                                $copy1 = ( Get-Item -LiteralPath $sCopy1 -Force )
+                            }
+                            Else {
+                                $copy1 = ( New-Item -ItemType Directory -Path $sCopy1 )
+                            }
+                            If ( Test-Path -LiteralPath $sCopy2 -PathType Container ) {
+                                $copy2 = ( Get-Item -LiteralPath $sCopy2 -Force )
+                            }
+                            Else {
+                                $copy2 = ( New-Item -ItemType Directory -Path $sCopy2 )
+                            }
+
+                            If ( $copy1 ) {
+                                Copy-Item -LiteralPath $LeftFile.FullName -Destination $copy1.FullName
+                            }
+                            If ( $copy2 ) {
+                                Copy-Item -LiteralPath $RightFile.FullName -Destination $copy2.FullName
+                            }
+
+                        }
+                    }
+                }
+
+
+            }
+
+            Pop-Location
+
+        }
+
+    }
     ElseIf ( $Verb -eq "consider" ) {
+        $DeferredFile = ( & get-deferred-preservation-jobs-cs.ps1 -JobType:REPORT | Select-Object -First 1 )
+
         $allObjects | get-itempackage-cs.ps1 |% {
 
-            "Checking for crud files..." | Write-Warning
+            Write-Progress -Activity ( "{0}" -f ( Get-CommandWithVerb ) ) -Status ( "[{0}]: Checking for crud files" -f $_.FullName )
+            $PackageTest = @( )
+            $ConsiderFast = $true
+            If ( -Not ( $_ | Get-Member CSPackageConsider ) ) {
+
+                $_ | Add-Member -MemberType NoteProperty -Name CSPackageConsider -Value:( [PSCustomObject] @{
+                    "Consider"=$true
+                    "Message"="checksum"
+                    "MessageTest"="checksum"
+                    "MessageSource"=( Get-CommandWithVerb )
+                    "MessageTimestamp"=( Get-Date )
+                }) -Force
+            }
+
+            If ( $_ | Get-Member CSPackageConsider ) {
+                $_.CSPackageConsider |% {
+                    If ( $_ -is [String] ) {
+                        "{0}" -f $_ | Write-Warning
+                    }
+                    ElseIf ( ( $_ -is [PSCustomObject] ) -and ( $_ | Get-Member -Name Consider ) ) {
+                        $Message = $_.Message
+                        $MessageSource = $_.MessageSource
+                        If ( -Not $MessageSource ) {
+                            $MessageSource = "MESSAGE"
+                        }
+                        If ( $_.MessageTimestamp ) {
+                            $MessageTS = ( "({0}) " -f ( $_.MessageTimestamp ).ToString() )
+                        }
+                        Else {
+                            $MessageTS = ""
+                        }
+                        "[{0}] {1}{2}" -f $MessageSource,$MessageTS,$Message | Write-Warning
+                    }
+                    Else {
+                        "{0}" -f $_ | Write-Warning                        
+                    }
+
+                    If ( $_.MessageTest -eq "Oxum" ) {
+                        $PackageTest += @( "Oxum" )
+                    }
+                    Else {
+                        $PackageTest += @( "checksum" )
+                        $ConsiderFast = $false
+                    }
+                }
+            }
             If ( $_ | test-cs-package-is.ps1 -Bagged ) {
 
                 $Bag = $_.CSPackageBagLocation
                 $Payload = ( $Bag | get-bagitbagcomponent-cs.ps1 -Payload )
                 
-                $Payload | & get-crud-files.ps1 |% {
+                $TestPackage = $_ 
+                $TestExits = ( $TestPackage | Invoke-CSConsiderPackageTests )
+
+                $DefaultYN = 'N' ; $InputTimeout=60
+                If ( $Interactive ) {
+                    $DefaultYN = 'Y' ; $InputTimeout=$null
+                }
+
+                $Payload | & get-crud-files.ps1 -Recurse |% {
                     "[{0}] found common, system-generated crud file in payload: {1}" -f ( Get-CommandWithVerb ),$_.Name | Write-Warning
-                    If ( $Interactive ) {
-                        If ( & read-yesfromhost-cs.ps1 -Prompt ( "Delete possible crud file {0}?" -f $_.FullName ) ) {
-                            Remove-Item $_.FullName -Verbose -Force
-                        }
+                    If ( & read-yesfromhost-cs.ps1 -Prompt ( "Delete possible crud file {0}?" -f $_.FullName ) -Timeout:$InputTimeout -DefaultInput:$DefaultYN ) {
+                        Remove-Item $_.FullName -Verbose -Force
+
+                        "[{0}] Re-running tests..." -f ( Get-CommandWithVerb ) | Write-Host -ForegroundColor Yellow
+                        $TestExits = ( $TestPackage | Invoke-CSConsiderPackageTests )
+                    }
+                }
+                
+                $aPossiblyReplaced = ( $_ | & get-replaced-files.ps1 )
+                If ( $aPossiblyReplaced.Count -gt 0 ) {
+                    $N = ( $aPossiblyReplaced.Count - 1 )
+                    $ZeroHour = ( $aPossiblyReplaced[ -1 ] )
+                    "[{0}] found at least {1:N0} {2} in payload altered, possibly replaced after the package was bagged ({3} @ {4}):" -f ( Get-CommandWithVerb ),( $N ),$( If ( $N -ne 1 ) { "files" } Else { "file" } ), $ZeroHour.Name, $ZeroHour.LastWriteTime | Write-Warning
+                    $aPossiblyReplaced |% { "`t{0} @ {1}" -f $_.LastWriteTime, $_.Name } | Write-Warning
+                    
+                    If ( & read-yesfromhost-cs.ps1 -Prompt ( "Rebag directory with possibly altered data {0}?" -f $_.FullName ) -Timeout:$InputTimeout -DefaultInput:$DefaultYN ) {
+                        Push-Location -LiteralPath:$_.FullName
+                        & coldstorage rebag -Items .
+                        & coldstorage validate -Items .
+                        Pop-Location
+
+                        "[{0}] Re-running tests..." -f ( Get-CommandWithVerb ) | Write-Host -ForegroundColor Yellow
+                        $TestExits = ( $TestPackage | Invoke-CSConsiderPackageTests )
                     }
                 }
 
             }
 
+            $mTestExits = ( $TestExits | Measure-Object -Sum )
+            $maxTestExit = ( $TestExits | Sort-Object -Descending | Select-Object -First 1 )
+            If ( ( $mTestExits.Count -eq 0 ) -or ( $mTestExits.Sum -gt 0 ) ) {
+                "you should consider repairs ({0})!" -f ( $TestExits|ConvertTo-Json -Compress) | Write-Warning
+
+                $_ | invoke-deferred-validation-job-item-cs.ps1 -DeferredFile:$DeferredFile -Fast:$ConsiderFast -Cmd:$MessageSource -PretestExitCode:$maxTestExit
+            }
         }
 
-        "consider repairs!" | Write-Warning
+        Write-Progress -Activity ( "{0}" -f ( Get-CommandWithVerb ) ) -Status "Done." -Completed
+
     }
     ElseIf ( $Verb -eq "check" ) {
         If ( $Items ) {
@@ -1950,7 +2260,7 @@ Else {
     ElseIf ( ("validate") -ieq $Verb ) {
         $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words } )
         $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
-        $Locations | & "${CSGetPackages}" "${Verb}" -Items:$Items -Repository:$Repository `
+        $Locations | & "${CSGetPackages}" "${Verb}" -Items:$Items -Repository:$Repository -Copy:$Copy `
             -Fast:$Fast `
             -Recurse:$Recurse `
             -At:$At `
@@ -2158,7 +2468,12 @@ Else {
 
     }
     ElseIf ( $Verb -eq "repository" ) {
-        Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$allObjects -Output:$Output
+        If ( $allObjects.Count -gt 0 ) {
+            Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$allObjects -Location:$Location -Output:$Output
+        }
+        Else {
+            Get-ColdStorageRepositories
+        }
     }
     ElseIf ( $Verb -eq "zipname" ) {
         $CSGetPackageInformationZipName = $( Get-CSScriptDirectory -File "cs-get-package-information-zip-name.ps1" )
@@ -2215,6 +2530,12 @@ Else {
     }
     ElseIf ( $Verb -eq "bleep" ) {
         Write-BleepBloop
+    }
+    ElseIf ( $Verb -iin @( "loop" ) ) {
+        & start-coldstorage-checkup-loops.ps1 -Loop
+    }
+    ElseIf ( $Verb -iin @( "cd" ) ) {
+        & set-location-to-mirror-cs.ps1 -LiteralPath:$allObjects
     }
     ElseIf ( $Verb -eq "echo" ) {
         $aFlags = $MyInvocation.BoundParameters

@@ -160,7 +160,32 @@ Param ( $Invocation, $User=$null, $Credentials=$null, [switch] $NoExit=$false, [
 
 }
 
+Function Start-ProcessWithNetworkAccess {
+Param ( [switch] $SU, $Command, $Invocation )
+
+    $cmd = $Command
+    $Invoc = $Invocation
+
+    If ( -Not ( Test-UserHasNetworkAccess ) ) {
+        If ( $SU ) {
+            $cmdName = $cmd.Name
+            $loc = ( Get-ColdStorageAccessTestPath )
+            "[{0}] Unable to acquire network access to {1}" -f $cmdName,$loc | Write-Error
+            Exit 255
+        }
+        Else {
+            $retval = ( Invoke-SelfWithNetworkAccess -Invocation:$Invoc )
+            Exit $retval
+        }
+    }
+    Else {
+        ( "[{0}] User has network access to {1}; good to go!" -f $cmd.Name,( Get-ColdStorageAccessTestPath ) ) | Write-Verbose -Verbose:$Verbose
+    }
+
+}
+
 
 Export-ModuleMember -Function Get-ColdStorageAccessTestPath
 Export-ModuleMember -Function Test-UserHasNetworkAccess
 Export-ModuleMember -Function Invoke-SelfWithNetworkAccess
+Export-ModuleMember -Function Start-ProcessWithNetworkAccess

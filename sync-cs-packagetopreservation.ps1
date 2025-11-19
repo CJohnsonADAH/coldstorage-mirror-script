@@ -59,7 +59,7 @@ Process {
 		$LogFile = $null
         If ( $Package | test-cs-package-is.ps1 -Bagged ) {
 			$LogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-sync" -Timestamp:( Get-Date ) -Force )
-			"LOG: {0}" -f $LogFile | Write-Host -ForegroundColor:Green -BackgroundColor:Black
+			"LOG: {0}" -f $LogFile | Write-Verbose
         }
 
         If ( ( -Not $NoMirror ) -and ( $Package | test-cs-package-is -Unmirrored ) ) {

@@ -41,7 +41,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Line, $args, [switch] $Progress=$fa
                 Write-Progress -Activity:( $sActivity ) -Status "${Line}"
             }
             If ( $DisplayResult -Or ( -Not $Stdout ) ) {
-                If ( $Line -match "^(([0-9\-\:\,]|\s)+)\s*-\s*([A-Z]+)\s-(.*)is\s+(in)?valid([:]|$)" ) {
+                If ( $Line -match "^(([0-9\-\:\,]|\s)+)\s*-\s*([A-Z]+)\s-(.*)(is)?\s+(in)?valid" ) {
                     If ( $Matches[3] -eq "ERROR" ) {
                         $FG = "Red"
                     }

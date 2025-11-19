@@ -340,13 +340,13 @@ Param ( [Parameter(ValueFromPipeline)] $Line, $Package, $Command=$null, $Log )
 		If ( $Log -ne $null ) {
 			If ( ( -Not ( Test-Path -LiteralPath $Log ) ) -or ( ( Get-Item -LiteralPath $Log -Force ).Length -eq 0 ) ) {
 				$StartMessage = @{ "Location"=$Package.FullName; "User"=( $env:USERNAME ); "Time"=( Get-Date ).ToString() }
-				( "! JSON[Start]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+				( "! JSON[Start]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) | Out-File -LiteralPath:$Log -Append
 			}
 		}
 		If ( $Command -ne $null ) {
 			If ( $Log -ne $null ) {
 				$StartMessage = @{ "Command"=( $Command -f ( "Get-Item -LiteralPath '{0}' -Force" -f $Package.FullName ) ); "User"=( $env:USERNAME ); "Time"=( Get-Date ).ToString() }
-				( "! JSON[Command]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+				( "! JSON[Command]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) | Out-File -LiteralPath:$Log -Append
 			}
 		}
 	}
@@ -356,10 +356,19 @@ Param ( [Parameter(ValueFromPipeline)] $Line, $Package, $Command=$null, $Log )
 			$Line | Write-Output
 			If ( $Log -ne $null ) {
 				If ( ( $Line -is [string] ) -or ( $Line -is [DateTime] ) ) {
-					"$Line" >> $Log
+					"$Line" | Out-File -LiteralPath:$Log -Append
 				}
+                ElseIf ( $Line -is [System.Management.Automation.InformationalRecord] ) {
+                    $TypeName = ( $Line.GetType().Name -replace "Record$","" )
+                    "{0}: {1}" -f ( $TypeName.ToUpper(), "$Line" ) | Out-File -LiteralPath:$Log -Append
+                }
+                ElseIf ( $Line -is [System.Management.Automation.ErrorRecord] ) {
+                    $TypeName = ( $Line.GetType().Name -replace "Record$","" )
+                    "{0}: {1}" -f ( $TypeName.ToUpper(), "$Line" ) | Out-File -LiteralPath:$Log -Append
+                    $Line | ConvertTo-Json -Compress | Out-File -LiteralPath:$Log -Append
+                }
 				Else {
-					$Line | ConvertTo-Json -Compress >> $Log
+					$Line | ConvertTo-Json -Compress | Out-File -LiteralPath:$Log -Append
 				}
 			}
 		}
@@ -367,17 +376,25 @@ Param ( [Parameter(ValueFromPipeline)] $Line, $Package, $Command=$null, $Log )
 
 	End {		
 
-		$ExitMessage = @{ "Location"=$Package.FullName; "Time"=( Get-Date ).ToString() }
-		( "! JSON[Exit]: {0}" -f ( $ExitMessage | ConvertTo-Json -Compress ) ) >> $Log
+        If ( $Log -ne $null ) {
+		    $ExitMessage = @{ "Location"=$Package.FullName; "Time"=( Get-Date ).ToString() }
+		    ( "! JSON[Exit]: {0}" -f ( $ExitMessage | ConvertTo-Json -Compress ) ) | Out-File -LiteralPath:$Log -Append
+        }
 		
 	}
 
 }
 
 Function Write-RoboCopyOutput {
-Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [switch] $Epilog=$false, [switch] $Echo=$false )
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Line,
+    [switch] $Prolog=$false,
+    [switch] $Epilog=$false,
+    [switch] $Echo=$false,
+    [switch] $Directories=$false
+)
 
-    Begin { $Status = $null; $pct = 0.0; $Sect = 0; }
+    Begin { $Status = $null; $pct = 0.0; $Sect = 0; $roboCopyParams = @{ } }
 
     Process {
         If ( "${Line}" ) {
@@ -388,8 +405,19 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [sw
                 $pct = 0.0
                 $Status = ( "${Line}" -replace "\t","    " )
                 $Status = ( "${Status}" -replace "\s"," " )
+                $Status = ( "({0}) {1}" -f ( Get-Date ), $Status )
             }
-            Write-Progress -Activity ( "Robocopy.exe {0} {1}" -f "${Source}","${Destination}" ) -Status "${Status}" -PercentComplete $pct
+            
+            $Source = $roboCopyParams[ "Source" ]
+            $Destination = $roboCopyParams[ "Destination" ]
+            $Options = $roboCopyParams[ "Options" ]
+            Write-Progress -Activity ( "Robocopy.exe {0} {1} {2}" -f "${Options}","${Source}","${Destination}" ) -Status "${Status}" -PercentComplete $pct
+            
+            If ( "${Line}" -match "\s([0-9]+)\s+(\S.*[\\])\s*$" ) {
+                If ( $Directories ) {
+                    $Line | Write-Host -ForegroundColor Yellow -BackgroundColor Black
+                }
+            }
 
         }
 
@@ -404,6 +432,12 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [sw
         If ( $Prolog -Or $Epilog ) {
             If ( $Prolog -and ( $Sect -le 2 ) ) {
                 "${Line}" | Write-Host
+                If ( "${Line}" -match "^\s*([^:]+)\s*[:]\s*(\S(.*\S)?)\s*$" ) {
+                    $Key = $Matches[1].Trim()
+                    $Value = $Matches[2]
+                    $roboCopyParams[ $Key ] = $Value
+                }
+
             }
             ElseIf ( "${Line}" -match "^[0-9/]+\s+[0-9:]+\s+(ERROR|WARNING)\s" ) {
                 "${Line}" | Write-Host -ForegroundColor Red
@@ -423,6 +457,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Line, [switch] $Prolog=$false, [sw
 
     End { }
 }
+
 
 Export-ModuleMember -Function Write-BleepBloop
 Export-ModuleMember -Function Select-UserApproved

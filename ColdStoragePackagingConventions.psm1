@@ -1072,12 +1072,13 @@ Param(
 
 Function Get-ItemPackage {
 Param (
-    [Parameter(ValueFromPipeline=$true)] $File,
+    [Parameter(ValueFromPipeline=$true)] $Item,
     [switch] $At=$false,
     [switch] $Recurse=$false,
     [switch] $Ascend=$false,
     $AscendTop=$null,
 	[switch] $Force=$false,
+    [switch] $FromZip=$false,
     [switch] $CheckZipped=$false,
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
@@ -1088,21 +1089,39 @@ Param (
     Begin { }
 
     Process {
-        $File = Get-FileObject($File)
+
+        $File = ( $Item | Get-FileObject )
+
+        If ( $FromZip ) {
+            If ( $File | Get-Member -Name Bag ) {
+                If ( $File | Get-Member -Name Zip ) {
+                    $File = ( $File.Bag | Get-FileObject )
+                }
+            }
+        }
+
         Write-Debug ( "Entered Get-ItemPackage: {0} -At:{1} -Recurse:{2} -Ascend:{3} -AscendTop:{4} -CheckZipped:{5} -ShowWarnings:{6}" -f $File.FullName, $At, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
+
         If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status $File.FullName }
 
         If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
             Continue
         }
 
-        $bBagged = ( Test-BagItFormattedDirectory -File $File )
-        $oBagLocation = $null
-        $aZipped = $false
-        
         $oFile = ( $File.FullName | Get-FileObject )
-        $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageContentFiles -Value:@( ) -Force
-        $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageContentWarnings -Value:@( ) -Force
+        If ( $oFile -ne $null ) {
+            $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageContentFiles -Value:@( ) -Force
+            $oFile | Add-Member -MemberType:NoteProperty -Name:CSPackageContentWarnings -Value:@( ) -Force
+        }
+        Else {
+            If ( $File.FullName -ne $null ) {
+                $diagFullName = $File.FullName
+            }
+            Else {
+                $diagFullName = "${File}"
+            }
+            "[Get-ItemPackage] '{0}' came out of Get-FileObject as NULL!!" -f $diagFullName | Write-Warning
+        }
 
         $nonpackaged = ( $File | Test-CSNonpackagedItem )
         If ( $nonpackaged ) {
@@ -1121,7 +1140,7 @@ Param (
             }
 
             $oBagLocation = $File
-            If ( $bBagged -and $CheckZipped ) {
+            If ( $oBagLocation -and $CheckZipped ) {
                 $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
             }
 
@@ -1129,10 +1148,10 @@ Param (
         ElseIf ( $File | Test-CSBaggedPackageItem ) {
             $t = ( $File | Get-CSPackageItemBagging -CheckZipped:$CheckZipped )
             $oFile.CSPackageContentFiles = @( $t['Contents'] )
-            If ( $bBagged ) {
-                $oBagLocation = $t['Bag']
+            If ( $t[ 'Bag' ] ) {
+                $oBagLocation = $t[ 'Bag' ]
                 If ( $CheckZipped ) {
-                    $aZipped = @( $t['Zip'] )
+                    $aZipped = @( $t[ 'Zip' ] )                    
                 }
             }
 
@@ -1142,8 +1161,7 @@ Param (
         }
         ElseIf ( Test-LooseFile -File $File ) {
             $oBagLocation = ( Get-BaggedCopyOfLooseFile -File $File )
-            $bBagged = $( If ( $oBagLocation ) { $true } Else { $false } )
-            If ( $bBagged -and $CheckZipped ) {
+            If ( $oBagLocation -and $CheckZipped ) {
                 $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
             }
             $oFile.CSPackageContentFiles = @( $File )
@@ -1165,6 +1183,8 @@ Param (
 
         If ( $oFile.CSPackageContentFiles.Count -gt 0 ) {
             $Package = $oFile
+
+            $bBagged = $( If ( $oBagLocation ) { $true } Else { $false } )
             $Package | Add-ItemPackageBagData -Contents:$oFile.CSPackageContentFiles -Bagged:$bBagged -BagLocation:$oBagLocation 
 
             $oCloudCopy = $null
@@ -1397,7 +1417,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $LI, $ListTag="ul", $ItemTag="li" )
 Function ConvertTo-HTMLLink {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, $RelativeTo, [switch] $RelativeHref=$false, [String] $Tag='<a href="{0}">{1}</a>' )
 
-    Begin { Push-Location; Set-Location $RelativeTo }
+    Begin { Push-Location; Set-Location -LiteralPath $RelativeTo }
 
     Process {
         $URL = $File.FileURI
@@ -1502,8 +1522,8 @@ Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$
                 | ConvertTo-HTMLLink -RelativeTo $UNC -RelativeHref:${RelativeHref} `
                 | ConvertTo-HTMLList `
                 | ConvertTo-HTMLDocument -Title ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) ) `
-                | Out-File -FilePath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
-
+                | Out-File -LiteralPath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
+                
             }
             Else {
                 ( "[{0}] index.html already exists in {1}. To force index.html to be regenerated, use -Force flag." -f $sContext,$Directory ) | Write-Warning
@@ -1554,3 +1574,5 @@ Export-ModuleMember -Function ConvertTo-HTMLList
 Export-ModuleMember -Function ConvertTo-HTMLLink
 Export-ModuleMember -Function Add-FileURI
 Export-ModuleMember -Function Add-IndexHTML
+Export-ModuleMember -Function Get-CSPackageItemBagging
+Export-ModuleMember -FUnction Test-CSBaggedPackageItem
