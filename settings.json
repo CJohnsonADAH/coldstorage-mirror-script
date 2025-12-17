@@ -1,9 +1,9 @@
 {
-	"BagIt": "//ADAHMainStorage_22B/ADAHServerTools/Scripts/bagit",
-	"ClamAV": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/clamav-1.4.2.win.x64",
-    "7za": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/7z-1900/x64",
-	"Python": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/WinPython64/python-3.9.0rc1.amd64",
-    "AWS": "//ADAHMainStorage_22B/ADAHServerTools/Binaries/AWS-CLI",
+	"BagIt": "//ADAHMAIN-24D/ADAHServerTools/Scripts/bagit",
+	"ClamAV": "//ADAHMAIN-24D/ADAHServerTools/Binaries/clamav-1.4.2.win.x64",
+    "7za": "//ADAHMAIN-24D/ADAHServerTools/Binaries/7z-1900/x64",
+	"Python": "//ADAHMAIN-24D/ADAHServerTools/Binaries/WinPython64/python-3.9.0rc1.amd64",
+    "AWS": "//ADAHMAIN-24D/ADAHServerTools/Binaries/AWS-CLI",
     "Script-Queue": "//ADAHColdStorage/Share/Scripts/.coldqueue",
 	"Institution": "Alabama Department of Archives and History",
 	"Drop-Server-SFTP": "adah@drop.adpn.org",
@@ -22,49 +22,49 @@
 	},
 	"Repository-Trashcan": "//ADAHMainStorage/ADAHColdStorage-Diffs",
     "Repository-Groups": {
-        "ER": [ "//ADAHColdStorage/ADAHDATA/ElectronicRecords", "//ADAHColdStorage/ElectronicRecords", "//ADAHMainStorage_22B/ElectronicRecords" ],
+        "ER": [ "//ADAHColdStorage/ADAHDATA/ElectronicRecords", "//ADAHColdStorage/ElectronicRecords", "//ADAHMAIN-24D/ElectronicRecords" ],
         "DA": [ "//ADAHColdStorage/ADAHDATA/Digitization", "//ADAHColdStorage/Digitization" ],
 		"NP": [ "//ADAHColdStorage/ADAHDATA", "//ADAHColdStorage" ]
     },
     "Repository-Mirrors": {
         "Processed": {
-			"Original": [ "//ADAHMainStorage_22B/ElectronicRecords/{0}" ],
+			"Original": [ "//ADAHMAIN-24D/ElectronicRecords/{0}" ],
 			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "ER", "Preservation", "Packaged" ]
 		},
         "Unprocessed": {
-			"Original": [ "//ADAHMainStorage_22B/ElectronicRecords/{0}" ],
+			"Original": [ "//ADAHMAIN-24D/ElectronicRecords/{0}" ],
 			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "ER", "Preservation", "Packaged" ]
 		},
         "Working_ER": {
-			"Original": [ "//ADAHMainStorage_22B/ER{0}" ],
+			"Original": [ "//ADAHMAIN-24D/ER{0}" ],
 			"Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "ER", "Working" ]
 		},
         "Masters": {
-			"Original":  [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Original":  [ "//ADAHMAIN-24D/Digital{0}" ],
 			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "DA", "Preservation", "Packaged" ]
 		},
         "Access": {
-			"Original": [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Original": [ "//ADAHMAIN-24D/Digital{0}" ],
 			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
 			"ColdStorage": "$Reflection",
 			"Groups": ["DA", "Preservation"]
 		},
         "Working_DA": {
-			"Original": [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Original": [ "//ADAHMAIN-24D/Digital{0}" ],
 			"Reflection": [ "{1}/Working-Mirror", "{2}/Working-Mirror" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "DA", "Working" ]
 		},
 		"Received": {
-			"Original": [ "//ADAHMainStorage_22B/{0}" ],
+			"Original": [ "//ADAHMAIN-24D/{0}" ],
 			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "NP", "Working" ]

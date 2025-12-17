@@ -21,6 +21,7 @@ Param (
 	[switch] $Batch = $false,
     [switch] $Interactive = $false,
     [String[]] $Skip = @(), 
+    [switch] $Download = $false,
     [switch] $Recurse = $false,
     [switch] $Force = $false,
     [switch] $PassThru = $false,
@@ -37,6 +38,8 @@ $Verbose = ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent )
 $Verbose = $( If ( $Verbose -eq $null ) { $false } Else { $Verbose } )
 $Debug = ( $PSCmdlet.MyInvocation.BoundParameters["Debug"].IsPresent )
 $Debug = $( If ( $Debug -eq $null ) { $false } Else { $Debug } )
+
+$ExitCode = 0
 
 $global:gBucketObjects = @{ }
 
@@ -364,18 +367,62 @@ Else {
         $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $allObjects | & "${CSGetPackages}" -Items -Zipped -InCloud | ForEach-Object {
             $pack = $_
-            $pack.CSPackageZip | Select-Object -First 1 | ForEach-Object {
-                $ZipName = $_.FullName
-                If ( $ZipName -like '*.json' ) {
-                    ( "JSON: {0}" -f $ZipName ) | Write-Warning
-                    $pack.CloudCopy
-                }
-                Else {
-                    ( "ZIP: {0}" -f $ZipName ) | Write-Warning
-                    $pack.CloudCopy
-                }
+            If ( $pack.CSPackageZip.Count -gt 0 ) {
+                $pack.CSPackageZip | Select-Object -First 1 | ForEach-Object {
+                    $ZipName = $_.FullName
+                    If ( $ZipName -like '*.json' ) {
+                        ( "JSON(CACHED): {0}" -f $ZipName ) | Write-Host -ForegroundColor:Cyan
+                        $pack.CloudCopy
+                    }
+                    Else {
+                        ( "ZIP(CACHED): {0}" -f $ZipName ) | Write-Host -ForegroundColor:Cyanget-it
+                        $pack.CloudCopy
+                    }
 
+                }
             }
+            ElseIf ( $Download ) {
+                $bag = $pack.CSPackageBagLocation
+                If ( $bag ) {
+                    $Bucket = ( $pack | Get-CloudStorageBucket )
+                    $Prefixes = @( ) + @( $bag | Get-ZippedBagNamePrefix )
+                    
+                    $Prefixes |% {
+                        $Prefix = $_
+                    
+                        $CloudCopy = ( Get-CloudStorageBucketObjectList -Bucket:$Bucket -Prefix:$Prefix )
+                    
+                        If ( $CloudCopy.Contents ) {
+
+                            $CloudCopy.Contents |% {
+                            
+                                $JsonName = ( "{0}.json" -f $_.Key )
+                                $ZipContainer = ( $pack | Get-ZippedBagsContainer )
+                                $JsonPath = ( Join-Path $ZipContainer.FullName -ChildPath $JsonName )
+
+                                If ( -Not ( Test-Path -LiteralPath $JsonPath ) ) {
+                                    $CloudCopy | ConvertTo-Json | Out-File -Encoding utf8 -LiteralPath $JsonPath
+                                    ( "JSON(CLOUD): {0}" -f $JsonPath ) | Write-Host -ForegroundColor:Cyan
+                                    $CloudCopy.Contents
+                                }
+                                Else {
+                                    ( "[{0}] Can't do it, path '{1}' already exists" -f $sCommandWithVerb,$JsonPath ) | Write-Warning
+                                    $ExitCode = 2
+                                }
+
+                            }
+                        
+
+                        }
+                        Else {
+                                ( "[{0}] Can't do it, package '{1}' not in cloud (search prefix: {2})" -f $sCommandWithVerb,$pack.FullName,( "s3://{0}/{1}" -f $Bucket,$Prefix ) ) | Write-Warning
+                                $ExitCode = 1
+                        }
+                    }
+
+                }
+            }
+
         }
 
     }
@@ -411,3 +458,5 @@ Else {
         }
     }
 }
+
+Exit $ExitCode

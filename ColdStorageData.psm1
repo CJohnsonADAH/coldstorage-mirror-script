@@ -72,5 +72,28 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Line, $Text=$null, $Algorithm="MD5
 
 }
 
+Function Get-CurrentLine {
+    $MyInvocation.ScriptLineNumber
+}
+
+Function Get-CSDebugContext {
+Param ( $Function, $Format="{0}:{1}" )
+
+    If ( $Function -is [String] ) {
+        $sName = $Function
+    }
+    ElseIf ( $Function | Get-Member -Name MyCommand ) {
+        $sName = ( $Function.MyCommand.Name )
+    }
+    Else {
+        $sName = "${Function}"
+    }
+    $nLine = $MyInvocation.ScriptLineNumber
+
+    $Format -f $sName, $nLine | Write-Output
+}
+
 Export-ModuleMember -Function Get-StringMD5
 Export-ModuleMember -Function Get-StringChecksum
+Export-ModuleMember -Function Get-CurrentLine
+Export-ModuleMember -Function Get-CSDebugContext

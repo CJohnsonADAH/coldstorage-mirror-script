@@ -82,7 +82,7 @@ End { }
 
 # WAS: Get-Bag-Zip-Name-Prefix
 Function Get-ZippedBagNamePrefix {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, $Extension=$null )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Extension=$null, [switch] $ClipExtensions=$false, [switch] $AllPossible=$false )
 
 Begin { }
 
@@ -90,51 +90,60 @@ Process {
     $oFile = Get-FileObject -File $File
 
     # Fully qualified file system path to the containing parent
-    $sFilePath = ( Get-ItemFileSystemParent $oFile ).FullName
+    $oFilePath = ( Get-ItemFileSystemParent $oFile )
+    $sFilePaths = @( $oFilePath.FullName )
     
-    # Fully qualified UNC path to the containing parent
-    $oFileUNCPath = ( $sFilePath | Get-UNCPathResolved -ReturnObject )
-    $sFileUNCPath = $oFileUNCPath.FullName
+    If ( $AllPossible -and ( $oFilePath.Name -eq '.bagged' ) ) {
+        $sFilePaths = @( $sFilePaths ) + ( ( Get-ItemFileSystemParent $oFilePath ).FullName )
+    }
 
-    # Slice off the root directory up to the node name of the repository container
-    $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
-    $sRepository = $oRepository.FullName
-    $sRepositoryNode = ( $File | Get-FileRepositoryPrefix -Fallback )
+    $sFilePaths |% {
+        $sFilePath = $_
     
-    $sFileName = ( $oFile.Name -replace "[^A-Za-z0-9_]+","-" )
+        # Fully qualified UNC path to the containing parent
+        $oFileUNCPath = ( $sFilePath | Get-UNCPathResolved -ReturnObject )
+        $sFileUNCPath = $oFileUNCPath.FullName
 
-    $reUNCRepo = [Regex]::Escape($sRepository)
-    $sZipPrefix = ( $sFileUNCPath -ireplace "^${reUNCRepo}","${sRepositoryNode}" )
-        
-    $sZipPrefix = ( $sZipPrefix -replace "[^A-Za-z0-9]+","-" )
+        # Slice off the root directory up to the node name of the repository container
+        $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
+        $sRepository = $oRepository.FullName
+        $sRepositoryNode = ( $File | Get-FileRepositoryPrefix -Fallback )
+    
+        $sFileName = ( $oFile.Name -replace "[^A-Za-z0-9_]+","-" )
 
-    $sZippedBagNamePrefix = ( "${sZipPrefix}-${sFileName}" )
+        $reUNCRepo = [Regex]::Escape($sRepository)
+        $sZipPrefix = ( $sFileUNCPath -ireplace "^${reUNCRepo}","${sRepositoryNode}" )
+    
+        $sZipPrefix = ( $sZipPrefix -replace "[^A-Za-z0-9]+","-" )
 
-    # SAFEGUARD: avoid "The specified path, file name, or both are too long." exceptions...
-    # "The fully qualified file name must be less than 260 characters, and the directory name must be less than 248 characters."
-    # If the prefix is long enough that the prefix + metadata suffixes + file extension will push it over,
-    # trim it down and use an MD5 hash to help keep the naming unique.
+        $sZippedBagNamePrefix = ( "${sZipPrefix}-${sFileName}" )
 
-    $nMaxPrefixLen = 185 ; $nMaxPrefixTrim = ( $nMaxPrefixLen - 35 )
-    If ( $sZippedBagNamePrefix.Length -gt $nMaxPrefixLen ) {
+        # SAFEGUARD: avoid "The specified path, file name, or both are too long." exceptions...
+        # "The fully qualified file name must be less than 260 characters, and the directory name must be less than 248 characters."
+        # If the prefix is long enough that the prefix + metadata suffixes + file extension will push it over,
+        # trim it down and use an MD5 hash to help keep the naming unique.
+
+        $nMaxPrefixLen = 185 ; $nMaxPrefixTrim = ( $nMaxPrefixLen - 35 )
+        If ( $sZippedBagNamePrefix.Length -gt $nMaxPrefixLen ) {
             
-        $stream = [System.IO.MemoryStream]::new()
-        $writer = [System.IO.StreamWriter]::new($stream)
-        $writer.write($sZippedBagNamePrefix)
-        $writer.Flush()
-        $stream.Position = 0
-        $oZipHashedSlugHash = ( Get-FileHash -InputStream $stream -Algorithm:MD5 )
-        $sZipHashedSlugHash = $oZipHashedSlugHash.Hash
+            $stream = [System.IO.MemoryStream]::new()
+            $writer = [System.IO.StreamWriter]::new($stream)
+            $writer.write($sZippedBagNamePrefix)
+            $writer.Flush()
+            $stream.Position = 0
+            $oZipHashedSlugHash = ( Get-FileHash -InputStream $stream -Algorithm:MD5 )
+            $sZipHashedSlugHash = $oZipHashedSlugHash.Hash
 
-        $sZippedBagNamePrefix = ( '{0}--{1}' -f ( $sZippedBagNamePrefix.Substring(0, $nMaxPrefixTrim ) ), $sZipHashedSlugHash.ToLower() )
+            $sZippedBagNamePrefix = ( '{0}--{1}' -f ( $sZippedBagNamePrefix.Substring(0, $nMaxPrefixTrim ) ), $sZipHashedSlugHash.ToLower() )
 
-    }
+        }
     
-    If ( $Extension -ne $null ) {
-        $sZippedBagNamePrefix = ( '{0}.{1}' -f $sZippedBagNamePrefix, $Extension )
-    }
+        If ( $Extension -ne $null ) {
+            $sZippedBagNamePrefix = ( '{0}.{1}' -f $sZippedBagNamePrefix, $Extension )
+        }
 
-    $sZippedBagNamePrefix | Write-Output
+        $sZippedBagNamePrefix | Write-Output
+    }
 
 }
 
@@ -280,30 +289,59 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository, $TS=$null, $Has
 
 }
 
+Function Get-ZippedBagsWildcardOfUnzippedBag {
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $AllPossible=$false, [switch] $BinaryOnly=$false )
+
+Begin { }
+
+Process {
+    $oFile = Get-FileObject($File)
+    $Prefixes = ( Get-ZippedBagNamePrefix -File $oFile.FullName -AllPossible:$AllPossible )
+
+    $Prefixes |% {
+        $Prefix = $_
+        $WC = ( "{0}_z*_md5_*.zip" -f "${Prefix}" )
+        $WC | Write-Output
+        If ( -Not $BinaryOnly ) {
+            ( "{0}.json" -f "${WC}" ) | Write-Output
+        }
+    }
+
+}
+
+End { }
+
+}
+
+
 # WAS/IS: Get-Zipped-Bag-Of-Bag/Get-ZippedBagOfUnzippedBag
 Function Get-ZippedBagOfUnzippedBag {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $BinaryOnly=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $AllPossible=$false, [switch] $BinaryOnly=$false )
 
-Begin { }
+Begin { $sFormat = 'ZIP archive'; If ( $BinaryOnly ) { $sFormat = ( '{0} or JSON marker' -f $sFormat ) } }
 
 Process {
     $oFile = Get-FileObject($File)
     If ( Test-BagItFormattedDirectory -File $oFile.FullName ) {
         $Containers = ( $oFile.FullName | Get-ZippedBagsContainer -All )
         $Prefix = ( Get-ZippedBagNamePrefix -File $oFile.FullName )
+
+        $SearchPaths = @()
         If ( $Containers.FullName -ne $null ) {
-            $ChildWildCard = ( "{0}_z*_md5_*.zip" -f "${Prefix}" )
-            $ChildWildCardJson = ( "{0}.json" -f "${ChildWildCard}" )
-            $SearchPaths = ( $Containers.FullName | Join-Path -ChildPath $ChildWildCard )
-            If ( -Not $BinaryOnly ) {
-                $SearchPaths = @( $SearchPaths ) + @( ( $Containers.FullName | Join-Path -ChildPath $ChildWildCardJson ) )
+            $Wildcards = ( $oFile | Get-ZippedBagsWildcardOfUnzippedBag -AllPossible:$AllPossible -BinaryOnly:$BinaryOnly )
+            
+            $SearchPaths = @( )
+            $Wildcards |% {
+                $SearchPaths = @( $SearchPaths ) + ( $Containers.FullName | Join-Path -ChildPath $_ )
             }
+
         }
-        Else {
-            $SearchPaths = @()
+
+        $SearchPaths |% {
+            "[{0}] Searching for {1} with wildcard: '{2}'" -f ( Get-CSDebugContext -Function:$MyInvocation ), $sFormat, $_ | Write-Debug
+            Get-ChildItem -Path $_
         }
-        $SearchPaths |% { Get-ChildItem -Path $_ }
     }
 }
 
@@ -578,6 +616,7 @@ Export-ModuleMember -Function Get-ZippedBagNamePrefix
 Export-ModuleMember -Function Get-ZippedBagNameWithTimestamp
 Export-ModuleMember -Function Get-ZippedBagNameWithChecksum
 Export-ModuleMember -Function Get-ZippedBagNameWithMetadata
+Export-ModuleMember -Function Get-ZippedBagsWildcardOfUnzippedBag
 Export-ModuleMember -Function Get-ZippedBagOfUnzippedBag
 Export-ModuleMember -Function Add-ZippedBagOfPreservationPackage
 Export-ModuleMember -Function New-ZippedBagsContainer

@@ -15,7 +15,7 @@ Import-Module -Verbose:$false BitsTransfer
 Import-Module -Verbose:$false Posh-SSH
 
 # Depdencies - Script
-Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageData.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageRepositoryLocations.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
@@ -265,11 +265,11 @@ Param (
 	$LogFile = ( $SyncOptions | Get-CSSyncOptionsLogFile )
 	
     If ( "${To}" -eq "" ) {
-        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        "[{0}] ('{1}', '{2}'): Parameter TO appears to be empty." -f ( Get-CSDebugContext -Function:$MyInvocation ), $From, $To | Write-Error
         Return
     }
     ElseIf ( "${From}" -eq "" ) {
-        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        "[{0}] ('{1}', '{2}'): Parameter FROM appears to be empty." -f ( Get-CSDebugContext -Function:$MyInvocation ), $From, $To | Write-Error
         Return
     }
 

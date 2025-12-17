@@ -1,25 +1,15 @@
-﻿
-#############################################################################################################
+﻿#############################################################################################################
 ## DEPENDENCIES #############################################################################################
 #############################################################################################################
 
-Function My-Script-Directory {
-Param ( $Command, $File=$null )
-
-    $Source = ( $Command.Source | Get-Item -Force )
-    $Path = ( $Source.Directory | Get-Item -Force )
-
-    If ( $File -ne $null ) {
-        $Path = ($Path.FullName + "\" + $File)
-    }
-
-    $Path
-}
-
 $global:gRepoLocsModuleCmd = $MyInvocation.MyCommand
 
-Import-Module -Verbose:$false  $( My-Script-Directory -Command $global:gRepoLocsModuleCmd -File "ColdStorageSettings.psm1" )
-Import-Module -Verbose:$false  $( My-Script-Directory -Command $global:gRepoLocsModuleCmd -File "ColdStorageFiles.psm1" )
+    $modSource = ( $global:gRepoLocsModuleCmd.Source | Get-Item -Force )
+    $modPath = ( $modSource.Directory | Get-Item -Force )
+
+Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
+Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageData.psm1" )
+Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
 
 #############################################################################################################
 ## DATA #####################################################################################################
@@ -92,12 +82,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $LiteralPath )
 Function Get-ColdStorageRepositories {
 Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false, [switch] $Passive=$false )
 
-    Begin { 
+    Begin {
         $GroupMeta = ( Get-ColdStorageSettings -Name "Repository-Groups" )
         $MirrorsMeta = ( Get-ColdStorageSettings -Name "Repository-Mirrors" )
     }
 
     Process {
+        "[{0}] Process ..." -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-Debug 
 
         If ( $Repository ) {
 
@@ -159,7 +150,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
 
             }
             Else {
-                
+                "[{0}] Tag and filter out ({1})..." -f ( Get-CSDebugContext -Function:$MyInvocation ), $Repository | Write-Debug 
                 $taggedOut = ( $Repository | Get-ColdStorageRepositories  -Groups:$Groups -Tag -NoTrash -Passive:$Passive )
                 $filteredOut = @( $taggedOut.Collection, $taggedOut.Locations.Reflection, $taggedOut.Locations.Original, $taggedOut.Locations.ColdStorage )
 
@@ -187,6 +178,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
 
         }
         Else {
+            "[{0}] Assemble output ..." -f ( Get-CSDebugContext -Function:$MyInvocation ), $Repository | Write-Debug 
             $out = @{ }
             $Repositories = ( $MirrorsMeta | Get-Member -MemberType NoteProperty |% { $_.Name } )
             $Repositories |% { $Key = $_; $out[$Key] = ( $Key | Get-ColdStorageRepositories -Groups:$Groups -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive ) }
@@ -653,6 +645,8 @@ Function Split-MirrorMatchedPath {
 Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch] $Root=$false, [switch] $Stem=$false, [switch] $Canonicalize=$false, $Depth=0 )
 
     Begin {
+        $sContext = $MyInvocation.MyCommand.Name
+        
         $Parts=@()
         If ( $Root ) {
             $Parts += , 0
@@ -667,7 +661,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
     }
 
     Process {
-        "[Split-MirrorMatchedPath] {0}" -f $LiteralPath | Write-Debug
+        "[Split-MirrorMatchedPath] LiteralPath='{0}'" -f $LiteralPath | Write-Debug
         If ( $Props -eq $null ) {
             $Props = ( $LiteralPath | Get-FileRepositoryProps )
         }
@@ -677,20 +671,23 @@ Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, $Props=$null, [switch]
         Else {
             $RepositoryRoot = $null
         }
+        "[{0}:{1}] RepositoryRoot={2}" -f $sContext, ( Get-CurrentLine ), $( If ( $RepositoryRoot -eq $null ) { '$NULL' } Else { $RepositoryRoot|ConvertTo-Json -Compress } ) | Write-Debug
 
         $sPath = Get-FileLiteralPath($LiteralPath)
+        "[{0}:{1}] sPath={2}" -f $sContext, ( Get-CurrentLine ), $( If ( $sPath -eq $null ) { '$NULL' } Else { $sPath|ConvertTo-Json -Compress } ) | Write-Debug
 
-        If ( $sPath -ine $RepositoryRoot ) {
+        If ( $sPath -inotin @( $RepositoryRoot ) ) {
             $sParent = ( $sPath | Split-Path -Parent )
             $sChild = ( $sPath | Split-Path -Leaf )
             If ( $Depth -eq 0 ) {
-                "[Split-MirrorMatchedPath] \ ${RepositoryRoot}" | Write-Debug
+                "[{0}:{1}] \ {2}" -f $sContext, ( Get-CurrentLine ), $RepositoryRoot | Write-Debug
             }
-            ( "[Split-MirrorMatchedPath] {0} {1}" -f ("." * ($Depth+1)), $sChild ) | Write-Debug
+            ( "[{0}] '{1}' {2} '{3}'" -f ( Get-CSDebugContext -Function:$MyInvocation ), $sParent, ("." * ($Depth+1)), $sChild ) | Write-Debug
 
             $Rest = @( $null, $sParent )
             If ( $sParent ) {
                 If ( $sParent -ine $RepositoryRoot ) {
+                    ( "[{0}] {1} {2} {3}" -f ( Get-CSDebugContext -Function:$MyInvocation ), $sParent, ("." * ($Depth+1)), $sChild ) | Write-Debug
                     $Rest = ( $sParent | Split-MirrorMatchedPath -Root -Stem -Depth:($Depth+1) -Props:$Props -Canonicalize:$Canonicalize )
                 }
                 Else {
@@ -820,9 +817,11 @@ Process {
                 $PropName = $_
                 $PropValue = $Locations.${PropName}
 
-                $PropValueUNC = ( $PropValue | Get-LocalPathFromUNC ) -join ""
+                $PropValueUNC = ( $PropValue | Get-LocalPathFromUNC ) -join ";"
 
                 $ItsMe = ( $Stock -iin @( $PropValue, $PropValueUNC ) )
+
+                "PROP {4}: {0} ({1}:{2}) / STOCK: {3}:{4}" -f $PropValue, $PropValueUNC, $PropValueUNC.Length, $Stock, $Stock.Length, $( If ( $ItsMe ) { "=" } Else { "/=" } )  |Write-Debug
 
                 $Include = ( ( -Not $Implicit ) -or ( $All ) -or ( $ItsMe -eq $Self ) )
 

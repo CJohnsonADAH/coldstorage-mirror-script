@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2025.0821
+@version 2025.1129
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -134,10 +134,6 @@ If ( $global:gScriptContextName -eq $null ) {
 
 $ColdStorageER = "\\ADAHColdStorage\ADAHDATA\ElectronicRecords"
 $ColdStorageDA = "\\ADAHColdStorage\ADAHDATA\Digitization"
-
-Function Get-CurrentLine {
-    $MyInvocation.ScriptLineNumber
-}
 
 Function Get-CommandWithVerb {
     $global:gCSCommandWithVerb
@@ -1989,7 +1985,11 @@ $global:gCSCommandWithVerb = $sCommandWithVerb
 If ( $Verbose ) {
     $VerbosePreference = "Continue"
 }
+If ( $Debug ) {
+    $DebugPreference = "Continue"
+}
 
+"[{0}] Begin script logic" -f $sCommandWithVerb | Write-Debug
 if ( $Help -eq $true ) {
     Get-CSUsageNotes -cmd $MyInvocation.MyCommand
 }
@@ -1998,8 +1998,12 @@ ElseIf ( $Version ) {
 }
 Else {
 
+    "[{0}] Verb: '{1}'" -f $sCommandWithVerb, $Verb | Write-Debug
+
     $t0 = date
-    $sCommandWithVerb = "${sCommandWithVerb} ${Verb}"
+    If ( $Verb.Length -gt 0 ) {
+        $sCommandWithVerb = "${sCommandWithVerb} ${Verb}"
+    }
     $global:gCSCommandWithVerb = $sCommandWithVerb
 
     If ( $Verb.Length -gt 0 ) {
@@ -2545,6 +2549,7 @@ Else {
         [PSCustomObject] $oEcho | Out-CSStream -Stream:$Output
     }
     Else {
+        "[{0}] No recognized verb. Display usage notes." -f $sCommandWithVerb | Write-Debug
         Get-CSUsageNotes -cmd $MyInvocation.MyCommand
     }
 

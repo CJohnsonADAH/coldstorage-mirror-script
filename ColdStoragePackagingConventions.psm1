@@ -1024,9 +1024,9 @@ Param (
                 If ( $bBagged ) {
                     $oBagLocation = $File
                     If ( $CheckZipped ) {
-                        $aZipped = ( $File | Get-ZippedBagOfUnzippedBag )
+                        $aZipped = ( $File | Get-ZippedBagOfUnzippedBag -AllPossible )
                     }
-                }           
+                }
             }
 
             @{ "Bag"=$oBagLocation; "Contents"=$aContents; "Zip"=$aZipped } | Write-Output
@@ -1054,7 +1054,7 @@ Param(
         $Package | Add-Member -MemberType:NoteProperty -Name:CSIPCAZPackageContents -Value:$Contents -Force
 
         If ( ( $Bagged -and $CheckZipped ) -and ( $Zip -eq $null ) ) {
-            $Zip = ( $Package | Get-ZippedBagOfUnzippedBag )
+            $Zip = ( $Package | Get-ZippedBagOfUnzippedBag -AllPossible )
         }
 
         If ( $CheckZipped -and ( $Zip -ne $null ) ){
@@ -1141,7 +1141,7 @@ Param (
 
             $oBagLocation = $File
             If ( $oBagLocation -and $CheckZipped ) {
-                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
+                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag -AllPossible )
             }
 
         }
@@ -1162,7 +1162,7 @@ Param (
         ElseIf ( Test-LooseFile -File $File ) {
             $oBagLocation = ( Get-BaggedCopyOfLooseFile -File $File )
             If ( $oBagLocation -and $CheckZipped ) {
-                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag )
+                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag -AllPossible )
             }
             $oFile.CSPackageContentFiles = @( $File )
         }
@@ -1275,6 +1275,23 @@ Param (
     }
 
     End { If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status "-" -Completed } }
+
+}
+
+Function Get-CSPackagePathRelativeToRepository {
+Param( [Parameter(ValueFromPipeline=$true)] $Package )
+
+    Begin { }
+
+    Process {
+        $oPackage = ( Get-FileObject -File $Package )
+        $oRepository = ( Get-FileRepositoryProps -File $oPackage )
+        If ( $oRepository ) {
+            $oPackage.FullName | Resolve-PathRelativeTo -Base:$oRepository.Location | Write-Output
+        }
+    }
+
+    End { }
 
 }
 
@@ -1575,4 +1592,5 @@ Export-ModuleMember -Function ConvertTo-HTMLLink
 Export-ModuleMember -Function Add-FileURI
 Export-ModuleMember -Function Add-IndexHTML
 Export-ModuleMember -Function Get-CSPackageItemBagging
-Export-ModuleMember -FUnction Test-CSBaggedPackageItem
+Export-ModuleMember -Function Test-CSBaggedPackageItem
+Export-ModuleMember -Function Get-CSPackagePathRelativeToRepository

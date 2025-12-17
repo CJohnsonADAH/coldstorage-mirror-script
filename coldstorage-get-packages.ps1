@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation Packages reporting script
-@version 2021.0617
+@version 2025.1201
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
