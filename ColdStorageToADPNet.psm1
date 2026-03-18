@@ -197,7 +197,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Path, [string] $Title, [string] $T
         If ( $ServiceURL ) {
             $AU = ( $Path | Get-ADPNetAUTable -ForService )
 
-            $oReq = Invoke-WebRequest -Uri $ServiceURL -Method "POST" -Body ( [PSCustomObject] @{
+            $oReq = Invoke-WebRequest -Uri:$ServiceURL -Method:"POST" -UseBasicParsing -Body:( [PSCustomObject] @{
                 institution_code = $AU['Institution Code']
                 institution_name = $AU['Institution Name']
                 au_title = $AU['AU Title']

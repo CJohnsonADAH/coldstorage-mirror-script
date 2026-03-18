@@ -38,7 +38,10 @@ Begin {
     Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageInteraction.psm1" )
     Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
     Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
+    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageData.psm1" )
+    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageStats.psm1" )
     Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
+    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageToCloudStorage.psm1" )
 
     Function Select-CSFileInfo {
     Param( [Parameter(ValueFromPipeline=$true)] $File, [switch] $FullName, [switch] $ReturnObject )

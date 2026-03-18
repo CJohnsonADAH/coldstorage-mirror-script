@@ -2,6 +2,13 @@
 ## DEPENDENCIES #############################################################################################
 #############################################################################################################
 
+Function Get-CSScriptDirectory {
+Param ( $File=$null )
+    $ScriptPath = ( Split-Path -Parent $PSCommandPath )
+    If ( $File -ne $null ) { $ScriptPath = ( Join-Path "${ScriptPath}" -ChildPath "${File}" ) }
+    ( Get-Item -Force -LiteralPath "${ScriptPath}" )
+}
+
 Function My-Script-Directory {
 Param ( $Command, $File=$null )
 
@@ -214,13 +221,14 @@ End { }
 }
 
 Function Get-ItemPackageZippedBag {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] $ReturnContainer=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] $Force=$false, [switch] $ReturnContainer=$false )
 
     Begin {
         $Result = @( )
     }
 
     Process {
+
         $oJustZippedNotes = ( $File | Get-Member -MemberType NoteProperty -Name "Zip" )
         If ( $oJustZippedNotes ) {
             $oFile = Get-FileObject( $oJustZippedNotes |% { $PropName = $_.Name ; $File.${PropName} } )
@@ -250,12 +258,32 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] 
             # NOOP - We should not do anything with items in the zipped bags container that failed other tests.
         }
 
-        # 5. Try to get packaging information on this item, recursing into child items if requested.
+        # 5. If we have previously checked this package for zips, but earlier steps turned up nothing, there may be no ZIP
+        ElseIf ( ( $oFile | Get-Member -Name:CSPackageCheckedZipped ) -and ( $oFile.CSPackageCheckedZipped ) ) {
+            # NOOP - We previously checked this package for zips, but earlier steps turned up no zips
+        }
+
+        # 6. Try to get packaging information on this item, recursing into child items if requested.
         Else {
 
             $oPackage = ( $oFile | Get-ItemPackage -Ascend -CheckZipped )
             If ( $oPackage.Count -gt 0 ) {
-                $Result += ( $oPackage | Get-ItemPackageZippedBag )
+                $oPackageZippedBag = ( $oPackage | Get-ItemPackageZippedBag )
+
+                If ( $oPackageZippedBag.Count -eq 0 ) {
+                    If ( $Force ) {
+                        "[Get-ItemPackageZippedBag -Force] We should CREATE a zipped bag..." | Write-Warning
+                        $CSZipPackages = $( Get-CSScriptDirectory -File "coldstorage-zip-packages.ps1" )
+                        $Zip = ( $oPackage | & "${CSZipPackages}" )
+                        If ( $Zip ) {
+                            $Zip | Get-ItemPackageZippedBag | Write-Output
+                        }
+                        #$oPackage 
+                    }
+                }
+
+                $Result += $oPackageZippedBag
+
             }
             ElseIf ( $Recurse ) {
                 $Result += ( $oFile | Get-ChildItemPackages -Recurse:$Recurse -CheckZipped | Get-ItemPackageZippedBag )
@@ -850,6 +878,7 @@ Param(
 Function Add-ItemPackageCloudCopyData {
 Param(
     [Parameter(ValueFromPipeline=$true)] $Package,
+    $CloudCopy=-1,
     [switch] $Force=$false,
     [switch] $PassThru=$false
 )
@@ -860,8 +889,15 @@ Param(
 
         $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedCloud )
 
-        If ( $Force -or $NotYetChecked ) {
+        If ( $CloudCopy -ne -1 ) {
+            $oCloudCopy = [PSCustomObject] $CloudCopy
 
+            $Package.CSPackageCheckedCloud = $true
+            $Package | Add-Member -MemberType NoteProperty -Name "CSPackageCloudCopy" -Value $oCloudCopy -Force
+            $Package | Add-Member -MemberType NoteProperty -Name "CloudCopy" -Value $oCloudCopy -Force
+            
+        }
+        ElseIf ( $Force -or $NotYetChecked ) {
             $aZipped = $Package.CSPackageZip
             If ( $aZipped.Name ) {
 
@@ -921,6 +957,35 @@ Param(
     End { }
 
 }
+
+Function Add-ItemPackageZipData {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Package,
+    $Zip,
+    [switch] $PassThru=$false
+)
+
+    Begin { }
+
+    Process {
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageCheckedZipped" -Value:$true -Force
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageZip" -Value:$Zip -Force
+        If ( $Zip -ne $null ) {
+            $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageZipCanonical" -Value:( @( $Zip ) |% { Get-Item -LiteralPath:( $_ | ConvertTo-CSCanonicalPath ) } ) -Force
+        }
+        Else {
+            $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageZipCanonical" -Value:( $null ) -Force
+        }
+
+        If ( $PassThru ) {
+            $Package | Write-Output
+        }
+    }
+
+    End { }
+
+}
+
 
 Function Test-CSNonpackagedItem {
 Param (
@@ -1184,12 +1249,20 @@ Param (
         If ( $oFile.CSPackageContentFiles.Count -gt 0 ) {
             $Package = $oFile
 
+            $oRepository = ( $oFile | Get-FileRepositoryLocation )
+            
+            $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageRepository" -Value:$oRepository -Force
+            
+            $sCanonicalLocation = ( $Package | ConvertTo-CSCanonicalPath )
+            $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageCanonicalLocation" -Value:$sCanonicalLocation -Force
+
             $bBagged = $( If ( $oBagLocation ) { $true } Else { $false } )
             $Package | Add-ItemPackageBagData -Contents:$oFile.CSPackageContentFiles -Bagged:$bBagged -BagLocation:$oBagLocation 
 
             $oCloudCopy = $null
+            
             If ( $aZipped -ne $false ) {
-                $Package | Add-Member -MemberType NoteProperty -Name "CSPackageZip" -Value $aZipped -Force
+                $Package | Add-ItemPackageZipData -Zip:$aZipped
             }
 
             If ( $CheckMirrored ) {
@@ -1295,6 +1368,251 @@ Param( [Parameter(ValueFromPipeline=$true)] $Package )
 
 }
 
+
+Function ConvertTo-CSCanonicalPath {
+Param( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+
+        $oFile = ( $File | Get-FileObject )
+        $sCanonicalLocation = $oFile.FullName
+
+        $oRepositoryProps = ( $oFile | Get-FileRepositoryProps )
+        If ( $oRepositoryProps ) {
+            If ( $oRepositoryProps.Canonical ) {
+                $sRelPath = ( $oFile | Get-CSPackagePathRelativeToRepository )
+                $sCanonicalContainer = ( $oRepositoryProps.Canonical | ConvertTo-ColdStorageSettingsFilePath )
+                $sCanonicalLocation = ( Join-Path $sCanonicalContainer -ChildPath:$sRelPath )
+                $sCanonicalLocation = ( Get-Item -LiteralPath:$sCanonicalLocation -Force ).FullName
+            }
+        }
+        
+        $sCanonicalLocation | Write-Output
+
+    }
+
+    End { }
+
+}
+
+Function Get-ItemPackageMetadataDateTimeFormat {
+    "yyyy-MM-ddTHH:mm:ss.ffffZ" | Write-Output
+}
+Function ConvertTo-ItemPackageMetadataDateTime {
+Param ( [Parameter(ValueFromPipeline=$true)] $DateTime )
+
+    Begin { }
+
+    Process {
+        $DateTime.ToUniversalTime().ToString( ( Get-ItemPackageMetadataDateTimeFormat ) )
+    }
+
+    End { }
+}
+
+Function Get-ItemPackageMetadataFilePath {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package )
+    Begin { }
+
+    Process {
+
+        $pack = $Package
+        If ( ( -Not ( $Package -is [object] ) ) -or ( -Not ( $Package.CSPackageBagged ) ) ) {
+            $pack = ( $Package | Get-ItemPackage -At )
+        }
+
+        If ( $pack.CSPackageBagged ) {
+        
+            $BagLocation = ( $pack.CSPackageBagLocation )
+            ( Join-Path $BagLocation.FullName -ChildPath "package.json" ) | Write-Output
+
+        }
+
+    }
+
+    End { }
+}
+
+Function Get-ItemPackageMetadataFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package )
+
+    Begin { }
+
+    Process {
+        $jsonFile = ( $Package | Get-ItemPackageMetadataFilePath )
+
+        If ( $jsonFile -ne $null ) {
+
+            If ( Test-Path -LiteralPath $jsonFile -PathType Leaf ) {
+                Get-Item -LiteralPath $jsonFile -Force
+            }
+
+        }
+        
+    }
+
+    End { }
+}
+
+Function New-ItemPackageMetadataFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package )
+
+    Begin { }
+
+    Process {
+        $pack = $Package
+        If ( ( -Not ( $Package -is [object] ) ) -or ( -Not ( $Package.CSPackageBagged ) ) ) {
+            $pack = ( $Package | Get-ItemPackage -At )
+        }
+
+        $jsonFile = ( $pack | Get-ItemPackageMetadataFilePath )
+        If ( $jsonFile -ne $null ) {
+
+            If ( -Not ( Test-Path -LiteralPath $jsonFile -PathType Leaf ) ) {
+                
+                $jsonItem = ( New-Item -Path $jsonFile )
+                If ( $jsonItem ) {
+                    $sRepository = ( $pack | Get-ItemFileSystemParent ).FullName
+                    If ( $pack | Get-Member -Name:CSPackageRepository ) {
+                        If ( $pack.CSPackageRepository.FullName ) {
+                            $sRepository = $pack.CSPackageRepository.FullName
+                        }
+                    }
+                    Push-Location $sRepository
+                    $sLocation = ( Resolve-Path $pack.FullName -Relative )
+                    Pop-Location
+
+                    $metadata = [ordered] @{
+                        "Time-Documented"=( Get-Date ).ToUniversalTime().ToString( ( Get-ItemPackageMetadataDateTimeFormat ) ) ;
+                        "User-Documented"=$env:USERNAME ;
+                        "Host-Documented"=$env:COMPUTERNAME ;
+                        "Repository"=$sRepository
+                        "Location"=$sLocation
+                    }
+                    If ( $pack.FullName -ne $pack.CSPackageBagLocation.FullName ) {
+                        $metadata["Location-Bag"] = ( $pack.CSPackageBagLocation.FullName )
+                    }
+                    [PSCustomObject] $metadata | ConvertTo-Json | Out-File $jsonItem.FullName -Encoding utf8
+
+                    $jsonItem | Write-Output
+
+                }
+
+            }
+
+        }
+    }
+
+    End { }
+
+}
+
+Function Get-ItemPackageMetadata {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name=$null )
+
+    Begin { }
+
+    Process {
+        $jsonItem = ( $Package | Get-ItemPackageMetadataFile )
+        If ( $jsonItem ) {
+        
+            $json = ( Get-Content -LiteralPath $jsonItem.FullName )
+            $meta = ( $json | ConvertFrom-Json )
+
+            If ( $meta ) {
+                If ( $Name -ne $null ) {
+                    If ( $meta | Get-Member -Name $Name ) {
+                        $meta.$Name | Write-Output
+                    }
+                }
+                Else {
+                    $meta | Write-Output
+                }
+
+            }
+
+
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Add-ItemPackageMetadata {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $Append=$false, [switch] $Force=$false )
+
+    Begin { }
+
+    Process {
+        $file = ( $Package | Get-ItemPackageMetadataFile )
+        $meta = ( $Package | Get-ItemPackageMetadata )
+        
+        $dirty = $false
+        If ( $meta | Get-Member -Name:$Name ) {
+            
+            If ( $Force ) {
+                If ( $Append ) {
+                    $meta.$Name = @( $meta.$Name ) + @( $Value )
+                }
+                Else {
+                    $meta.$Name = $Value
+                }
+                $dirty = $true
+            }
+
+        }
+        Else {
+            $meta | Add-Member -MemberType:NoteProperty -Name:$Name -Value:$Value
+            $dirty = $true
+        }
+
+        If ( $dirty ) {
+            $meta | Add-Member -MemberType:NoteProperty -Name:"Time-MetaUpdated" -Value:( Get-Date ).ToUniversalTime().ToString( ( Get-ItemPackageMetadataDateTimeFormat ) ) -Force
+            $meta | ConvertTo-Json | Out-File -Encoding:utf8 -LiteralPath:$file.FullName
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Remove-ItemPackageMetadata {
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name=$null, [switch] $Force=$false )
+
+    Begin { }
+
+    Process {
+
+        $file = ( $Package | Get-ItemPackageMetadataFile )
+
+        If ( $Name -ne $null ) {
+            $meta = ( $Package | Get-ItemPackageMetadata )
+            $dirty_meta = $null
+            If ( $meta | Get-Member -Name:$Name ) {
+                $dirty_meta = ( $meta | Select-Object -Property:* -ExcludeProperty:$Name )
+            }
+
+            If ( $dirty_meta -ne $null ) {
+                $dirty_meta | Add-Member -MemberType:NoteProperty -Name:"Time-MetaUpdated" -Value:( Get-Date ).ToUniversalTime().ToString( ( Get-ItemPackageMetadataDateTimeFormat ) ) -Force
+                $dirty_meta | ConvertTo-Json | Out-File -Encoding:utf8 -LiteralPath:$file.FullName
+            }
+
+        }
+        Else {
+            # FIXME - NOOP
+        }
+
+
+    }
+
+    End { }
+
+}
 
 #############################################################################################################
 ## ER INSTANCE DIRECTORIES: Typically found in ER Unprocessed directory #####################################
@@ -1586,6 +1904,13 @@ Export-ModuleMember -Function Get-ERInstanceData
 Export-ModuleMember -Function Test-CSNonpackagedItem
 Export-ModuleMember -Function Get-ItemPackage
 Export-ModuleMember -Function Get-ChildItemPackages
+Export-ModuleMember -Function ConvertTo-ItemPackageMetadataDateTime
+Export-ModuleMember -Function Get-ItemPackageMetadataFilePath
+Export-ModuleMember -Function Get-ItemPackageMetadataFile
+Export-ModuleMember -Function New-ItemPackageMetadataFile
+Export-ModuleMember -Function Get-ItemPackageMetadata
+Export-ModuleMember -Function Add-ItemPackageMetadata
+Export-ModuleMember -Function Remove-ItemPackageMetadata
 Export-ModuleMember -Function ConvertTo-HTMLDocument
 Export-ModuleMember -Function ConvertTo-HTMLList
 Export-ModuleMember -Function ConvertTo-HTMLLink
@@ -1593,4 +1918,7 @@ Export-ModuleMember -Function Add-FileURI
 Export-ModuleMember -Function Add-IndexHTML
 Export-ModuleMember -Function Get-CSPackageItemBagging
 Export-ModuleMember -Function Test-CSBaggedPackageItem
+Export-ModuleMember -Function ConvertTo-CSCanonicalPath
 Export-ModuleMember -Function Get-CSPackagePathRelativeToRepository
+Export-ModuleMember -Function Add-ItemPackageCloudCopyData
+Export-ModuleMember -Function Add-ItemPackageZipData

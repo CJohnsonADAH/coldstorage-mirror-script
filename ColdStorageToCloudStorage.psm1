@@ -611,15 +611,39 @@ End {
         
         $sContext = ( "[{0}:{1}] " -f $global:gCSScriptName,$Bucket )
 
-        If ( $global:gBucketObjects.ContainsKey($Bucket) ) {
-            $oCloudContents = $global:gBucketObjects[$Bucket]
-            $isDataGood = $true
+        # Set up in-memory cache if it hasn't been set up.
+        If ( $global:gBucketObjects -eq $null ) {
+            $global:gBucketObjects = @{ }
         }
-        Else {
+
+        $t0 = ( Get-Date )
+        "[Get-CloudStorageListing] Retrieving bucket {0} ... " -f $Bucket | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
+
+        $oCloudContents = $null
+
+        # 1. First, try to fill it from $global:gBucketObjects
+
+        If ( $global:gBucketObjects.ContainsKey( $Bucket ) ) {
+            "in-memory variable ... " | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Green -NoNewline # DBG
+            
+            $cachedObject = $global:gBucketObjects[$Bucket]
+            If ( $cachedObject -is [hashtable] ) {
+                $cachedAge = ( ( Get-Date ) - $cachedObject[ 'timestamp' ] )
+                If ( $cachedAge.TotalSeconds -lt 600 ) {
+                    $oCloudContents = $cachedObject[ 'content' ]
+                    $isDataGood = $true
+                }
+            }
+        }
+
+        If ( $oCloudContents -eq $null ) {
+            "not yet in memory; " | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
+
             $sPropsDir = ( $Files | Select-Object -First 1 | Get-PackageCloudStorageBucketCacheDirectory )
             
             If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
-                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Cache:$sPropsDir -CacheExpiration:600 )
+                "going to file cache {0}" -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
+                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Cache:$sPropsDir -CacheExpiration:3600 )
                 If ( $oReply ) {
                     $awsExitCode = $oReply.AWSCLIExitCode
                 }
@@ -628,6 +652,7 @@ End {
                 #$jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
             }
             Else {
+                "going to API request" -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
                 $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Prefix:$Files.Name -Cache:$sPropsDir -CacheExpiration:600 )
                 If ( $oReply ) {
                     $awsExitCode = $oReply.AWSCLIExitCode
@@ -660,7 +685,9 @@ End {
                 $oCloudContents = @( )
                 $isDataGood = ( $awsExitCode -eq 0 )
             }
+
         }
+        ( " ... Data {0}; DONE in {1}." -f ( $isDataGood | Get-ConditionalText -WhenTrue:"GOOD" -WhenFalse:"BAD" ),( ( Get-Date ) - $t0 ) ) | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor Green #DBG
 
         If ( -Not $Unmatched ) {
             $Side = @("local", "cloud")
@@ -671,7 +698,7 @@ End {
         If ( $isDataGood ) {
 
             If ( $All -or ( $Files.Count -ne 1 ) ) {
-                $global:gBucketObjects[$Bucket] = $oCloudContents
+                $global:gBucketObjects[$Bucket] = @{ "timestamp"=( Get-Date ); "content"=$oCloudContents }
             }
 
             $oCloudContents = $oCloudContents | Select-CSDatedObject -From:$From -To:$To -MemberName:LastModified
@@ -746,12 +773,12 @@ End {
 }
 
 Function Get-ItemPackageForCloudStorageBucket {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, $ShowWarnings=$null )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [switch] $Force=$false, $ShowWarnings=$null )
 
     Begin { }
 
     Process {
-        $aItems = ( $File | Get-ItemPackageZippedBag -Recurse:$Recurse )
+        $aItems = ( $File | Get-ItemPackageZippedBag -Recurse:$Recurse -Force:$Force )
         If ( $aItems ) {
             $aItems | Sort-Object -Unique -Property Name
         }
@@ -764,21 +791,44 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, $S
 
 }
 
+Function Remove-PackageCloudStorageBucketListingCache {
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
+
+    Begin { }
+
+    Process {
+        "[Remove-PackageCloudStorageBucketListingCache] Removing cached listing data ..." | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -NoNewline -ForegroundColor:Yellow #DBG
+
+        $sCacheDirectory = ( $File | Get-PackageCloudStorageBucketCacheDirectory )
+        If ( ( $sCacheDirectory -ne $null ) -and ( Test-Path -LiteralPath $sCacheDirectory -PathType Container ) ) {
+            $I = 0
+            Get-ChildItem $sCacheDirectory -File |% {
+                Remove-Item $_.FullName
+                $I = $I + 1
+            }
+        }
+
+        "{0:N0} cached {1} removed" -f $I, ( Get-PluralizedText -N:$I -Singular:"file" -Plural:"files" ) | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow #DBG
+
+    }
+
+    End { }
+
+}
+
 Function Add-PackageToCloudStorageBucket {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [switch] $Recurse=$false )
 
     Begin { $AWS = $( Get-ExeForAWSCLI ); If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
-        $sCacheDirectory = ( $File | Get-PackageCloudStorageBucketCacheDirectory )
-        If ( ( $sCacheDirectory -ne $null ) -and ( Test-Path -LiteralPath $sCacheDirectory -PathType Container ) ) {
-            Get-ChildItem $sCacheDirectory -File |% {
-                Remove-Item $_.FullName
-            }
-        }
+        "[Add-PackageToCloudStorageBucket] HERE WE ARE..."|Write-Warning
+        $File | Remove-PackageCloudStorageBucketListingCache
 
         $oFile = $null
-        $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -ShowWarnings:("{0} to cloud" -f $global:gCSScriptName) |% {
+        $ItemPackages = ( $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -Force -ShowWarnings:("{0} to cloud" -f $global:gCSScriptName) )
+        $ItemPackages |% {
+
             $oFile = $_
 			$Package = ( $File | Get-ItemPackage -At -FromZip )
 			$vLogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-to-cloud" -Timestamp:( Get-Date ) -Force )

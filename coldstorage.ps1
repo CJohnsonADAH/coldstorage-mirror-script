@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2025.1129
+@version 2026.0309
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -32,7 +32,7 @@ param (
     [switch] $SizesOnly = $false,
 	[switch] $Batch = $false,
     [switch] $Interactive = $false,
-    [switch] $Repository = $true,
+    [switch] $Repository = $false,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $At = $false,
@@ -545,7 +545,6 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [Switch] $Quiet, [String] $Ex
 }
 
 # Out-BagItFormattedDirectoryWhenCleared: invoke a malware scanner (ClamAV) to clear preservation packages, then a bagger (BagIt.py) to bag them
-# Formerly known as: Do-Clear-And-Bag
 # @package coldstorage bag
 Function Out-BagItFormattedDirectoryWhenCleared {
 
@@ -922,39 +921,6 @@ Function Invoke-BagChildDirectories ($Pair, $From, $To, $Skip=@(), [switch] $For
     Pop-Location
 }
 
-# Invoke-ColdStorageRepositoryBag
-# Formerly known as: Do-Bag
-function Invoke-ColdStorageRepositoryBag ($Pairs=$null, $Skip=@(), [switch] $Force=$false, [switch] $Bundle=$false, [switch] $Manifest=$false, [switch] $PassThru=$false, [switch] $Batch=$false) {
-
-    If ( $Pairs -eq "_" ) {
-        Get-ChildItem -Path . -Directory |% { ( "PS> {0} bag -Items '{1}' {2}" -f $global:gCSScriptName,$_.FullName,$( If ($Bundle) { "-Bundle" } Else { "" } ) ) | Write-Verbose ; & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$Bundle -PassThru:$PassThru -Batch:$Batch }
-        Get-ChildItem -Path . -File |% { ( "PS> {0} bag -Items '{1}'" -f $global:gCSScriptName,$_.FullName ) | Write-Verbose ; & "${global:gCSScriptPath}" bag -Items $_.FullName -Skip:$Skip -Force:$Force -Bundle:$false -PassThru:$PassThru -Batch:$Batch }
-    }
-    Else {
-
-    $mirrors = ( Get-ColdStorageRepositories )
-
-    if ( $Pairs.Count -lt 1 ) {
-        $Pairs = $mirrors.Keys
-    }
-
-    $i = 0
-    $N = $Pairs.Count
-    $Pairs | ForEach {
-        $Pair = $_
-        $locations = $mirrors[$Pair]
-
-        $slug = $locations[0]
-        $src = $locations[2]
-        $dest = $locations[1]
-
-        Invoke-BagChildDirectories -Pair "${Pair}" -From "${src}" -To "${dest}" -Skip:$Skip -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
-        $i = $i + 1
-    }
-
-    }
-}
-
 function Invoke-ColdStorageDirectoryCheck {
 Param ($Pair, $From, $To, [switch] $Batch=$false)
 
@@ -1039,6 +1005,32 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
 
     End { }
 
+}
+
+Function Invoke-ColdStorageItemBag {
+Param(
+    $Items,
+    [switch] $PassThru,
+    [switch] $At,
+    [switch] $Recurse,
+    [switch] $NoScan,
+    [switch] $Bundle,
+    [switch] $Manifest,
+    [switch] $Mirrored,
+    [switch] $Batch,
+    [switch] $Interactive,
+    [switch] $Force=$false
+)
+
+    $SkipScan = @( )
+    If ( $NoScan ) {
+        $SkipScan = @( "clamav" )
+    }
+
+    $Items | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -At:$At -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
+    If ( $Mirrored ) {
+        $Items | Get-FileObject |? { $_ -ne $null } |% { $_ | Invoke-ColdStorageItemMirror -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false }
+    }
 }
 
 Function Invoke-ColdStorageItemCheck {
@@ -1260,7 +1252,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Word, [String] $Output="" )
 }
 
 Function Invoke-ColdStorageTo {
-Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly, [switch] $Halt=$false, [switch] $Batch=$false )
+Param ( [string] $Destination, $What, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly, [switch] $Halt=$false, [switch] $Batch=$false )
 
     $Destinations = ("cloud", "drop", "adpnet")
 
@@ -1268,11 +1260,11 @@ Param ( [string] $Destination, $What, [switch] $Items, [switch] $Repository, [sw
         
         $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
         $Locations = ( "." | & "${CSGetPackages}" -Items -Recurse -Bagged -Zipped -NotInCloud )
-        Invoke-ColdStorageTo -Destination:$Destination -What:$Locations -Items -Diff:$Diff -WhatIf:$WhatIf -Report:$Report -ReportOnly:$ReportOnly -Batch:$Batch
+        Invoke-ColdStorageTo -Destination:$Destination -What:$Locations -Diff:$Diff -WhatIf:$WhatIf -Report:$Report -ReportOnly:$ReportOnly -Batch:$Batch
 
     }
-    ElseIf ( -Not $Items ) {
-        Write-Warning ( "[${global:gScriptContextName}:${Destination}] Not yet implemented for repositories. Try: & coldstorage to ${Destination} -Items [File1] [File2] [...]" )
+    ElseIf ( $Repository ) {
+        Write-Warning ( "[${global:gScriptContextName}:${Destination}] Not yet implemented for repositories. Try: & coldstorage to ${Destination} [File1] [File2] [...]" )
     }
     ElseIf ( $Destination -eq "cloud" ) {
         If ( $Halt ) {
@@ -1382,7 +1374,9 @@ Function Sync-ADPNetPluginsDirectory {
 Function Invoke-ColdStorageRepository {
 Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, $Location=$null, [String] $Output="" )
 
-    Begin { }
+    Begin {
+        $bGetProperties = $false
+    }
 
     Process {
         If ( $Items -Or ( -Not $Repository ) ) {
@@ -1392,7 +1386,10 @@ Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, $Location=$
             $aItems = @( )
             $Words | ForEach {
                 $Term = $_
-                If ( Test-Path -LiteralPath $Term ) {
+                If ( $Term -eq 'properties' ) {
+                    $bGetProperties = $true
+                }
+                ElseIf ( Test-Path -LiteralPath $Term ) {
                     $aItems += , $Term
                 }
                 Else {
@@ -1411,8 +1408,28 @@ Param ( [switch] $Items=$false, [switch] $Repository=$false, $Words, $Location=$
 
         $aItems |% {
             $File = Get-FileObject -File $_ 
-            [PSCustomObject] @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
+            $Table = @{ FILE=( $File.FullName ); REPOSITORY=($File | Get-FileRepositoryName) }
+            If ( $bGetProperties ) {
+                $Table[ 'PROPERTIES' ] = ( $File | Get-FileRepositoryProps )
+            }
+            [PSCustomObject] $Table
         } | Out-CSData -Output:$Output
+    }
+
+    End { }
+
+}
+
+Function Invoke-ColdStorageConfigure {
+Param ( $Words )
+
+    Begin { }
+
+    Process {
+        $aws = ( Get-ExeForAWSCLI )
+        & "${aws}" configure 
+        & "${aws}" configure set default.s3.multipart_chunksize 64MB
+        & "${aws}" configure set default.s3.max_concurrent_requests 100
     }
 
     End { }
@@ -2021,12 +2038,19 @@ Else {
             $DiffLevel = 1
         }
 
-        If ( $Items ) {
-            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
-        }
-        Else {
+        If ( $Repository ) {
             Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
         }
+        Else {
+            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
+        }
+    }
+    ElseIf ( $Verb -eq "321" ) {
+        $CSScript = $( Get-CSScriptDirectory -File "coldstorage.ps1" )
+        $CSGetPackages = $( Get-CSScriptDirectory -File "get-itempackage-cs.ps1" )
+        $CSWritePackagesReport = $( Get-CSScriptDirectory -File "write-packages-report-cs.ps1" )
+        $CSSyncPackageToPreservation = $( Get-CSScriptDirectory -File "sync-cs-packagetopreservation.ps1" )
+        $allObjects | & $CSGetPackages -Bagged -CheckMirrored -CheckZipped -CheckCloud |% { $_ | & $CSWritePackagesReport ; $_ | & $CSSyncPackageToPreservation }
     }
     ElseIf ( $Verb -eq "diff" ) {
         
@@ -2254,11 +2278,11 @@ Else {
 
     }
     ElseIf ( $Verb -eq "check" ) {
-        If ( $Items ) {
-            $allObjects | Invoke-ColdStorageItemCheck
+        If ( $Repository ) {
+            Invoke-ColdStorageRepositoryCheck -Pairs:$Words
         }
         Else {
-            Invoke-ColdStorageRepositoryCheck -Pairs:$Words
+            $allObjects | Invoke-ColdStorageItemCheck
         }
     }
     ElseIf ( ("validate") -ieq $Verb ) {
@@ -2280,35 +2304,17 @@ Else {
             -Output:$Output `
             -PassThru:$PassThru
     }
+    ElseIf ( $Repository -and ( $Verb -iin @( "bag", "rebag", "unbag", "zip" ) ) ) {
+        ( "[{0}] Not currently implemented for repositories. Use: {0} [File1] [File2] ..." -f $sCommandWithVerb ) | Write-Warning
+    }
     ElseIf ( $Verb -eq "bag" ) {
-        $SkipScan = @( )
-        If ( $NoScan ) {
-            $SkipScan = @( "clamav" )
-        }
-
-        If ( $Items ) {
-            $allObjects | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -At:$At -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
-        }
-        Else {
-            Invoke-ColdStorageRepositoryBag -Pairs $Words -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
-        }
-
+        Invoke-ColdStorageItemBag -Items:$allObjects -PassThru:$PassThru -At:$At -Recurse:$Recurse -NoScan:$NoScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -Mirrored:$Mirrored -Batch:$Batch -Interactive:$Interactive
     }
     ElseIf ( $Verb -eq "rebag" ) {
-        If ( $Items ) {
-            $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Rebag -PassThru:$PassThru
-        }
-        Else {
-            ( "[{0}] Not currently implemented for repositories. Use: {0} -Items [File1] [File2] ..." -f $sVerbWithCommandName ) | Write-Warning
-        }
+        $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Rebag -PassThru:$PassThru
     }
     ElseIf ( $Verb -eq "unbag" ) {
-        If ( $Items ) {
-            $allObjects | Get-FileObject | Undo-CSBagPackage -PassThru:$PassThru
-        }
-        Else {
-            ( "[{0}] Not currently implemented for repositories. Use: {0} -Items [File1] [File2] ..." -f $sVerbWithCommandName ) | Write-Warning
-        }
+        $allObjects | Get-FileObject | Undo-CSBagPackage -PassThru:$PassThru
     }
     ElseIf ( $Verb -eq "zip" ) {
 
@@ -2386,11 +2392,11 @@ Else {
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Remainder = $Words
         $allObjects = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
-        Invoke-ColdStorageTo -Destination:$Object -What:$allObjects -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
+        Invoke-ColdStorageTo -Destination:$Object -What:$allObjects -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("cloud", "drop") -ieq $Verb ) {
         $allObjects = ( $allObjects | ColdStorage-Command-Line -Default "${PWD}" )
-        Invoke-ColdStorageTo -Destination:$Verb -What:$allObjects -Items:$Items -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
+        Invoke-ColdStorageTo -Destination:$Verb -What:$allObjects -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
     }
     ElseIf ( ("in","vs") -ieq $Verb ) {
         $Object, $Remainder = $Words
@@ -2473,7 +2479,8 @@ Else {
     }
     ElseIf ( $Verb -eq "repository" ) {
         If ( $allObjects.Count -gt 0 ) {
-            Invoke-ColdStorageRepository -Items:$Items -Repository:$Repository -Words:$allObjects -Location:$Location -Output:$Output
+            $bRepository = ( -Not $Items )
+            Invoke-ColdStorageRepository -Items:$Items -Repository:$bRepository -Words:$allObjects -Location:$Location -Output:$Output
         }
         Else {
             Get-ColdStorageRepositories
@@ -2531,6 +2538,9 @@ Else {
     }
     ElseIf ( $Verb -eq "settle" ) {
         Invoke-ColdStorageSettle -Words:$allObjects -Bucket:$Bucket -Force:$Force -Batch:$Batch -Zipped:$Zipped
+    }
+    ElseIf ( $Verb -eq "configure" ) {
+        Invoke-ColdStorageConfigure -Words:$allObjects
     }
     ElseIf ( $Verb -eq "bleep" ) {
         Write-BleepBloop

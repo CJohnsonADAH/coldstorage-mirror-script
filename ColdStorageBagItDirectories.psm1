@@ -24,29 +24,70 @@ $global:CSBIDScriptDirectory = ( My-Script-Directory -Command $MyInvocation.MyCo
 #############################################################################################################
 
 Function Test-BagItFormattedDirectory {
-Param ( $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
-    $result = $false # innocent until proven guilty
+    Begin { }
 
-    $oFile = Get-FileObject -File $File
-    If ( ( $oFile -ne $null ) -and ( $oFile | Get-Member -Name FullName ) ) {
-        $BagDir = $oFile.FullName
-        If ( Test-Path -LiteralPath $BagDir -PathType Container ) {
-            $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
-            if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
-                $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )
-                if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
-                    $result = $true
+    Process {
+        $result = $false # innocent until proven guilty
+
+        $oFile = Get-FileObject -File $File
+        If ( ( $oFile -ne $null ) -and ( $oFile | Get-Member -Name FullName ) ) {
+            $BagDir = $oFile.FullName
+            If ( Test-Path -LiteralPath $BagDir -PathType Container ) {
+                $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
+                if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
+                    $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )
+                    if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
+                        $result = $true
+                    }
                 }
             }
+            ( "[Test-BagItFormattedDirectory] Result={0} -- File: '{1}'" -f $result,$File ) | Write-Debug
         }
-        ( "[Test-BagItFormattedDirectory] Result={0} -- File: '{1}'" -f $result,$File ) | Write-Debug
-    }
-    Else {
-        ( "[Test-BagItFormattedDirectory] Result={0} -- File Not Found: '{1}'" -f $result,$File ) | Write-Debug
+        Else {
+            ( "[Test-BagItFormattedDirectory] Result={0} -- File Not Found: '{1}'" -f $result,$File ) | Write-Debug
+        }
+
+        $result | Write-Output
     }
 
-    $result | Write-Output
+    End { }
+
+}
+
+Function Test-BagItFormattedDirectoryContent {
+Param( [Parameter(ValueFromPipeline=$true)] $Item )
+
+    Begin { }
+
+    Process {
+        $result = $false
+
+        $Parent = $null
+        If ( Test-Path -LiteralPath:$Item.FullName -PathType:Container ) {
+            $Parent = $Item.Parent
+        }
+        ElseIf ( Test-Path -LiteralPath:$Item.FullName -PathType:Leaf ) {
+            $Parent = $Item.Directory
+        }
+
+        If ( $Parent ) {
+        
+            If ( $Parent | Test-BagItFormattedDirectory ) {
+                $result = $true
+            }
+            Else {
+                $result = ( $Parent | Test-BagItFormattedDirectoryContent )
+            }
+
+        }
+        $result | Write-Output
+
+    }
+
+    End { }
+
 }
 
 Function Get-CSBaggedPackageLogDirectory {
@@ -205,6 +246,7 @@ End { }
 }
 
 Export-ModuleMember -Function Test-BagItFormattedDirectory
+Export-ModuleMember -Function Test-BagItFormattedDirectoryContent
 Export-ModuleMember -Function Test-CSBaggedPackageValidates
 Export-ModuleMember -Function Select-BagItFormattedDirectories
 Export-ModuleMember -Function Select-BagItPayloadDirectory

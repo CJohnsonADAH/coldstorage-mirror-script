@@ -393,6 +393,17 @@ Param (
                 $sZipPath = ( $sRepository | Join-Path -ChildPath:$sZipName )
 
 				$oPackage = ( $oFile | Get-ItemPackage -At )
+
+                # Document in package metadata
+                $meta = ( $oPackage | Get-ItemPackageMetadataFile )
+                If ( -Not ( $meta ) ) {
+                    $meta = ( $oPackage | New-ItemPackageMetadataFile )
+                }
+                If ( $meta ) {
+                    $oPackage | Add-ItemPackageMetadata -Name:"Location-Zip" -Value:$sZipPath -Force -Append
+                    $oPackage | Add-ItemPackageMetadata -Name:"Time-Zip" -Value:( Get-Date | ConvertTo-ItemPackageMetadataDateTime ) -Force -Append
+                }
+
                 $CAResult = ( $oFile.FullName | Compress-ArchiveWith7z -WhatIf:$WhatIf -DestinationPath:$sZipPath | Write-CSOutputWithLogMaybe -Package:$oPackage -Command:("'{0}' | Compress-ArchiveWith7z"  -f $oFile.FullName ) -Log:$LogFile )
                 $CACompleted = ( Get-Date )
 

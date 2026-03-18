@@ -260,7 +260,7 @@ Param ( [String] $Package, $Exe=$null )
 
     $ExePath = ( Get-ColdStorageSettings($Package) | ConvertTo-ColdStorageSettingsFilePath )
     If ( $Exe ) {
-        $ExePath = "${ExePath}\${Exe}"
+        $ExePath = ( Join-Path "${ExePath}" -ChildPath "${Exe}" )
     }
 
     ( $ExePath )

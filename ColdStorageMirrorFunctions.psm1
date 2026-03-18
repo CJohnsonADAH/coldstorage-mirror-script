@@ -21,6 +21,7 @@ Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdS
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageZipArchives.psm1" )
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageInteraction.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageBagItDirectories.psm1" )
 
 Function Get-ScriptPath {
 Param ( $Command=$null, $File=$null )

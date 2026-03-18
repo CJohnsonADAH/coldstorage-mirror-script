@@ -13,6 +13,74 @@ $global:gColdStorageDataModuleCmd = $MyInvocation.MyCommand
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
+Function Test-JsonMimeType {
+Param( [Parameter(ValueFromPipeline=$true)] $MimeType )
+
+    Begin { }
+
+    Process {
+        ( $MimeType -match '^((application|text)/)?(x-)?(javascript|json)' ) | Write-Output
+    }
+
+    End { }
+
+}
+
+Function ConvertTo-HttpDataString {
+Param( [Parameter(ValueFromPipeline=$true)] $Data, $InputType="guess" )
+
+    Begin { }
+
+    Process {
+        $o = $null ; $h = $null
+        If ( ( $InputType | Test-JsonMimeType ) -and ( $Data -is [string] ) ) {
+            $o = ( $Data | ConvertFrom-Json )
+        }
+        ElseIf ( $Data -is [Hashtable] ) {
+            $h = $Data
+        }
+        ElseIf ( $Data -is [System.Collections.Specialized.OrderedDictionary] ) {
+            $h = $Data
+        }
+        ElseIf ( $Data -is [object] ) {
+            $o = $Data
+        }
+
+        If ( ( $h -eq $null ) -and ( $o -ne $null ) ) {
+            $h = [ordered] @{}
+            $o.PSObject.Properties |% {
+                $h[ $_.Name ] = $_.Value
+            }
+        }
+
+        $KeyValue = @( $h.Keys |% { "{0}={1}" -f [System.Web.HttpUtility]::UrlEncode( $_ ), [System.Web.HttpUtility]::UrlEncode( $h[ $_ ] ) } )
+        ( $KeyValue -join "&" ) | Write-Output
+
+    }
+
+    End { }
+
+}
+
+Function ConvertFrom-HttpDataString {
+Param( [Parameter(ValueFromPipeline=$true)] $Data, $OutputType ="hashtable" )
+
+    Begin { }
+
+    Process {
+        $h = [ordered] @{ }
+        ( $Data -split "&" ) |% {
+            $Key, $Value = ( ( $_ -split "=",2 ) |% { [System.Web.HttpUtility]::UrlDecode( $_ ) } )
+            $h[ $Key ] = $Value
+        }
+        $h | Write-Output
+
+    }
+
+    End { }
+
+}
+
 Function Get-StringMD5 {
 Param ( [Parameter(ValueFromPipeline=$true)] $Line, $Text=$null )
 <#
@@ -97,3 +165,5 @@ Export-ModuleMember -Function Get-StringMD5
 Export-ModuleMember -Function Get-StringChecksum
 Export-ModuleMember -Function Get-CurrentLine
 Export-ModuleMember -Function Get-CSDebugContext
+Export-ModuleMember -Function ConvertTo-HttpDataString
+Export-ModuleMember -Function ConvertFrom-HttpDataString

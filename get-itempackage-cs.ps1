@@ -17,6 +17,8 @@ Begin {
     $modPath = ( $modSource.Directory | Get-Item -Force )
 
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
+    Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageData.psm1" )
+    Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageStats.psm1" )
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageToCloudStorage.psm1" )

@@ -314,6 +314,55 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
     }
 }
 
+Function Get-ConditionalText {
+Param( [Parameter(ValueFromPipeline=$true)] $Test, $WhenTrue, $WhenFalse=$null )
+
+    Begin {
+        $FormatWhenTrue = ( $WhenTrue -like "*{0}*" )
+        $FormatWhenFalse = ( $WhenFalse -like "*{0}*" )
+    }
+
+    Process {
+
+        If ( $Test -is [ScriptBlock] ) {
+            $bResult = ( & $Test )
+        }
+        Else {
+            $bResult = ( -Not ( -Not ( $Test ) ) )
+        }
+
+        If ( $FormatWhenTrue ) {
+            $vWhenTrue = ( $WhenTrue -f $WhenFalse )
+        }
+        Else {
+            $vWhenTrue = $WhenTrue
+        }
+        If ( $FormatWhenFalse ) {
+            $vWhenFalse = ( $WhenFalse -f $WhenTrue )
+        }
+        Else {
+            $vWhenFalse = $WhenFalse
+        }
+
+        If ( $bResult ) {
+
+            If ( $vWhenTrue -ne $null ) {
+                $vWhenTrue
+            }
+        }
+        Else {
+
+            If ( $vWhenFalse -ne $null ) {
+                $vWhenFalse
+            }
+        }
+
+    }
+
+    End { }
+
+}
+
 Function Get-PluralizedText {
 Param ( [Parameter(Position=0)] $N, [Parameter(ValueFromPipeline=$true)] $Singular, $Plural="{0}s" )
 
@@ -458,6 +507,99 @@ Param (
     End { }
 }
 
+Function Set-CSIDiagnosticMessageStream {
+Param( [Parameter(ValueFromPipeline=$true)] $For, $Value=$true )
+
+    Begin {
+        If ( $global:gCSIDiagnostics -eq $null ) {
+            $global:gCSIDiagnostics = @{ }
+        }    
+    }
+
+    Process {
+
+        $For |% {
+            If ( ( $Value -eq $null ) -or ( $Value -eq $false ) ) {
+                If ( $global:gCSIDiagnostics.ContainsKey( $_ ) ) {
+                    $global:gCSIDiagnostics.Remove( $_ )
+                }
+            }
+            Else {
+                $global:gCSIDiagnostics[ $_ ] = $Value
+            } 
+        }
+
+    }
+
+    End { }
+
+}
+
+Function Get-CSIDiagnosticMessageStream {
+Param( [Parameter(ValueFromPipeline=$true)] $For, [switch] $Each=$false, [switch] $All=$false )
+
+    Begin {
+        $GoodList = @( )
+        $TotalList =  @( )
+    }
+
+    Process {
+        $TotalList = @( $TotalList ) + @( $For )
+        If ( $global:gCSIDiagnostics.ContainsKey( $For ) ) {
+            $Value = $global:gCSIDiagnostics[ $For ]
+            If ( [bool] $Value ) {
+                If ( $Each ) {
+                    $Value | Write-Output
+                }
+                $GoodList = @( $GoodList ) + @( $For )
+            }
+        }
+    }
+
+    End {
+        If ( $All ) {
+            ( $GoodList.Count -eq $TotalList.Count ) | Write-Output
+        }
+        ElseIf ( -Not $Each ) {
+            ( $GoodList.Count -gt 0 ) | Write-Output
+        }
+    }
+}
+
+Function Write-CSIDiagnosticMessageStream {
+Param( [Parameter(ValueFromPipeline)] $Line, $ForegroundColor=$null, $BackgroundColor=$null, [switch] $NoNewline, $Context=@( ) )
+
+    Begin {
+        If ( $global:gCSIDiagnostics -eq $null ) {
+            $global:gCSIDiagnostics = @{ }
+        }
+    }
+
+    Process {
+        
+        If ( $Context | Get-CSIDiagnosticMessageStream ) {
+
+            If ( ( $ForegroundColor -eq $null ) -and ( $BackgroundColor -eq $null ) ) {
+                $Line | Write-Host -NoNewline:$NoNewline
+            }
+            ElseIf ( $ForegroundColor -eq $null ) {
+                $Line | Write-Host -BackgroundColor:$BackgroundColor -NoNewline:$NoNewline
+            }
+            ElseIf ( $BackgroundColor -eq $null ) {
+                $Line | Write-Host -ForegroundColor:$ForegroundColor -NoNewline:$NoNewline
+            }
+            Else {
+                $Line | Write-Host -ForegroundColor:$ForegroundColor -BackgroundColor:$BackgroundColor -NoNewline:$NoNewline
+            }
+
+
+        }
+
+    }
+
+    End { }
+
+}
 
 Export-ModuleMember -Function Write-BleepBloop
 Export-ModuleMember -Function Select-UserApproved
@@ -469,6 +611,11 @@ Export-ModuleMember -Function Write-UnbaggedItemNoticeMessage
 Export-ModuleMember -Function Read-YesFromHost
 
 Export-ModuleMember -Function Get-PluralizedText
+Export-ModuleMember -Function Get-ConditionalText
 
 Export-ModuleMember -Function Write-RoboCopyOutput
 Export-ModuleMember -Function Write-CSOutputWithLogMaybe
+
+Export-ModuleMember -Function Set-CSIDiagnosticMessageStream
+Export-ModuleMember -Function Get-CSIDiagnosticMessageStream
+Export-ModuleMember -Function Write-CSIDiagnosticMessageStream
