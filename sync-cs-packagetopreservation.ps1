@@ -23,13 +23,13 @@ Begin {
             If ( $Log -ne $null ) {
                 If ( -Not ( Test-Path -LiteralPath $Log ) ) {
                     $StartMessage = @{ "Location"=$Package.FullName; "Time"=( Get-Date ).ToString() }
-                    ( "! JSON[Start]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+                    ( "! JSON[Start]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) | Out-File -LiteralPath:$Log -Append
                 }
             }
             If ( $Command -ne $null ) {
                 If ( $Log -ne $null ) {
                     $StartMessage = @{ "Command"=( $Command -f ( "Get-Item -LiteralPath '{0}' -Force" -f $Package.FullName ) ); "Time"=( Get-Date ).ToString() }
-                    ( "! JSON[Command]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) >> $Log
+                    ( "! JSON[Command]: {0}" -f ( $StartMessage | ConvertTo-Json -Compress ) ) | Out-File -LiteralPath:$Log -A
                 }
             }
         }
@@ -38,7 +38,7 @@ Begin {
             If ( $Line -ne $null ) {
                 $Line | Write-Output
                 If ( $Log -ne $null ) {
-                    "$Line" >> $Log
+                    "$Line" | Out-File -LiteralPath:$Log -Append
                 }
             }
         }
@@ -73,7 +73,7 @@ Process {
                 $PassThru = $true
             }
             Else {
-                ( "{0} | & coldstorage mirror -Items -RoboCopy" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+                ( "{0} | & coldstorage mirror -Items -RoboCopy" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
             }
 
         }
@@ -102,7 +102,7 @@ Process {
                 $SkipOver = $false
             }
             Else {
-                ( "{0} | & coldstorage bag -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+                ( "{0} | & coldstorage bag -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
             }
         }
         If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -Unzipped ) ) ) {
@@ -124,7 +124,7 @@ Process {
                 $SkipOver = $false
             }
             Else {
-                ( "{0} | & coldstorage zip -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+                ( "{0} | & coldstorage zip -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
             }
         }
         If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -NotInCloud ) ) ) {
@@ -147,7 +147,7 @@ Process {
                 $SkipOver = $false
             }
             Else {
-                ( "{0} | & coldstorage to cloud -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) >> $DeferredFile
+                ( "{0} | & coldstorage to cloud -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
             }
         }
     
