@@ -4,7 +4,8 @@
     [switch] $Pop=$false,
     [switch] $ColdStorage=$false,
     [switch] $Original=$false,
-    [switch] $Reflection=$false
+    [switch] $Reflection=$false,
+    [switch] $Forward=$false
 )
 
     Function Get-CSScriptDirectory {
@@ -30,8 +31,8 @@ Else {
 
 $Destinations |% {
     $Destination = $_
-    If ( $Original -or ( $ColdStorage -or $Reflection ) ) {
-        $Mirror = ( $Destination | get-mirrormatcheditem-cs.ps1 -ColdStorage:$ColdStorage -Reflection:$Reflection -Original:$Original | Get-FileObject )
+    If ( ( $Original -or ( $ColdStorage -or $Reflection ) ) -or $Forward ) {
+        $Mirror = ( $Destination | get-mirrormatcheditem-cs.ps1 -ColdStorage:$ColdStorage -Reflection:$Reflection -Original:$Original -Forward:$Forward | Get-FileObject )
     }
     Else {
         $Mirror = ( $Destination | get-mirrormatcheditem-cs.ps1 -Other | Get-FileObject )

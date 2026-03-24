@@ -104,31 +104,33 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                 $Locations += ( $Row.Groups |% { $Key = $_; $GroupMeta.${Key} } )
                 
                 # 1. Let's fill in Original and Reflection and ColdStorage
-                "Original", "Reflection", "ColdStorage" |% { 
+                "Original", "Reflection", "ColdStorage", "Forward" |% { 
                     $Aspect = $_
-                    If ( $Row.$Aspect -is [String] ) {
-                        $Alias = ( $Row.$Aspect ).Trim("$")
-                        $ToConvert = $Row.$Alias
-                    }
-                    Else {
-                        $ToConvert = $Row.$Aspect
-                    }
+                    If ( $Row | Get-Member -Name $Aspect ) { 
+                        If ( $Row.$Aspect -is [String] ) {
+                            $Alias = ( $Row.$Aspect ).Trim("$")
+                            $ToConvert = $Row.$Alias
+                        }
+                        Else {
+                            $ToConvert = $Row.$Aspect
+                        }
 
-                    # Sigh
-                    If ( $Locations.Count -le 3 ) {
-                        "WARNING: The Repository {0} does not seem to be set up correctly in settings.json !!" | Write-Warning
-                        "REPOSITORY={0}" -f $Repository | Write-Warning
-                        "_={0}" -f $_ | Write-Warning
-                        'MirrorsMeta.$Repository=',$MirrorsMeta.${Repository} | Write-Warning
-                        "LOCATIONS: " | Write-Warning
-                        $Locations |% { If ( $_ -ne $null ) { $_ | Write-Warning } Else { "(null)" | Write-Warning } }
-                    }
+                        # Sigh
+                        If ( $Locations.Count -le 3 ) {
+                            "WARNING: The Repository {0} does not seem to be set up correctly in settings.json !!" | Write-Warning
+                            "REPOSITORY={0}" -f $Repository | Write-Warning
+                            "_={0}" -f $_ | Write-Warning
+                            'MirrorsMeta.$Repository=',$MirrorsMeta.${Repository} | Write-Warning
+                            "LOCATIONS: " | Write-Warning
+                            $Locations |% { If ( $_ -ne $null ) { $_ | Write-Warning } Else { "(null)" | Write-Warning } }
+                        }
                     
-                    $Converted = ( $ToConvert |% { $_ -f $Locations | ConvertTo-ColdStorageSettingsFilePath } )
+                        $Converted = ( $ToConvert |% { $_ -f $Locations | ConvertTo-ColdStorageSettingsFilePath } )
 
-                    # Priority goes to a listable location; failing that, fall back onto the first listed candidate
-                    $BestOption = @( $Converted |% { $Path = $_ ; If ( $Path | Test-IsListable ) { $Path } } ) + @( $Converted )                   
-                    $Row.$Aspect = ( $BestOption | Select-Object -First 1 )
+                        # Priority goes to a listable location; failing that, fall back onto the first listed candidate
+                        $BestOption = @( $Converted |% { $Path = $_ ; If ( $Path | Test-IsListable ) { $Path } } ) + @( $Converted )                   
+                        $Row.$Aspect = ( $BestOption | Select-Object -First 1 )
+                    }
 
                 }
 
@@ -750,7 +752,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null )
 }
 
 Function Get-MirrorMatchedItem {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, [switch] $Passive=$false, $Repositories=$null, [switch] $ShowWarnings=$false )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Forward=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, [switch] $Passive=$false, $Repositories=$null, [switch] $ShowWarnings=$false )
 
 Begin { $mirrors = ( Get-ColdStorageRepositories -NoTrash -Tag ) }
 
@@ -761,6 +763,7 @@ Process {
     If ( $Original ) { $Range += , "Original" }
     If ( $Reflection ) { $Range += , "Reflection" }
     If ( $ColdStorage ) { $Range += , "ColdStorage" }
+    If ( $Forward ) { $Range += , "Forward" }
     If ( $Trashcan ) { $Range += , "Trashcan" }
 
     If ( $Range.Count -eq 0 ) { $Range = ( "Original", "Reflection" ); $Implicit = $true }
@@ -770,7 +773,7 @@ Process {
         $mirrors = ( Get-ColdStorageRepositories -Tag -Passive:$Passive )
     }
 
-    Write-Debug ( "[Get-MirrorMatchedItem] Match {0}" -f $( If ( $File -is [String] ) { $File } Else { $File.FullName } ) )
+    Write-Debug ( "[Get-MirrorMatchedItem:773] Match {0}" -f $( If ( $File -is [String] ) { $File } Else { $File.FullName } ) )
     $Pair = ( $File | Get-MirrorMatchedItemPair -Pair:$Pair )
 
     # Split the path up; look for $Stock in list of mirrored repositories, then we can reattach $Stem
@@ -782,6 +785,7 @@ Process {
         If ( $mirrors.ContainsKey( "${Pair}" ) ) {
             $Locations = $mirrors[ "${Pair}" ].Locations
         }
+        "[{0}:{1}] Locations: {2}" -f "Get-MirrorMatchedItem",( Get-CurrentLine ),( $Locations | ConvertTo-Json -Compress ) | Write-Debug
 
         $HereThereDiagLines = @(
             ( "PAIR: '{0}'" -f ( $Pair -join "'; '" ) ),

@@ -49,6 +49,7 @@
 			"Original":  [ "//ADAHMAIN-24D/Digital{0}" ],
 			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
 			"ColdStorage": "$Reflection",
+			"Forward": [ "//ADAHMainStorage_22B/Digital{0}" ],
 			"Groups": [ "DA", "Preservation", "Packaged" ]
 		},
         "Access": {

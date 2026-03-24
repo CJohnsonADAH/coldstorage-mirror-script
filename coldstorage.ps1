@@ -55,6 +55,9 @@ param (
     [switch] $NotMirrored = $false,
     [switch] $InCloud = $false,
     [switch] $NotInCloud = $false,
+    [switch] $Original = $false,
+    [switch] $ColdStorage = $false,
+    [switch] $Forward = $false,
     [switch] $Only = $false,
     [switch] $PassThru = $false,
     [switch] $Report = $false,
@@ -943,7 +946,7 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 }
 
 Function Invoke-ColdStorageItemMirror {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $Force=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false, [switch] $Scheduled=$false, [switch] $WhatIf )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $Force=$false, [switch] $Forward=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false, [switch] $Scheduled=$false, [switch] $WhatIf )
 
     Begin { }
 
@@ -954,8 +957,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
             $sRepository = $oRepository.FullName
             $RepositorySlug = ( Get-FileRepositoryName -File $File )
 
-            $Original = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Original -All )
-            $Reflection = ( $File | Get-MirrorMatchedItem -Pair $RepositorySlug -Reflection -All )
+            $Original = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Original -All )
+            If ( -Not $Forward ) {
+                $Reflection = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Reflection -All )
+            }
+            Else {
+                $Reflection = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Forward -All )
+            }
 
             If ( -Not $Reverse ) {
                 $Src = $Original
@@ -2042,7 +2050,7 @@ Else {
             Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
         }
         Else {
-            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
+            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Forward:$Forward -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
         }
     }
     ElseIf ( $Verb -eq "321" ) {
@@ -2549,7 +2557,7 @@ Else {
         & start-coldstorage-checkup-loops.ps1 -Loop
     }
     ElseIf ( $Verb -iin @( "cd" ) ) {
-        & set-location-to-mirror-cs.ps1 -LiteralPath:$allObjects
+        & set-location-to-mirror-cs.ps1 -Original:$Original -ColdStorage:$ColdStorage -Forward:$Forward -LiteralPath:$allObjects
     }
     ElseIf ( $Verb -eq "echo" ) {
         $aFlags = $MyInvocation.BoundParameters
