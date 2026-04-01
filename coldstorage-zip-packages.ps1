@@ -439,17 +439,38 @@ Else {
     }
     ElseIf ( $Verb -eq "compress" ) {
         $allObjects |% {
-            $sFile = Get-FileLiteralPath -File $_
+            $oFile = ( $_ | Get-FileObject )
+            $sFile = ( $_ | Get-FileLiteralPath )
+
             If ( Test-BagItFormattedDirectory -File $sFile ) {
                 $_ | Compress-CSBaggedPackage -Skip:$Skip -WhatIf:$WhatIf
             }
             ElseIf ( Test-LooseFile -File $_ ) {
                 $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
+                
+                # If the hardlinked singleton bag does not exist, but we have sidecar checksum files,
+                # then temporarily  create a hardlinked singleton bag from the sidecar checksum files,
+                # and erase the hardlinked singleton bag when complete.
+
+                $Sidecars = @( ) ; $TempContainer = $null
+                If ( -Not ( $oBag ) ) {
+                    $Sidecars = ( $oFile | get-checksumsidecar-cs.ps1 -Resolve )
+                    If ( $Sidecars.Count -gt 0 ) {
+                        $TempContainer = ( $oFile | out-bagitcontainerhardlink.ps1 -PassThru )
+                        $oBag = ( Get-BaggedCopyOfLooseFile -File $_ )
+                    }
+                }
+
                 If ($oBag) {
                     $oBag | Compress-CSBaggedPackage -Skip:$Skip
+
+                    If ( $TempContainer -ne $Null ) {
+                        Remove-Item -LiteralPath:$TempContainer.FullName -Recurse -Force
+                    }
+
                 }
                 Else {
-                    Write-Warning "${sFile} is a loose file not a BagIt-formatted directory."
+                    "[{0}] {1} is a loose file not a BagIt-formatted directory." -f ( Get-CSDebugContext -Function:$MyInvocation ), $sFile | Write-Warning
                 }
             }
             Else {

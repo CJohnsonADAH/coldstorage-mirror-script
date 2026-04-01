@@ -714,6 +714,334 @@ Process {
 End { }
 }
 
+Function ConvertTo-321LooseFileFunctionFileReference {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Output )
+
+    Begin { }
+
+    Process {
+        $Result = @( )
+
+        If ( $Output -eq 'object' ) {
+            $Result += @( $Item | Get-FileObject )
+        }
+        ElseIf ( $Output -eq 'literalpath' ) {
+            $Result += @( $Item | Get-FileLiteralPath )
+        }
+        ElseIf ( $Item -is [string] ) {
+            $Result += @( $Item )
+        }
+        Else {
+            $Result += @( $Item | Get-FileLiteralPath )
+        }
+
+        $Result | Write-Output
+    }
+
+    End { }
+
+}
+
+Function Get-321LooseFileChecksumSidecarsContainers {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Output="string" )
+
+    Begin { }
+
+    Process {
+        $o = ( $Item | Get-FileObject )
+        
+        $Name = $o.Name
+
+        $Parent = ( $o | Get-ItemFileSystemParent )
+        $ContainerNames = ( Get-BaggedCopyContainerSubdirectories )
+            
+        $Containers = ( $ContainerNames |% { $Parent.FullName | Join-Path -ChildPath $_ } | Sort-Object -Property:Length -Descending )
+
+        $Containers | ConvertTo-321LooseFileFunctionFileReference -Output:$Output | Write-Output
+
+    }
+
+    End { }
+
+}
+Function Get-321LooseFileChecksumSidecarsContainer {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='*', $Output="string", [switch] $Detect, [switch] $Create=$false )
+
+    Begin { }
+
+    Process {
+        $Containers = ( $Item | Get-321LooseFileChecksumSidecarsContainers -Output:string )
+
+        If ( $Detect ) {
+
+            $Detected = ( $Containers |? { Test-Path -LiteralPath:$_ -PathType:Container } |? {
+                Push-Location -LiteralPath:$_
+                $WC = ( $Item | Get-321LooseFileChecksumSidecarFilesWildcard )
+                Test-Path -Path:$WC -PathType:Leaf
+                Pop-Location
+            } )
+
+            $N = ( $Detected | Measure-Object ).Count
+
+            If ( $N -gt 0  ) {
+                $Detected | Select-Object -First:1 |% { If ( $Output -eq 'object' ) { $_ | Get-FileObject } Else { $_ } } | Write-Output
+            }
+            ElseIf ( $Create ) {
+                $Containers | Select-Object -First:1 |% {
+
+                    If ( -Not ( Test-Path -LiteralPath:$_ -PathType:Container ) ) {
+                        
+                        New-Item -Path:$_ -ItemType:Directory |% {
+                            '[{0}] Created NEW sidecar container directory "{1}"' -f ( Get-CSDebugContext -Function:$MyInvocation ), $_.FullName | Write-Verbose
+                            If ( $Output -eq 'object' ) { $_ | Write-Output } Else { $_ | Get-FileLiteralPath | Write-Output }
+                        }
+
+                    }
+                    Else {
+
+                        Get-Item -LiteralPath:$_ -Force
+
+                    }
+
+                }
+            }
+
+        }
+        Else {
+
+            If ( $Create ) {
+                $Containers | Select-Object -First:1 |% {
+                
+                    If ( -Not ( Test-Path -LiteralPath:$_ -PathType:Container ) ) {
+                        New-Item -Path:$_ -ItemType:Directory |% { '[{0}] Created NEW sidecar container directory "{1}"' -f ( Get-CSDebugContext -Function:$MyInvocation ), $_.FullName | Write-Verbose }
+                    }
+
+                }
+            }
+
+            $Containers | Select-Object -First:1 | ConvertTo-321LooseFileFunctionFileReference -Output:$Output | Write-Output
+        }
+
+    }
+
+    End { }
+}
+Function New-321LooseFileChecksumSidecarsContainer {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Output="object", [switch] $IfNotExists=$false )
+
+    Begin { }
+
+    Process {
+        
+        $o = @( )
+        $Item | Get-321LooseFileChecksumSidecarsContainers -Output:"string" |% {
+
+            If ( ( $o | Measure-Object ).Count -eq 0 ) {
+            
+                If ( Test-Path -LiteralPath:$_ -PathType:Container ) {
+
+                    If ( $IfNotExists ) {
+
+                        $o = @( $o ) + @( Get-Item -LiteralPath:$_ -Force )
+
+                    }
+
+                }
+                Else {
+                    $o = @( $o ) + @( New-Item -Path:$_ -ItemType:Directory )
+                }
+
+            }
+
+        }
+        $o | ConvertTo-321LooseFileFunctionFileReference -Output:$Output | Write-Output
+
+    }
+
+    End { }
+
+}
+Function Get-321LooseFileChecksumSidecarFilesWildcard {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='*' )
+    
+    Begin { }
+
+    Process {
+        $Name = ( $Item | Get-FileObject ).Name
+        $Name = ( $Name -replace '[\[\]]', '_' )
+
+        "{0}.{1}" -f $Name, $Algorithm | Write-Output
+    }
+
+    End { }
+
+}
+Function Add-321LooseFileChecksumSidecarFile {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='md5', $Value=$null, [switch] $Compute=$false, [switch] $Force=$false )
+
+    Begin { }
+
+    Process {
+        $Container = ( $Item | Get-321LooseFileChecksumSidecarsContainer -Algorithm:$Algorithm -Detect -Create -Output:"object" )
+        $SidecarName = ( $Item | Get-321LooseFileChecksumSidecarFilesWildcard -Algorithm:$Algorithm )
+
+        $PayloadPath = ( "{0}/{1}" -f ( Get-BagItFormattedDirectoryPayload ), $Item.Name )
+
+        $Checksum = $null
+        If ( -Not $Compute ) {
+            $Checksum = $Value
+        }
+        Else {
+            $o = ( $Item | Get-FileObject )
+            If ( $o ) {
+                $ItemHash = ( Get-FileHash -LiteralPath:$o.FullName -Algorithm:$Algorithm )
+            
+                If ( $ItemHash ) {
+                    $Checksum = $ItemHash.Hash
+                }
+                Else {
+                    "[{0}] Get-FileHash({1}) on '{2}' failed!" -f ( Get-CSDebugContext -Function:$MyInvocation ), $Algorithm, $o.FullName | Write-Error
+                }
+            }
+            Else {
+                "[{0}] Get-FileObject on '{1}' failed!" -f ( Get-CSDebugContext -Function:$MyInvocation ), $Item | Write-Error
+            }
+        }
+
+        $SidecarFile = ( $Container.FullName | Join-Path -ChildPath:$SidecarName )
+        If ( $PayloadPath -and ( $Checksum -ne $null ) ) {
+            If ( $Force -or ( -Not ( Test-Path -LiteralPath:$SidecarFile -PathType:Leaf ) ) ) {
+                $Checksum = $Checksum.ToLower()
+                "{0}  {1}" -f $Checksum, $PayloadPath | Out-File -Encoding:utf8 -LiteralPath:$SidecarFile
+                "[{0}] sidecar file '{1}' added, contents: '{2}  {3}'" -f ( Get-CSDebugContext -Function:$MyInvocation ), $SidecarFile, $Checksum, $PayloadPath | Write-Verbose
+            }
+            Else {
+                "[{0}] sidecar file '{1}' already exists; use -Force to overwrite" -f ( Get-CSDebugContext -Function:$MyInvocation ), $SidecarFile | Write-Verbose
+            }
+        }
+        Else {
+            "[{0}] PayloadPath='{1}', Checksum='{2}'. Use -Value to specify a checksum or -Compute to compute it" -f ( Get-CSDebugContext -Function:$MyInvocation ), $PayloadPath, $Checksum | Write-Warning
+        }
+
+
+    }
+
+    End { }
+
+}
+
+Function Get-321LooseFileChecksumSidecarFile {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='*', $Output='object' )
+
+    Begin { }
+
+    Process {
+        $Container = ( $Item | Get-321LooseFileChecksumSidecarsContainer -Algorithm:$Algorithm -Detect -Output:"object" )
+
+        $AlgoExclude = @( 'tag', 'json' )
+        If ( $Algorithm.Count -eq 1 ) {
+            $AlgoWC = $Algorithm
+            $AlgoInclude = $null
+        }
+        Else {
+            $AlgoWC = '*'
+            $AlgoInclude = @( $Algorithm )
+        }
+
+        $SidecarName = ( $Item | Get-321LooseFileChecksumSidecarFilesWildcard -Algorithm:$AlgoWC )
+
+        # Container will always be a LiteralPath which should be interpreted without wildcards. SidecarName may be a literal filename, or may be a wildcard
+        $oo = @( )
+        If ( $Container ) {
+            Push-Location -LiteralPath:$Container.FullName
+            If ( Test-Path -Path:$SidecarName -PathType:Leaf ) {
+                $oo += @( Get-Item -Path:$SidecarName -Force )
+            }
+            Pop-Location
+        }
+
+        $oo |? {
+
+            $File = $_
+
+            $OK = ( $AlgoInclude -eq $null )
+            If ( -Not $OK ) {
+
+                $AlgoInclude |% {
+                    $WC = ( '*.{0}' -f $_ )
+                    "INCLUDE: {0} ({1} LIKE {2} :: {3})" -f $_, $File.Name, $WC, ( $File.Name -notlike $WC ) | Write-Debug
+                    $OK = ( $OK -or ( $File.Name -like $WC ) )
+                }
+
+            }
+            $OK | Write-Output
+
+        } |? {
+
+            $File = $_
+
+            $OK = ( $AlgoExclude -eq $null )
+            If ( -Not $OK ) {
+                $OK = $true
+                $AlgoExclude |% {
+                    $WC = ( '*.{0}' -f $_ )
+                    "EXCLUDE: {0} ({1} NOT LIKE {2} :: {3})" -f $_, $File.Name, $WC, ( $File.Name -notlike $WC ) | Write-Debug
+                    $OK = ( $OK -and ( $File.Name -notlike $WC ) )
+                }
+            }
+            $OK | Write-Output
+
+        } | ConvertTo-321LooseFileFunctionFileReference -Output:$Output | Write-Output
+
+    }
+
+    End { }
+}
+
+Function Get-321LooseFileBagLocationTransient {
+Param( [Parameter(ValueFromPipeline=$true)] $Item, $Output='string', [switch] $Slug=$false, [switch] $RelPath=$false )
+
+    Begin { }
+
+    Process {
+    
+            $Result = ( $Item | Get-FileObject | Get-ItemPackageMetadata -Name:"Bag-Directory" )
+            If ( $Result -ne $null ) {
+            
+                If ( $Slug ) {
+                    # NOOP
+                }
+                ElseIf ( $RelPath ) {
+                    $Container = ( $Item | Get-321LooseFileChecksumSidecarsContainer -Output:"object" )
+                    $Result = ( $Container.Name | Join-Path -ChildPath $Result )
+                }
+                Else {
+                
+                    $Container = ( $Item | Get-321LooseFileChecksumSidecarsContainer -Output:"string" )
+                    $Result = ( $Container | Join-Path -ChildPath $Result )
+
+                }
+
+            }
+            Else {
+
+                "[{0}] Package '{1}' has no Item Package Metadata File ({2})" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( $Item | Get-FileLiteralPath ), ( $Item | Get-ItemPackageMetadataFilePath ) | Write-Verbose
+
+            }
+
+            $Result | ConvertTo-321LooseFileFunctionFileReference -Output:$Output
+
+    }
+
+    End { }
+}
+
+
+
+#############################################################################################################
+#############################################################################################################
+#############################################################################################################
+
 Function Test-BagItManifestFile {
 Param( [Parameter(ValueFromPipeline=$true)] $File, $Bag )
 
@@ -959,6 +1287,7 @@ Function Add-ItemPackageBagData {
 Param(
     [Parameter(ValueFromPipeline=$true)] $Package,
     $Contents=@( ),
+    $Sidecars=@( ),
     [switch] $Bagged=$false,
     $BagLocation=$null
 )
@@ -969,10 +1298,11 @@ Param(
         $mContents = ( $Contents | Measure-Object -Sum Length )
         #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
 
-        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagged" -Value ( [bool] $Bagged ) -Force
-        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageBagLocation" -Value $BagLocation -Force
-        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageContents" -Value $mContents.Count -Force
-        $Package | Add-Member -MemberType NoteProperty -Name "CSPackageFileSize" -Value $mContents.Sum -Force
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageSidecars" -Value:$Sidecars -Force
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageBagged" -Value:( [bool] $Bagged ) -Force
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageBagLocation" -Value:$BagLocation -Force
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageContents" -Value:$mContents.Count -Force
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageFileSize" -Value:$mContents.Sum -Force
     }
 
     End { }
@@ -1214,6 +1544,8 @@ Param (
             "[Get-ItemPackage] '{0}' came out of Get-FileObject as NULL!!" -f $diagFullName | Write-Warning
         }
 
+        $Sidecars = @( )
+
         $nonpackaged = ( $File | Test-CSNonpackagedItem )
         If ( $nonpackaged ) {
             $oFile.CSPackageContentWarnings += @( "SKIPPED -- {0}" -f $nonpackaged.CSNonpackagedReason )
@@ -1251,11 +1583,43 @@ Param (
             $oFile.CSPackageContentFiles = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
         }
         ElseIf ( Test-LooseFile -File $File ) {
+            
             $oBagLocation = ( Get-BaggedCopyOfLooseFile -File $File )
-            If ( $oBagLocation -and $CheckZipped ) {
-                $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag -AllPossible )
-            }
             $oFile.CSPackageContentFiles = @( $File )
+            
+            $Sidecars = ( $oFile | Get-321LooseFileChecksumSidecarFile -Algorithm:'*' )
+            
+            If ( $CheckZipped ) {
+                If ( $oBagLocation ) {
+                    $aZipped = ( $oBagLocation | Get-ZippedBagOfUnzippedBag -AllPossible )
+                }
+                ElseIf ( $Sidecars.Count -gt 0 ) {
+                    
+                    # The bagged directory version of this package exists only transiently, and a lot of code for sorting out zip file names
+                    # depends on the assumption that the bagged directory version of the package currently exists. I don't want to recreate
+                    # it on the fly nearly every time Get-ItemPackage is called on an unbundled loose file, so instead let's see if we can get
+                    # a file recorded in the *,package.json metadata
+                    "[{0}] Retrieving ZIP location from package metadata file" -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-Verbose
+                    $metaLocationZip = ( $oFile | Get-ItemPackageMetadata -Name:"Location-Zip" )
+                    If ( $metaLocationZip ) {
+                        $Wildcards = ( $metaLocationZip |% { $Prefix = ( $_ -replace '[.]zip$','' ) ; ( "{0}*" -f $Prefix ) } | Sort-Object -Unique )
+                        
+                        $aZipped = ( $Wildcards |% {
+                            $Parent = ( $_ | Split-Path -Parent )
+                            $Wildcard = ( $_ | Split-Path -Leaf )
+
+                            Push-Location -LiteralPath:$Parent
+                            If ( Test-Path -Path:$Wildcard -PathType:Leaf ) {
+                                Get-Item -Path:$Wildcard -Force
+                            }
+                            Pop-Location
+                        } )
+                    }
+
+                }
+
+            }
+
         }
         ElseIf ( $Recurse -and ( Test-Path -LiteralPath $File.FullName -PathType Container ) ) {
             ( "RECURSE INTO DIRECTORY: {0}" -f $File.FullName ) | Write-Verbose
@@ -1285,7 +1649,7 @@ Param (
             $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageCanonicalLocation" -Value:$sCanonicalLocation -Force
 
             $bBagged = $( If ( $oBagLocation ) { $true } Else { $false } )
-            $Package | Add-ItemPackageBagData -Contents:$oFile.CSPackageContentFiles -Bagged:$bBagged -BagLocation:$oBagLocation 
+            $Package | Add-ItemPackageBagData -Contents:$oFile.CSPackageContentFiles -Sidecars:$Sidecars -Bagged:$bBagged -BagLocation:$oBagLocation 
 
             $oCloudCopy = $null
 
@@ -1460,17 +1824,27 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
     Process {
 
         $pack = $Package
-        If ( ( -Not ( $Package -is [object] ) ) -or ( -Not ( $Package.CSPackageBagged ) ) ) {
+        If ( ( -Not ( $Package -is [object] ) ) -or ( -Not ( $Package | Get-Member -Name:CSPackageBagged ) ) ) {
+            "[{0}] Bare path or file object piped in. Call Get-ItemPackage to secure packaging-convention metadata." -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-Debug
             $pack = ( $Package | Get-ItemPackage -At )
         }
 
-        If ( $pack.CSPackageBagged ) {
+        If ( $pack | Test-LooseFile ) {
+
+            $SidecarLocation = ( $pack | Get-321LooseFileChecksumSidecarsContainer )
+            If ( $SidecarLocation ) {
+                $packName = ( $pack.Name -replace '[\[\]]','_' )
+                Join-Path $SidecarLocation -ChildPath:( "{0}.package.json" -f $packName ) | Write-Output
+            }
+
+        }
+        ElseIf ( $pack.CSPackageBagged ) {
         
             $BagLocation = ( $pack.CSPackageBagLocation )
             ( Join-Path $BagLocation.FullName -ChildPath "package.json" ) | Write-Output
 
         }
-
+        
     }
 
     End { }
@@ -1936,6 +2310,15 @@ Export-ModuleMember -Function Test-BaggedCopyOfLooseFile
 Export-ModuleMember -Function Select-BaggedCopiesOfLooseFiles
 Export-ModuleMember -Function Select-BaggedCopyMatchedToLooseFile
 Export-ModuleMember -Function Add-BaggedCopyContainer
+Export-ModuleMember -Function Get-BaggedCopyContainerSubdirectories
+Export-ModuleMember -Function ConvertTo-321LooseFileFunctionFileReference
+Export-ModuleMember -Function Test-InBaggedCopyContainerSubdirectory
+Export-ModuleMember -Function Get-321LooseFileChecksumSidecarsContainers
+Export-ModuleMember -Function Get-321LooseFileChecksumSidecarsContainer
+Export-ModuleMember -Function New-321LooseFileChecksumSidecarsContainer
+Export-ModuleMember -Function Add-321LooseFileChecksumSidecarFile
+Export-ModuleMember -Function Get-321LooseFileChecksumSidecarFile
+Export-ModuleMember -Function Get-321LooseFileBagLocationTransient
 Export-ModuleMember -Function Test-BagItManifestFile
 Export-ModuleMEmber -Function New-BagItManifestContainer
 Export-ModuleMember -Function Undo-CSBagPackage

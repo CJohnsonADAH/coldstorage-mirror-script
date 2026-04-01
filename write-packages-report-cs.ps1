@@ -113,6 +113,13 @@ Begin {
 
             $oContext = ( Get-FileObject $Context )
 
+            $Sidecars = $Package.CSPackageSidecars
+            If ( $Sidecars ) {
+                $nSidecars = ( $Sidecars | Measure-Object ).Count
+            }
+            Else {
+                $nSidecars = 0
+            }
             Push-Location -LiteralPath ( $oContext | Get-ItemFileSystemLocation ).FullName
 
             $sFullName = $Package.FullName
@@ -120,8 +127,9 @@ Begin {
             $sRelName = ( Resolve-Path -Relative -LiteralPath $Package.FullName )
             $sTheName = $( If ( $FullName ) { $sFullName } Else { $sRelName } )
 
-            $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } Else { 0 } )
-            $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } Else { "unbagged" } )
+            $nBaggedFlag = $( If ( $Package.CSPackageBagged ) { 1 } ElseIf ( $nSidecars -gt 0 ) { 1 } Else { 0 } )
+            $sBaggedFlag = $( If ( $Package.CSPackageBagged ) { "BAGGED" } ElseIf ( $nSidecars -gt 0 ) { "SIDECARS" } Else { "unbagged" } )
+
             If ( $CheckZipped ) {
                 $sZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { "ZIPPED" } Else { "unzipped" } )
                 $nZippedFlag = $( If ( $Package.CSPackageZip.Count -gt 0 ) { 1 } Else { 0 } )

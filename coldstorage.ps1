@@ -181,190 +181,6 @@ End {
 }
 
 #############################################################################################################
-## BagIt PACKAGING CONVENTIONS ##############################################################################
-#############################################################################################################
-
-Function Out-BagItFormattedDirectory {
-<#
-.SYNOPSIS
-Invoke the BagIt.py external script to bag a preservation package
-
-.DESCRIPTION
-Given a directory of digital content, enclose it within a BagIt-formatted package.
-Formerly known as: Do-Bag-Directory
-
-.PARAMETER DIRNAME
-Specifies the directory to enclose in a BagIt-formatted package.
-
-.PARAMETER PassThru
-If present, output the location of the BagIt-formatted package into the pipeline after completing the bagging.
-
-.PARAMETER Progress
-If provided, provides a [CSProgressMessenger] object to manage progress and logging output from the process.
-#>
-
-    [CmdletBinding()]
-
-Param( [Parameter(ValueFromPipeline=$true)] $DIRNAME, [switch] $PassThru=$false, $Log=$null, $LogPackage=$null, $Context=$null, $Progress=$null )
-
-    Begin { }
-
-    Process {
-    
-        $BagDir = $( If ( $DIRNAME -is [String] ) { $DIRNAME } Else { Get-FileObject($DIRNAME) |% { $_.FullName } } )
-
-        Push-Location -LiteralPath ( $BagDir )
-
-        Get-SystemArtifactItems -LiteralPath "." | Remove-Item -Force -Verbose:$Verbose
-
-        "PS ${PWD}> bagit.py ." | Write-Verbose
-    
-        If ( $Progress ) {
-            $Progress.Update( ( "Bagging {0}" -f $BagDir ), 0, ( "OK-BagIt: {0}" -f $BagDir ) )
-        }
-
-        $BagItPy = ( Get-PathToBagIt | Join-Path -ChildPath "bagit.py" )
-	    $Python = Get-ExeForPython
-
-        # Execute bagit.py under python interpreter; capture stderr output and send it to $Progress if we have that
-        $Output = ( & $( Get-ExeForPython ) "${BagItPy}" . 2>&1 |% { "$_" -replace "[`r`n]","" } |% { If ( $Progress ) { $Progress.Update( ( "Bagging {0}: {1}" -f $BagDir,"$_" ), 0, $null ) } ; "$_" } )
-        
-        If ( $Log -ne $null ) {
-            # Send the bagit.py console output to the log file, if provided
-            $Output | Write-CSOutputWithLogMaybe -Package:$LogPackage -Command:$Context -Log:$Log >$null
-        }
-
-        $NotOK = $LASTEXITCODE
-
-        If ( $NotOK -gt 0 ) {
-            "ERR-BagIt: returned ${NotOK}" | Write-Verbose
-            $Output | Write-Error
-        }
-        Else {
-            
-            # Send the bagit.py console output to Verbose stream
-            $Output 2>&1 |% { "$_" -replace "[`r`n]","" } |% { If ( $Progress ) { $Progress.Update( ( "Bagging {0}: {1}" -f $BagDir,"$_" ), 0, $null ) } ; $_ | Write-Verbose }
-            
-            # If requested, pass thru the successfully bagged directory to Output stream
-            If ( $PassThru ) {
-                Get-FileObject -File $BagDir | Write-Output
-            }
-            ElseIf ( $Progress ) {
-                $Progress.Update( ( "Bagged {0}" -f $BagDir ), ( "OK-BagIt: {0}" -f $BagDir ) )
-            }
-
-
-        }
-
-        Pop-Location
-    }
-
-    End { }
-}
-
-Function Out-BaggedPackage {
-<#
-.SYNOPSIS
-Enclose a preservation package of digital content into a BagIt-formatted preservation package.
-
-.DESCRIPTION
-Given a loose file or a directory of digital content, enclose that within a BagIt-formatted preservation package following ADAHColdStorage packaging conventions.
-
-If the input is a directory, the output will be a directory in the same location containing BagIt manifest files and the original content enclosed in a payload directory called "data".
-
-If the input is a loose file, the output will be a BagIt-formatted directory located within the same parent container, containing a copy of the loose file enclosed in a payload directory called "data".
-
-Formerly known as: Do-Bag-Loose-File
-
-.PARAMETER LiteralPath
-Specifies the loose file or the directory to enclose within a BagIt-formatted package.
-
-.PARAMETER PassThru
-If present, output the location of the BagIt-formatted package into the pipeline after completing the bagging.
-
-.PARAMETER Progress
-If provided, provides a [CSProgressMessenger] object to manage progress and logging output from the process.
-#>
-
-    [CmdletBinding()]
-
-Param( [Parameter(ValueFromPipeline=$true)] $LiteralPath, [switch] $PassThru=$false, $Progress=$null )
-
-    Begin { $cmd = ( Get-CommandWithVerb ) }
-
-    Process {
-        If ( -Not $LiteralPath ) {
-            Return
-        }
-
-        $Item = Get-FileObject($LiteralPath)
-
-        # If this is a single (loose) file, then we will create a parallel counterpart directory
-        If ( Test-Path -LiteralPath $Item.FullName -PathType Leaf ) {
-
-            Push-Location -LiteralPath $Item.DirectoryName
-
-            $OriginalFileName = $Item.Name
-            $OriginalFullName = $Item.FullName
-            $FileName = ( $Item | Get-PathToBaggedCopyOfLooseFile )
-
-            $BagDir = ( Get-Location | Add-BaggedCopyContainer | Join-Path -ChildPath "${FileName}" )
-            If ( -Not ( Test-Path -LiteralPath $BagDir ) ) {
-                $oBagDir = ( New-Item -Type Directory -Path $BagDir )
-                $BagDir = $( If ( $oBagDir ) { $oBagDir.FullName } Else { $null } )
-            }
-
-            If ( Test-Path -LiteralPath $BagDir -PathType Container ) {
-                
-                # Move the loose file into its containing counterpart directory. We'll re-link it to its old directory later.
-                Move-Item -LiteralPath $Item -Destination $BagDir
-
-                # Now rewrite the counterpart directory as a BagIt-formatted preservation package
-                $BagDir | Out-BagItFormattedDirectory -PassThru:$PassThru -Progress:$Progress
-                If ( $LastExitCode -eq 0 ) {
-
-                    # If all went well, then hardlink a reference at the loose file's old location to the new BagIt directory payload
-                    $DataDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
-                    $Payload = ( "${DataDir}" | Join-Path -ChildPath "${OriginalFileName}" )
-                    If ( Test-Path -LiteralPath "${Payload}" ) {
-                        
-                        New-Item -ItemType HardLink -Path "${OriginalFullName}" -Target "${Payload}" | %{ "[$cmd] Bagged ${BagDir}, created link to payload: $_" | Write-Verbose }
-	        
-                        # Set file attributes to ReadOnly -- bagged copies should remain immutable
-                        Set-ItemProperty -LiteralPath "${OriginalFullName}" -Name IsReadOnly -Value $true
-                        Set-ItemProperty -LiteralPath "${Payload}" -Name IsReadOnly -Value $true
-
-                    }
-                    Else {
-                        ( "[$cmd] BagIt process completed OK, but ${cmd} could not locate BagIt payload: '{0}'" -f "${Payload}" ) | Write-Error
-                    }
-
-                }
-
-            }
-            Else {
-                ( "[$cmd] Could not create or locate counterpart directory for BagIt to operate on: '{0}'" -f "${BagDir}" ) | Write-Error
-            }
-
-            Pop-Location
-
-        }
-
-        # If this is a directory, then we run BagIt directly over the directory.
-        ElseIf ( Test-Path -LiteralPath $Item.FullName -PathType Container ) {
-            $LiteralPath | Out-BagItFormattedDirectory -Verbose:$Verbose -PassThru:$PassThru -Progress:$Progress
-        }
-
-        Else {
-            ( "[$cmd] Preservation package not found: '{0}'" -f $LiteralPath ) | Write-Warning
-        }
-    }
-
-    End { }
-
-}
-
-#############################################################################################################
 ## COMMAND FUNCTIONS ########################################################################################
 #############################################################################################################
 
@@ -475,7 +291,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
 
         # Avoid name collision with data child directory when we pop out contents
         Move-Item $Payload -Destination $RebagData -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
-        $RebagData | Out-BagItFormattedDirectory -Progress:$Progress -Log:$vLogFile -LogPackage:$Bag -Context:$sCmd
+        $RebagData | out-bagitformatteddirectory-cs.ps1 -Log:$vLogFile -LogPackage:$Bag -Context:$sCmd
 
         # Pop out contents
         Get-ChildItem -LiteralPath $RebagData |% {
@@ -601,6 +417,8 @@ param (
         $DirName = $File.FullName
         $BaseName = $File.Name
 
+        "[{0}] Entering {1} processing" -f ( Get-CSDebugContext -Function:$MyInvocation ), $MyInvocation.MyCommand.Name | Write-Debug
+
         If ( -Not $File ) {
             ( "[Out-BagItFormattedDirectoryWhenCleared:{0}] File object is empty" -f ( Get-CurrentLine ) ) | Write-Warning
         }
@@ -630,7 +448,7 @@ param (
             ElseIf ( Test-ERInstanceDirectory($File) ) {
 
                 Push-Location -LiteralPath $DirName
-                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BagItFormattedDirectory -Progress:$Progress
+                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-bagitformatteddirectory-cs.ps1
                 Pop-Location
 
                 If ( $PassThru ) {
@@ -642,7 +460,7 @@ param (
             }
             ElseIf ( Test-IndexedDirectory($File) ) {
 
-                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
+                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
             
                 If ( $PassThru ) {
                     If ( Test-BagItFormattedDirectory($File) ) {
@@ -656,7 +474,7 @@ param (
                 Get-ChildItem -File -LiteralPath $File.FullName |% {
                 
                     $ChildItem = $_
-                    $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | Out-BaggedPackage -Progress:$Progress
+                    $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
 
                     If ( $PassThru ) {
                         $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
@@ -1030,6 +848,7 @@ Param(
     [switch] $Force=$false
 )
 
+    "[{0}] Entering function" -f ( Get-CSDebugContext -Function:$MyInvocation ) |Write-Debug
     $SkipScan = @( )
     If ( $NoScan ) {
         $SkipScan = @( "clamav" )
@@ -2326,7 +2145,7 @@ Else {
     }
     ElseIf ( $Verb -eq "zip" ) {
 
-        $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words | Get-ColdStorageLocation -ShowWarnings } )
+        $Locations = ( $allObjects | Get-FileLiteralPath )
 
         $SkipScan = @( )
         If ( $NoScan ) {

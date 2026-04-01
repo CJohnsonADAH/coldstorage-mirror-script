@@ -108,7 +108,7 @@ Process {
         $oRepository = Get-FileObject -File ( $oFileUNCPath | Get-FileRepositoryLocation )
         $sRepository = $oRepository.FullName
         $sRepositoryNode = ( $File | Get-FileRepositoryPrefix -Fallback )
-    
+        
         $sFileName = ( $oFile.Name -replace "[^A-Za-z0-9_]+","-" )
 
         $reUNCRepo = [Regex]::Escape($sRepository)
