@@ -9,26 +9,18 @@ Param ( $File=$null )
     ( Get-Item -Force -LiteralPath "${ScriptPath}" )
 }
 
-Function My-Script-Directory {
-Param ( $Command, $File=$null )
-
-    $Source = ( $Command.Source | Get-Item -Force )
-    $Path = ( $Source.Directory | Get-Item -Force )
-
-    If ( $File -ne $null ) {
-        $Path = ($Path.FullName + "\" + $File)
-    }
-
-    $Path
-}
-
 $global:gPackagingConventionsCmd = $MyInvocation.MyCommand
 
-Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageFiles.psm1" )
-Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageScanFilesOK.psm1" )
-Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageBagItDirectories.psm1" )
-Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageRepositoryLocations.psm1" )
-Import-Module $( My-Script-Directory -Command $global:gPackagingConventionsCmd -File "ColdStorageZipArchives.psm1" )
+    $modSource = ( $global:gPackagingConventionsCmd.Source | Get-Item -Force )
+    $modPath = ( $modSource.Directory | Get-Item -Force )
+
+# Depdencies - Script
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath:"ColdStorageData.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath:"ColdStorageFiles.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath:"ColdStorageScanFilesOK.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath:"ColdStorageBagItDirectories.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath:"ColdStorageRepositoryLocations.psm1" )
+Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath:"ColdStorageZipArchives.psm1" )
 
 Function Get-CSItemPackageProgressId { 909 }
 
