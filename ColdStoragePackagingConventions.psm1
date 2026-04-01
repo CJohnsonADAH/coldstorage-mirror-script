@@ -213,13 +213,22 @@ End { }
 }
 
 Function Get-ItemPackageZippedBag {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] $Force=$false, [switch] $ReturnContainer=$false )
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File,
+    [switch] $Recurse,
+    [switch] $Force=$false,
+    [switch] $ReturnContainer=$false,
+    [switch] $Profile=$false
+)
 
     Begin {
         $Result = @( )
+        If ( $Profile ) { $tN = @( Get-Date ) }
     }
 
     Process {
+
+        If ( $Profile ) { $tN += , ( Get-Date ) }
 
         $oJustZippedNotes = ( $File | Get-Member -MemberType NoteProperty -Name "Zip" )
         If ( $oJustZippedNotes ) {
@@ -228,6 +237,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] 
         Else {
             $oFile = Get-FileObject($File)
         }
+
+        If ( $Profile ) { $tN += , ( Get-Date ) }
 
         # 1. Does this have a Package property .CSPackageZip? If so, return that.
         $oZipNotes = ( $oFile | Get-Member -MemberType NoteProperty -Name "CSPackageZip" )
@@ -282,6 +293,8 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] 
             }
         }
 
+        If ( $Profile ) { $tN += , ( Get-Date ) }
+
         If ( $Result.Count -gt 0 ) {
             If ( -Not $ReturnContainer ) {
                 $Result | Write-Output
@@ -292,9 +305,12 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse, [switch] 
     }
 
     End {
+        If ( $Profile ) { $tN += , ( Get-Date ) }
+
         If ( $Result.Count -gt 0 ) {
             $Result | Select-ZippedBagsContainers | Write-Output
         }
+
     }
 
 }
@@ -380,6 +396,8 @@ Function Get-PathToBaggedCopyOfLooseFile {
         [Switch]
         $Wildcard,
 
+        $Timestamp=$null,
+
         [Parameter(ValueFromPipeline=$true)]
         $File
     )
@@ -399,7 +417,11 @@ Function Get-PathToBaggedCopyOfLooseFile {
             # 4 = YYYY, 2 = mm, 2 = dd, 2 = HH, 2 = MM, 2 = SS
             $Suffix = ( "[0-9]" * ( 4 + 2 + 2 + 2 + 2 + 2) )
         } else {
-            $DateStamp = ( Date -UFormat "%Y%m%d%H%M%S" )
+            $TS = $Timestamp
+            If ( $TS -eq $null ) {
+                $TS = ( Get-Date )
+            }
+            $DateStamp = ( $TS.ToString( "yyyyMMddHHmmss" ) )
             $Suffix = "${DateStamp}"
         }
         $Suffix = "_bagged_${Suffix}"
@@ -1140,12 +1162,16 @@ Param (
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
     [switch] $ShowWarnings=$false,
+    [switch] $Profile=$false,
     [switch] $Progress=$false
 )
 
-    Begin { }
+    Begin {
+        If ( $Profile ) { $tN = @( Get-Date ) }
+    }
 
     Process {
+        If ( $Profile ) { $tN += , ( Get-Date ) }
 
         $File = ( $Item | Get-FileObject )
 
@@ -1160,6 +1186,7 @@ Param (
         Write-Debug ( "Entered Get-ItemPackage: {0} -At:{1} -Recurse:{2} -Ascend:{3} -AscendTop:{4} -CheckZipped:{5} -ShowWarnings:{6}" -f $File.FullName, $At, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings )
 
         If ( $Progress ) { Write-Progress -Id:( Get-CSItemPackageProgressId ) -Activity "Getting preservation packages" -Status $File.FullName }
+        If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity "Getting preservation packages" -Status:( "{0}: {1}" -f ( $tN[-1] - $tN[-2] ), $File.FullName ) }
 
         If ( ( $File.Name -eq "." ) -or ( $File.Name -eq ".." ) ) {
             Continue
@@ -1239,6 +1266,8 @@ Param (
         }
 
         If ( $oFile.CSPackageContentFiles.Count -gt 0 ) {
+            If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity:"Getting preservation packages" -Status:( "{0}: Preparing return object: {1}" -f ( $tN[-1] - $tN[-2] ), $oFile.FullName ) }
+
             $Package = $oFile
 
             $oRepository = ( $oFile | Get-FileRepositoryLocation )
@@ -1252,14 +1281,21 @@ Param (
             $Package | Add-ItemPackageBagData -Contents:$oFile.CSPackageContentFiles -Bagged:$bBagged -BagLocation:$oBagLocation 
 
             $oCloudCopy = $null
+
+            If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity:"Getting preservation packages" -Status:( "{0}: Adding zip data to return object: {1}" -f ( $tN[-1] - $tN[-2] ), $oFile.FullName ) }
             
-            If ( $aZipped -ne $false ) {
+            If ( $CheckZipped ) {
+                "[{0}] CheckZipped={1} ; Add-ItemPackageZipData -Zip:{2}" -f ( Get-CSDebugContext -Function:$MyInvocation ), $CheckZipped, ( '["{0}"]' -f ( ( $aZipped |% { $_.FullName } ) -join '", "' ) ) | Write-Debug
                 $Package | Add-ItemPackageZipData -Zip:$aZipped
             }
+
+            If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity:"Getting preservation packages" -Status:( "{0}: Adding mirror data to return object: {1}" -f ( $tN[-1] - $tN[-2] ), $oFile.FullName ) }
 
             If ( $CheckMirrored ) {
                 $Package | Add-ItemPackageMirrorData
             }
+
+            If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity:"Getting preservation packages" -Status:( "{0}: Adding cloud data to return object: {1}" -f ( $tN[-1] - $tN[-2] ), $oFile.FullName ) }
 
             If ( $CheckCloud ) {
                 $Package | Add-ItemPackageCloudCopyData
@@ -1282,6 +1318,8 @@ Param (
             }
             $Package | Add-Member -MemberType NoteProperty -Name "CSPackageChecked" -Value:( $PackageChecked | Select-Object -Unique ) -Force
 
+            If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity:"Getting preservation packages" -Status:( "{0}: Outputting return object: {1}" -f ( $tN[-1] - $tN[-2] ), $Package.FullName ) }
+
             $Package | Write-Output
         }
         ElseIf ( $Ascend ) {
@@ -1296,11 +1334,15 @@ Param (
             }
         }
 
+        If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity "Getting preservation packages" -Status:( "{0}: Exiting GetItemPackage" -f ( $tN[-1] - $tN[-2] ), $File.FullName ) }
         ( "Exited Get-ItemPackage: {0} -Recurse:{1} -Ascend:{2} -AscendTop:{3} -CheckZipped:{4} -ShowWarnings:{5}" -f $File.FullName, $Recurse, $Ascend, $AscendTop, $CheckZipped, $ShowWarnings ) | Write-Debug
 
     }
 
-    End { }
+    End {
+        If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity "Getting preservation packages" -Status:( "DONE" ) -Completed }
+
+    }
 }
 
 Function Get-ChildItemPackages {
@@ -1434,10 +1476,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
 
     Process {
         $jsonFile = ( $Package | Get-ItemPackageMetadataFilePath )
-
+        "JSON: {0}" -f $jsonFile|Write-Debug
         If ( $jsonFile -ne $null ) {
 
-            If ( Test-Path -LiteralPath $jsonFile -PathType Leaf ) {
+            "Test-Path -LiteralPath:{0} -PathType:Leaf :: {1}" -f $jsonFile, ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) |Write-Debug
+            If ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) {
                 Get-Item -LiteralPath $jsonFile -Force
             }
 

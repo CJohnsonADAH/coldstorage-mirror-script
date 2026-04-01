@@ -822,8 +822,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
     Begin { $AWS = $( Get-ExeForAWSCLI ); If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
-        "[Add-PackageToCloudStorageBucket] HERE WE ARE..."|Write-Warning
+        "[{0}] HERE WE ARE ... ({1})" -f ( Get-CSDebugContext -Function:$MyInvocation ),( $tN = @( Get-Date ) )[-1] | Write-Warning
         $File | Remove-PackageCloudStorageBucketListingCache
+        "[{0}] CACHED CLEARED ... ({2} / {1})" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
 
         $oFile = $null
         $ItemPackages = ( $File | Get-ItemPackageForCloudStorageBucket -Recurse:$Recurse -Force -ShowWarnings:("{0} to cloud" -f $global:gCSScriptName) )
@@ -832,12 +833,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
             $oFile = $_
 			$Package = ( $File | Get-ItemPackage -At -FromZip )
 			$vLogFile = ( $Package | & get-itempackageeventlog-cs.ps1 -Event:"preservation-to-cloud" -Timestamp:( Get-Date ) -Force )
-            
+
             $sFileName = $oFile.Name
 			$sFile = $oFile.FullName
 
             # Retrieve a bucket name based on the package object, using its props file cascade
             $Bucket = ( $Package | Get-CloudStorageBucket )
+
+            "[{0}] FOR-EACH ITEMPACKAGES({1}) ... About to upload ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
 
             If ( $Bucket ) {
                 # AWS-CLI does not cope well with long path names even if Windows is configured to handle them.
@@ -851,10 +854,15 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                 }
                 
                 $s3Uri = ( "s3://{0}/{1}" -f $Bucket,$sFileName )
+                
+                "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 ls '${s3Uri}' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Warning
                 $s3Ls = ( & "${AWS}" s3 ls $s3Uri ) ; $s3LsExit = $LASTEXITCODE
 
                 If ( $s3LsExit -ne 0 ) {
 				    $sCmd = ( '& {0} s3 cp "{1}" "s3://{2}/" --storage-class DEEP_ARCHIVE {3}' -f ${AWS},${sFile},${Bucket},${sWhatIf} )
+                    
+                    "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 cp '${sFile}' 's3://${Bucket}/' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Warning
+
                     & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
                         # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
                         If ( "$_" -match "Completed\s+[0-9.]+\s+.*\s+with\s+[0-9]+.*\s+remaining\s*" ) {
