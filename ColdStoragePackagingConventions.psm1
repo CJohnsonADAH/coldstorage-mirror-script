@@ -1047,7 +1047,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Bag )
 
     Begin {
         $Payload = ( $Bag | Select-BagItPayloadDirectory )
-        $ExcludeRegex = ( "^(bagged-[0-9]+|logs|manifest[.]html)$" )
+        $ExcludeRegex = ( "^([.]?bagged-[0-9]+|logs|manifest[.]html|package[.]json)$" )
     }
 
     Process {
