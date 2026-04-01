@@ -1253,12 +1253,14 @@ Param(
                 $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
                 $aListing = ( $oListing | Get-TablesMerged )
                     
-                $aZipped |% {
-                    $itemZipped = $_
-                    $itemZippedName = ( $itemZipped.Name -replace "[.]json$","" )
-                    $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $itemZippedName ) ) )
-                    If ( $aListing.ContainsKey( $itemZippedName ) ) {
-                        $Copy = $aListing[ $itemZippedName ]
+                $itemZipKeys = ( $Package | Get-ItemPackageCloudStorageKey )
+                $itemZipKeys |% {
+
+                    $Key = $_
+
+                    $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $Key ) ) )
+                    If ( $aListing.ContainsKey( $Key ) ) {
+                        $Copy = $aListing[ $Key ]
                         If ( $oCloudCopy -eq $null ) {
                             $oCloudCopy = $Copy
                         }

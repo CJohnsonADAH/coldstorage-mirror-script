@@ -561,6 +561,48 @@ Param(
 
 }
 
+Function Get-ItemPackageCloudStorageKey {
+Param( [Parameter(ValueFromPipeline=$true)] $File, [Int] $N=-1 )
+
+    Begin {
+        $Keys = @( )
+    }
+
+    Process {
+        $Package = $File
+        
+        # We need the ZIP file name, if there is any available. Check to secure this.
+        $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedZipped )
+        If ( $NotYetChecked ) {
+            $Package = ( $File | Get-ItemPackage -At -CheckZipped -Force )
+        }
+
+        # Get the ZIP file name
+        $ZipNames = ( $Package.CSPackageZip )
+        If ( $ZipNames.Count -gt 0 ) {
+
+            # json marker files reveal the name of the original ZIP prior to the file extension
+            $ZipNames |% {
+                $Keys += @( ( $_.Name -replace "[.]json$","" ) )
+            }
+
+        }
+
+    }
+
+    End {
+    
+        # Output 1..N of the processed keys (derived from ZIP file names)
+        $Keys = ( $Keys | Select-Object -Unique )
+        If ( $N -ge 0 ) {
+            $Keys = ( $Keys | Select-Object -First:$N )
+        }
+
+        $Keys | Write-Output
+
+    }
+
+}
 
 Function Get-CloudStorageListing {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $From="", [string] $To="", [string] $Context="Get-CloudStorageListing" )
@@ -998,6 +1040,7 @@ Export-ModuleMember -Function Get-CloudStorageTimestamp
 Export-ModuleMember -Function Get-CloudStorageBucketProperties
 Export-ModuleMember -Function Get-PackageCloudStorageBucketCacheDirectory
 Export-ModuleMember -Function Get-CloudStorageBucketObjectList
+Export-ModuleMember -Function Get-ItemPackageCloudStorageKey
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket
