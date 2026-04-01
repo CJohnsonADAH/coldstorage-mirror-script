@@ -1910,7 +1910,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
                     If ( $pack.FullName -ne $pack.CSPackageBagLocation.FullName ) {
                         $metadata["Location-Bag"] = ( $pack.CSPackageBagLocation.FullName )
                     }
-                    [PSCustomObject] $metadata | ConvertTo-Json | Out-File $jsonItem.FullName -Encoding utf8
+                    [PSCustomObject] $metadata | ConvertTo-Json | Out-File -LiteralPath:$jsonItem.FullName -Encoding utf8
 
                     $jsonItem | Write-Output
 
@@ -2273,7 +2273,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Directory, [switch] $RelativeHref=$
                 | ConvertTo-HTMLLink -RelativeTo $UNC -RelativeHref:${RelativeHref} `
                 | ConvertTo-HTMLList `
                 | ConvertTo-HTMLDocument -Title ( "Contents of: {0}" -f [System.Web.HttpUtility]::HtmlEncode($UNC) ) `
-                | Out-File -LiteralPath $indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
+                | Out-File -LiteralPath:$indexHtmlPath -NoClobber:(-Not $Force) -Encoding utf8
                 
             }
             Else {
