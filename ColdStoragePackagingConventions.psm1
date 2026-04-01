@@ -433,23 +433,30 @@ Function Get-PathToBaggedCopyOfLooseFile {
 }
 
 Function Test-UnbaggedLooseFile {
-Param ( $File )
+Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
-    $oFile = Get-FileObject($File)
+    Begin { }
+
+    Process {
+        $oFile = ( $File | Get-FileObject )
     
-    $result = $false
-    If ( -Not ( $oFile -eq $null ) ) {
-        If ( Test-LooseFile($File) ) {
-            $result = $true
-            $bag = Get-BaggedCopyOfLooseFile -File $oFile
+        $result = $false
+        If ( -Not ( $oFile -eq $null ) ) {
+            If ( $oFile | Test-LooseFile ) {
+                $result = $true
+                $bag = ( Get-BaggedCopyOfLooseFile -File $oFile )
                        
-            if ( $bag.Count -gt 0 ) {
-                $result = $false
+                if ( $bag.Count -gt 0 ) {
+                    $result = $false
+                }
             }
         }
-    }
     
-    $result
+        $result | Write-Output
+    }
+
+    End { }
+
 }
 
 Function Get-LooseFileOfBaggedCopy {
