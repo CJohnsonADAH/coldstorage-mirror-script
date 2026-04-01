@@ -110,7 +110,7 @@ Import-Module -Verbose:$false Posh-SSH
 
 # Internal Dependencies - Modules
 $bVerboseModules = ( $Debug -eq $true )
-$bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) )
+$bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) -or ( $Force ) )
 
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageData.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageInteraction.psm1" )
