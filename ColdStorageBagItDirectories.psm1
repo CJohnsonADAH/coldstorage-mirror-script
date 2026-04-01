@@ -23,6 +23,26 @@ $global:CSBIDScriptDirectory = ( My-Script-Directory -Command $MyInvocation.MyCo
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
+Function Get-BagItFormattedDirectoryPayload {
+Param ( [Parameter(ValueFromPipeline=$true)] $Bag, $Output="string" )
+
+    Begin { }
+
+    Process {
+
+        $Payload = "data"
+        If ( $Bag -ne $null ) {
+            $Payload = ( $Bag | Get-FileLiteralPath | Join-Path -ChildPath $Payload )
+        }
+
+        $Payload |% { If ( $Output -eq 'object' ) { $_ | Get-FileObject } Else { $_ } } | Write-Output
+
+    }
+
+    End { }
+
+}
+
 Function Test-BagItFormattedDirectory {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
@@ -35,7 +55,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
         If ( ( $oFile -ne $null ) -and ( $oFile | Get-Member -Name FullName ) ) {
             $BagDir = $oFile.FullName
             If ( Test-Path -LiteralPath $BagDir -PathType Container ) {
-                $PayloadDir = ( "${BagDir}" | Join-Path -ChildPath "data" )
+                $PayloadDir = ( $BagDir | Get-BagItFormattedDirectoryPayload )
                 if ( Test-Path -LiteralPath $PayloadDir -PathType Container ) {
                     $BagItTxt = ( "${BagDir}" | Join-Path -ChildPath "bagit.txt" )
                     if ( Test-Path -LiteralPath $BagItTxt -PathType Leaf ) {
@@ -218,7 +238,7 @@ Begin { }
 
 Process {
     If ( $File -ne $null ) {
-        $sPath = ( ( Get-FileObject($File).FullName ) | Join-Path -ChildPath "data" )
+        $sPath = ( $File | Get-BagItFormattedDirectoryPayload )
         If ( Test-Path -LiteralPath "${sPath}" -PathType Container ) {
             Get-Item -Force -LiteralPath "${sPath}"
         }
@@ -245,6 +265,7 @@ End { }
 
 }
 
+Export-ModuleMember -Function Get-BagItFormattedDirectoryPayload
 Export-ModuleMember -Function Test-BagItFormattedDirectory
 Export-ModuleMember -Function Test-BagItFormattedDirectoryContent
 Export-ModuleMember -Function Test-CSBaggedPackageValidates
