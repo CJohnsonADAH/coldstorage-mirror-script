@@ -392,7 +392,7 @@ Param (
                 $sZipName = ( Get-ZippedBagNamePrefix -File $oFile -Extension:'zip' )
                 $sZipPath = ( $sRepository | Join-Path -ChildPath:$sZipName )
 
-				$oPackage = ( $oFile | Get-ItemPackage -At )
+				$oPackage = ( $oFile | Get-ItemPackage -At -Force )
 
                 # Document in package metadata
                 $meta = ( $oPackage | Get-ItemPackageMetadataFile )
