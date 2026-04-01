@@ -203,7 +203,7 @@ Function Test-CSBaggedPackageValidates ($DIRNAME, [String[]] $Skip=@( ), [switch
         If ( $NotOK -gt 0 ) {
             $OldErrorView = $ErrorView; $ErrorView = "CategoryView"
             
-            "ERR-BagIt: ${DIRNAME}" | Write-Warning
+            "ERR-BagIt: ${DIRNAME}" | Write-Output
             If ( -Not $Verbose ) {
                 $Output | Write-Warning
             }
