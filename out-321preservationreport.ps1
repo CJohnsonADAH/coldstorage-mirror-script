@@ -1,20 +1,24 @@
 ﻿Param (
     [Parameter(ValueFromPipeline=$true)] $Item,
-    $N=10000,
+    $N=$null,
     $Output='text/plain',
+    $Header="~~~",
+    $Footer="~~~",
     [switch] $Bags=$false,
     [switch] $WSFA=$false,
     [switch] $Flat=$false,
     $Log=$null,
     [switch] $Attn=$false,
     $AttnLog=$null,
-    [switch] $Summary=$false
+    [switch] $Summary=$false,
+    [switch] $Profile=$false
 )
 
 
 Begin {
 
     $ExitCode = 0
+    $Process_Loops = 0
 
 #############################################################################################################
 ## DEPENDENCIES #############################################################################################
@@ -130,6 +134,30 @@ Begin {
 
     }
 
+    Function Write-ProfileProgress {
+    Param( [Parameter(ValueFromPipeline)] $Message, $tN, $Log=$null, $Activity="Processing", $Id=067 )
+
+        Begin { }
+
+        Process {
+            $Status = ( '[{0}: {1}] {2}' -f ( $tN[-1] - $tN[-2] ), $tN[-1], $Message )
+            Write-Progress -Id:$Id -Activity:$Activity -Status:$Status
+            If ( $Log -ne $null ) {
+                $SkipCsv = 0
+                If ( Test-Path -LiteralPath:$Log ) {
+                    $SkipCsv = 1
+                }
+                [PSCustomObject] @{ "t0"=$tN[0]; "tN"=$tN[-1]; "N"=( $tN | Measure-Object ).Count; "Message"=$status } | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip:$SkipCsv | Out-File -Encoding:utf8 -LiteralPath:$Log -Append
+            }
+        }
+
+        End { }
+    
+    }
+
+    If ( $Header ) {
+        $Header -f ( Get-Date ) | Write-Host -ForegroundColor:Gray
+    }
 
 }
 
@@ -138,6 +166,7 @@ Begin {
 #############################################################################################################
 
 Process {
+    $Process_Loops = $Process_Loops + 1
 
     If ( $Item -eq $null ) {
         $oItem = ( Get-Item -LiteralPath:. -Force )
@@ -146,15 +175,29 @@ Process {
         $oItem = ( $Item | Get-FileObject )
     }
 
-    $t0 = ( Get-Date ) 
+    If ( $Process_Loops -gt 1 ) {
+        "" | Write-Host
+    }
+
+    $t0 = ( Get-Date ) ; $tN = @( $t0 )
     "START: {0} in {1}" -f $t0, $oItem.FullName | Write-Host -ForegroundColor Cyan
 
     Push-Location -LiteralPath:$oItem.FullName
 
     $sLog = $Log ; If ( $sLog -eq $null ) { $sLog = ( $oItem | Get-321PRLogFilePath -Template:'get-321preservationreport-{0}.log.txt' ) }
     $sAttnLog = $AttnLog ; If ( $sAttnLog -eq $null ) { $sAttnLog = ( $oItem | Get-321PRLogFilePath -Template:'get-321preservationreport-{0}-ATTN-{1}.log.txt' ) }
+    
+    $sProfileLog = $null
+    If ( $Profile ) {
+        $sProfileLog = ( $oItem | Get-321PRLogFilePath -Template:'get-321preservationreport-{0}-PROFILE-{1}.log.txt' )
+    }
 
     $Location = ( Get-Item -LiteralPath . -Force )
+
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Collecting bagged directories' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
 
     If ( $Flat ) {
         $out = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } )
@@ -170,6 +213,9 @@ Process {
         } |? {
             ( $_ | Test-BagItFormattedDirectory )
         } |? {
+            If ( $Profile ) {
+                Write-Progress -Id:068 -Activity:"Screening" -Status:( '[{0}: {1}] Collecting bagged directories: {2}' -f ( (Get-Date) - $tN[-1] ), $tN[-1], $_.FullName )
+            }
             -Not ( $_ | Test-BagItFormattedDirectoryContent )
         } )
     }
@@ -178,25 +224,58 @@ Process {
         $out = ( $out | Select-Object -First:$N )
     }
 
-    $packages = ( $out | & get-itempackage-cs.ps1 -CheckMirrored -CheckZipped -CheckCloud )
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        $Nout = ( $out | Measure-Object ).Count
+        ( '[{0:N0}x] $packages = ( $out | & get-itempackage-cs.ps1 -Check321 -Profile )' -f $Nout ) | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
+    
+    $packages = ( $out | & get-itempackage-cs.ps1 -Check321 -Profile:$Profile )
+
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Sorting and collating: ~' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
 
     $packs = @{}
     $packs['~'] = ( $packages |? { Write-Progress -Id:101 -Activity:"Sorting and collating packages" -Status:( $_ | write-packages-report-cs.ps1 ) ;
         ( ( -Not ( $_ | test-cs-package-is.ps1 -Mirrored ) ) -or ( -Not ( $_.CSPackageZip.Count -gt 0 ) ) -or ( -Not ( $_.CloudCopy -ne $null ) ) )
     } )
 
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Sorting and collating: ~m' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
+
     $packs['~m'] = ( $packs['~'] |? { Write-Progress -Id:101 -Activity:"Sorting and collating packages (mirrored copy)" -Status:( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_ | test-cs-package-is.ps1 -Mirrored ) } )
+
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Sorting and collating: ~z' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
+
     $packs['~z'] = ( $packs['~'] |? { Write-Progress -Id:101 -Activity:"Sorting and collating packages (zipped copy)" -Status:( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_.CSPackageZip.Count -gt 0 ) } )
+
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Sorting and collating: ~c' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
+
     $packs['~c'] = ( $packs['~'] |? { Write-Progress -Id:101 -Activity:"Sorting and collating packages (cloud copy)" -Status:( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_.CloudCopy -ne $null ) } )
+
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Preparing report' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
     
     Write-Progress -Id:101  -Activity:"Sorting and collating packages" -Status:"Done." -Completed
 
-    $tN = ( Get-Date )
+    $tN += , ( Get-Date )
 
     $Rpt = [ordered] @{
         "LOCATION"=$Location.FullName
         "START"= $t0
-        "END"=$tN
+        "END"=$tN[-1]
         "PACKAGES"=( $packages | Measure-Object ).Count
         "MIRRORED"=( ( $packages | Measure-Object ).Count - ( $packs['~m'] | Measure-Object ).Count )
         "ZIPPED"=( ( $packages | Measure-Object ).Count - ( $packs['~z'] | Measure-Object ).Count )
@@ -266,7 +345,11 @@ Process {
         }
 
     }
-    "DONE: {0} ({1})" -f $tN, ($tN - $t0) | Write-Host -ForegroundColor Cyan
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'DONE: {0}' -f $oItem.FullName | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
+    "DONE: {0} ({1})" -f $tN[-1], ($tN[-1] - $tN[0]) | Write-Host -ForegroundColor Cyan
 
     If ( Test-Path -LiteralPath $sLog -PathType Leaf ) {
         $SkipCsvLines=1
@@ -298,11 +381,18 @@ Process {
 
         "ATTN LOG: {0}" -f $sAttnLog | Write-Host -ForegroundColor Cyan
     }
+    If ( $Profile ) {
+        "PROFILE LOG: {0}" -f $sProfileLog | Write-Host -ForegroundColor Yellow
+    }
 
     Pop-Location
 
 }
 
 End {
+    If ( $Footer ) {
+        $Footer -f ( Get-Date ), $ExitCode  | Write-Host -ForegroundColor:Gray
+    }
+
     Exit $ExitCode
 }

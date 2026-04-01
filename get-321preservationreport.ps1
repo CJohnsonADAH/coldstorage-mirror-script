@@ -228,7 +228,7 @@ If ( Test-Path -LiteralPath:$Log -PathType:Leaf ) {
         $Dict | Write-Output
     } )
     "REPORTED: {0} - {1} ({2})" -f $Rpt[ "START" ], $Rpt[ "END" ], ( [DateTime]::Parse( $Rpt[ "END" ] ) - [DateTime]::Parse( $Rpt[ "START" ] ) ) | Write-Host -ForegroundColor:Cyan
-    $Rpt | Write-321PreservationPackagesSummaryReport
+    $Rpt | Write-321PreservationPackagesSummaryReport | Write-Host
     "" | Write-Host
 }
 Else {
@@ -247,8 +247,16 @@ If ( Test-Path -Path:$AttnLogSlug -PathType:Leaf ) {
         $AttnLog = $null
     }
     ElseIf ( $Attn ) {
+        If ( $AttnSelect -is [ScriptBlock] ) {
+            $AttnObjects = ( $AttnObjects | &$AttnSelect )
+        }
+
         $nAttn = ( $AttnObjects | Measure-Object ).Count
-        If ( $nAttn -le 10 ) {
+        
+        If ( $Output -ne 'text/plain' ) {
+                $AttnLog['ALL'] = $AttnObjects
+        }
+        ElseIf ( $nAttn -le 10 ) {
             $AttnLog['ALL'] = $AttnObjects
         }
         Else {
@@ -257,6 +265,7 @@ If ( Test-Path -Path:$AttnLogSlug -PathType:Leaf ) {
             $AttnLog['DELIM'] = '[...]'
             $AttnLog['END'] = ( $AttnObjects | Select-Object -Last:10 )
         }
+
     }
 
     If ( $AttnLog -ne $null ) {
@@ -269,8 +278,17 @@ If ( Test-Path -Path:$AttnLogSlug -PathType:Leaf ) {
 
                     $p = ( $_ | Get-321PRPackage )
                     If ( $p -ne $null ) {
-                        $oContext = ( $p | Get-FileRepositoryLocation )
-                        "ATTN: {0}" -f ( $p | write-packages-report-cs.ps1 -Context:$oContext.FullName ) | Write-Attn
+                        If ( $Output -eq 'text/plain' ) {
+                            $oContext = ( $p | Get-FileRepositoryLocation )
+                            "ATTN: {0}" -f ( $p | write-packages-report-cs.ps1 -Context:$oContext.FullName ) | Write-Attn
+                        }
+                        ElseIf ( $Output -eq 'object' ) {
+                            $p | Write-Output
+                        }
+                        Else {
+                            $oContext = ( $p | Get-FileRepositoryLocation )
+                            "ATTN: {0}" -f ( $p | write-packages-report-cs.ps1 -Context:$oContext.FullName ) | Write-Attn
+                        }
                     }
                 }
             }
@@ -279,138 +297,3 @@ If ( Test-Path -Path:$AttnLogSlug -PathType:Leaf ) {
 }
 Pop-Location
 
-Exit 255
-
-$Location = ( Get-Item -LiteralPath . -Force )
-
-If ( $Flat ) {
-    $out = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } )
-}
-ElseIf ( $WSFA ) {
-    $out = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } |% { Get-ChildItem $_.FullName -Directory } )
-}
-Else {
-    $out = ( Get-ChildItem -Directory -Recurse -Force |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } |? {
-        ( $_ | Test-BagItFormattedDirectory )
-    } |? {
-        -Not ( $_ | Test-BagItFormattedDirectoryContent )
-    } )
-}
-
-If ( $N -ne $null ) {
-    $out = ( $out | Select-Object -First:$N )
-}
-
-$packages = ( $out | & get-itempackage-cs.ps1 -CheckMirrored -CheckZipped -CheckCloud )
-
-$packs = @{}
-$packs['~'] = ( $packages |? { Write-Progress ( $_ | write-packages-report-cs.ps1 ) ;
-    ( ( -Not ( $_ | test-cs-package-is.ps1 -Mirrored ) ) -or ( -Not ( $_.CSPackageZip.Count -gt 0 ) ) -or ( -Not ( $_.CloudCopy -ne $null ) ) )
-} )
-
-$packs['~m'] = ( $packs['~'] |? { Write-Progress ( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_ | test-cs-package-is.ps1 -Mirrored ) } )
-$packs['~z'] = ( $packs['~'] |? { Write-Progress ( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_.CSPackageZip.Count -gt 0 ) } )
-$packs['~c'] = ( $packs['~'] |? { Write-Progress ( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_.CloudCopy -ne $null ) } )
-
-$tN = ( Get-Date )
-
-$Rpt = [ordered] @{
-    "LOCATION"=$Location.FullName
-    "START"= $t0
-    "END"=$tN
-    "PACKAGES"=( $packages | Measure-Object ).Count
-    "MIRRORED"=( ( $packages | Measure-Object ).Count - ( $packs['~m'] | Measure-Object ).Count )
-    "ZIPPED"=( ( $packages | Measure-Object ).Count - ( $packs['~z'] | Measure-Object ).Count )
-    "CLOUD"=( ( $packages | Measure-Object ).Count - ( $packs['~c'] | Measure-Object ).Count )
-}
-
-$oRpt = ( [PSCustomObject] $Rpt )
-
-If ( $Output -eq 'CSV' ) {
-    $oRpt | ConvertTo-Csv -NoTypeInformation
-}
-ElseIf ( $Output -eq 'Object' ) {
-    $oRpt | Write-Output
-}
-Else {
-    "TOTAL: {0:N0}" -f $Rpt["PACKAGES"]
-
-    "MIRRORED", "ZIPPED","CLOUD" |% {
-        "{0}: {1:N0} / {2:N0} ({3:N2}% complete, {4:N0} remaining)" -f $_, $Rpt[ $_ ], $Rpt["PACKAGES"], (100.0*$Rpt[ $_ ]/$Rpt["PACKAGES"]), ( $Rpt[ "PACKAGES" ] - $Rpt[ $_ ] )
-    }
-
-    $AttnRpt = $null
-    If ( $Attn ) {
-        $AttnRpt = @( )
-        $packs['~'] |% {
-            If ( -Not $Summary ) {
-                ( "ATTN: {0}" -f ( $_ | write-packages-report-cs.ps1 ) ) | Write-Host -ForegroundColor Yellow
-            }
-            
-            $RepoLocation = ( $_ | Get-FileRepositoryLocation )
-            If ( $RepoLocation ) {
-                Push-Locaiton $RepoLocation.FullName
-                $RelPath = ( Resolve-Path $_.FullName -Relative )
-                $RepoPrefix = ( '$({0})' -f ( $_ | Get-FileRepositoryPrefix ) )
-                $RelPath = ( $RelPath -replace '^.',$RepoPrefix )
-                Pop-Location
-            }
-            Else {
-                $RelPath = ( Resolve-Path $_.FullName -Relative )
-            }
-
-            $aAttn = [ordered] @{ "Path"=$RelPath ; "File"=$_.FullName ; "Repository"=$Repo }
-
-            If ( $_.CSPackageMirrorCopy ) {
-                $aAttn[ 'Mirror' ] = $_.CSPackageMirrorCopy.FullName
-            }
-            Else {
-                $aAttn[ 'Mirror' ] = ""
-            }
-            If ( $_.CSPackageZip ) {
-                $aAttn[ 'Zip' ] = $_.CSPackageZip.FullName
-            }
-            Else {
-                $aAttn[ 'Zip' ] = ""
-            }
-            If ( $_.CSPackageCloudCopy ) {
-                $aAttn[ 'Cloud' ] = ( 's3://{0}/{1}' -f $_.CSPackageCloudCopy.Bucket, $_.CSPackageCloudCopy.Key )
-            }
-            Else {
-                $aAttn[ 'Cloud' ] = ""
-            }
-            $AttnRpt = @( $AttnRpt ) + @( [PSCustomObject] $aAttn )
-        }
-        If ( $Summary ) {
-            $AttnCount = ( $packs['~'] | Measure-Object ).Count
-            "ATTN: {0:N0} / {1:N0} ({2:N2}% complete)" -f $AttnCount, $Rpt[ "PACKAGES" ], ( 100.0* ( $Rpt[ "PACKAGES" ] - $AttnCount ) / $Rpt[ "PACKAGES" ] )
-        }
-
-    }
-
-}
-"DONE: {0} ({1})" -f $tN, ($tN - $t0) | Write-Host -ForegroundColor Cyan
-
-If ( Test-Path -LiteralPath $Log -PathType Leaf ) {
-    $SkipCsvLines=1
-}
-Else {
-    $SkipCsvLines=0
-}
-$Lines = ( $oRpt | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip:$SkipCsvLines )
-$Lines | Out-File -Encoding utf8 -Append -LiteralPath $Log
-
-"LOG: {0}" -f $Log | Write-Host -ForegroundColor Cyan
-
-If ( Test-Path -LiteralPath $AttnLog -PathType Leaf ) {
-    $SkipCsvLines=1
-}
-Else {
-    $SkipCsvLines=0
-}
-If ( $AttnRpt -ne $null ) {
-    $Lines = ( $AttnRpt | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip:$SkipCsvLines )
-    $Lines | Out-File -Encoding utf8 -Append -LiteralPath $AttnLog
-}
-
-"ATTN LOG: {0}" -f $AttnLog | Write-Host -ForegroundColor Cyan

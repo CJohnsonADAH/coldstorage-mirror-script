@@ -7,7 +7,9 @@
     [switch] $CheckZipped=$false,
     [switch] $CheckMirrored=$false,
     [switch] $CheckCloud=$false,
-    [switch] $ShowWarnings=$false
+    [switch] $Check321=$false,
+    [switch] $ShowWarnings=$false,
+    [switch] $Profile=$false
 )
 
 Begin {
@@ -23,6 +25,12 @@ Begin {
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageStats.psm1" )
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageToCloudStorage.psm1" )
 
+    If ( $Check321 ) {
+        $CheckMirrored = $true
+        $CheckZipped = $true
+        $CheckCloud = $true
+    }
+
     $ExitCode = 0
 }
 
@@ -31,7 +39,7 @@ Process {
         $Orig = $_
         $oItem = ( $Item | Get-FileObject )
         If ( $oItem ) {
-            $oPackage = ( $oItem | Get-ItemPackage -At:$At -Ascend:$Ascend -Force:$Force -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud )
+            $oPackage = ( $oItem | Get-ItemPackage -At:$At -Ascend:$Ascend -Force:$Force -CheckZipped:$CheckZipped -CheckMirrored:$CheckMirrored -CheckCloud:$CheckCloud -Profile:$Profile )
             If ( $Orig -is [Object] ) {
                 $Orig | Get-Member -MemberType NoteProperty -Name CS* |% {
                     $PropName = $_.Name

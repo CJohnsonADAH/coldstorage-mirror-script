@@ -146,7 +146,7 @@ Begin {
             $sFileSizeReadable = ( "{0}" -f ( $Package.CSPackageFileSize | Format-BytesHumanReadable ) )
             $sBagFile = $( If ( $Package.CSPackageBagLocation ) { $Package.CSPackageBagLocation.FullName | Resolve-Path -Relative } Else { "" } )
             $sBaggedLocation = $( If ( $Package.CSPackageBagLocation -and ( $Package.CSPackageBagLocation.FullName -ne $Package.FullName ) ) { ( " # bag: {0}" -f ( $Package.CSPackageBagLocation.FullName | Resolve-PathRelativeTo -Base $Package.FullName ) ) } Else { "" } )
-
+            
             Pop-Location
 
             If ( $CheckMirrored ) {
