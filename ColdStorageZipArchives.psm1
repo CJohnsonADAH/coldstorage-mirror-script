@@ -447,11 +447,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Location, [switch] $All=$false )
 
     Process {
         $Props = ( $Location.FullName | Get-ItemColdStorageProps -Cascade )
-        $ZipUniverse = $Props["Zip"]
+        If ( $Props.ContainsKey( "Zip" ) ) {
+            $ZipUniverse = $Props[ "Zip" ]
+            $ZipUniverse | ConvertTo-ColdStorageSettingsFilePath
+        }
 
         $JunctionDestination = $null
         If ( $ZipUniverse ) {
-            $ZipUniverse = ( $ZipUniverse | ConvertTo-ColdStorageSettingsFilePath | Get-LocalPathFromUNC )
+            $ZipUniverse = ( $ZipUniverse | Get-LocalPathFromUNC )
         "ZIP UNIVERSE: {0}" -f $ZipUniverse|Write-Warning
             $JunctionDestination = ( $Props.Cascade | Select-Object -First 1 | Split-MirrorMatchedPath -Stem |% { $ZipUniverse | Join-Path -ChildPath $_ } )
             If ( $JunctionDestination ) {
