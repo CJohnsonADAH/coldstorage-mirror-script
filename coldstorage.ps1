@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0309
+@version 2026.0403
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1101,9 +1101,11 @@ Param ( [string] $Destination, $What, [switch] $Repository, [switch] $Diff, [swi
             $Candidates = ( $What | Get-ItemPackageZippedBag -ReturnContainer | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
             $Candidates | Write-Verbose
             $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
+            $Candidates | Get-ItemPackage -At -Force -CheckZipped -CheckCloud | Add-ItemPackageCloudCopyDataCache -WhatIf:${WhatIf}
         }
         Else {
             $What | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
+            $What | Get-ItemPackage -At -Force -CheckZipped -CheckCloud | Add-ItemPackageCloudCopyDataCache -WhatIf:${WhatIf}
         }
     }
     ElseIf ( $Destination -eq "drop" ) {

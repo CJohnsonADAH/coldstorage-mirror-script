@@ -1248,24 +1248,47 @@ Param(
         }
         ElseIf ( $Force -or $NotYetChecked ) {
             $aZipped = $Package.CSPackageZip
-            If ( $aZipped.Name ) {
+            If ( ( $aZipped | Measure-Object ).Count -gt 0 ) {
 
-                $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
-                $aListing = ( $oListing | Get-TablesMerged )
+                $aCached = ( $aZipped | Get-ItemPackageCloudCopyDataCache )
+                "[{0}] CLOUD DATA CACHE FILE(s): [{1}]" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( ( $aCached |% { "'{0}'" -f $_.FullName } ) -join ', ' ) | Write-Verbose
+
+                If ( ( $aCached | Measure-Object ).Count -gt 0 ) {
                     
-                $itemZipKeys = ( $Package | Get-ItemPackageCloudStorageKey )
-                $itemZipKeys |% {
-
-                    $Key = $_
-
-                    $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $Key ) ) )
-                    If ( $aListing.ContainsKey( $Key ) ) {
-                        $Copy = $aListing[ $Key ]
-                        If ( $oCloudCopy -eq $null ) {
-                            $oCloudCopy = $Copy
+                    $aCached | Sort-Object -Property LastWriteTime -Descending |% {
+                        
+                        $jsonCopy = $null
+                        $jsonCopy = ( Get-Content -LiteralPath:$_.FullName | ConvertFrom-Json -ErrorAction:SilentlyContinue )
+                        If ( $jsonCopy -ne $null ) {
+                            If ( $oCloudCopy -eq $null ) {
+                                $oCloudCopy = $jsonCopy
+                            }
+                            Else {
+                                $oCloudCopy = @( $oCloudCopy ) + @( $jsonCopy )
+                            }
                         }
-                        Else {
-                            $oCloudCopy = @( $oCloudCopy ) + @( $Copy )
+
+                    }
+
+                }
+                Else {
+                    $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
+                    $aListing = ( $oListing | Get-TablesMerged )
+                    
+                    $itemZipKeys = ( $Package | Get-ItemPackageCloudStorageKey )
+                    $itemZipKeys |% {
+
+                        $Key = $_
+
+                        $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $Key ) ) )
+                        If ( $aListing.ContainsKey( $Key ) ) {
+                            $Copy = $aListing[ $Key ]
+                            If ( $oCloudCopy -eq $null ) {
+                                $oCloudCopy = $Copy
+                            }
+                            Else {
+                                $oCloudCopy = @( $oCloudCopy ) + @( $Copy )
+                            }
                         }
                     }
                 }

@@ -278,39 +278,50 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
         $Key = $File
         $Bucket = $null
         
-        $oFile = $File
-        If ( $oFile -is [Hashtable] ) {
-            $oFile = [PSCustomObject] $oFile
+        If ( $File -is [Array] ) {
+            $aFile = @( ) + @( $File )
+        }
+        Else {
+            $aFile = @( $File )
         }
 
-        If ( $oFile ) {
+        $aFile |% {
+            
+            $oFile = $_
 
-            If ( $oFile | Get-Member -MemberType NoteProperty -Name Key ) {
-                $Key = ( $oFile.Key )
+            If ( $oFile -is [Hashtable] ) {
+                $oFile = [PSCustomObject] $oFile
             }
-            ElseIf ( $oFile | Get-Member -MemberType NoteProperty -Name CloudCopy ) {
-                $Key = ( $oFile.CloudCopy.Key )
-                $Bucket = ( $oFile.CloudCopy.Bucket )
-            }
-            ElseIf ( $oFile | Get-Member -MemberType Property -Name FullName ) {
-                $Key = ( $oFile.Name )
-            }
+        
+            If ( $oFile ) {
 
-            If ( $Bucket -eq $null ) {
-                If ( $oFile | Get-Member -MemberType NoteProperty -Name Bucket ) {
-                    $Bucket = ( $oFile.Bucket )
+                If ( $oFile | Get-Member -MemberType NoteProperty -Name Key ) {
+                    $Key = ( $oFile.Key )
+                }
+                ElseIf ( $oFile | Get-Member -MemberType NoteProperty -Name CloudCopy ) {
+                    $Key = ( $oFile.CloudCopy.Key )
+                    $Bucket = ( $oFile.CloudCopy.Bucket )
                 }
                 ElseIf ( $oFile | Get-Member -MemberType Property -Name FullName ) {
-                    $Bucket = ( $oFile | Get-CloudStorageBucket )
+                    $Key = ( $oFile.Name )
                 }
+
+                If ( $Bucket -eq $null ) {
+                    If ( $oFile | Get-Member -MemberType NoteProperty -Name Bucket ) {
+                        $Bucket = ( $oFile.Bucket )
+                    }
+                    ElseIf ( $oFile | Get-Member -MemberType Property -Name FullName ) {
+                        $Bucket = ( $oFile | Get-CloudStorageBucket )
+                    }
+                }
+
+                $Scheme = "s3"
+
+                If ( ( $Key -ne $null ) -and ( $Bucket -ne $null ) ) {
+                    ( "{0}://{1}/{2}" -f $Scheme,$Bucket,$Key ) | Write-Output
+                }
+
             }
-
-            $Scheme = "s3"
-
-            If ( ( $Key -ne $null ) -and ( $Bucket -ne $null ) ) {
-                ( "{0}://{1}/{2}" -f $Scheme,$Bucket,$Key ) | Write-Output
-            }
-
         }
 
     }
@@ -715,7 +726,7 @@ End {
                         $isDataGood = $true
                     }
                     Else {
-                        ( "${sContext}could not find contents in JSON reply: {0}; object:" -f ( $pReply | ConvertTo-Json -Compress ) ) | Write-Warning
+                        ( "[0] could not find contents in JSON reply: {1}; object:" -f $sContext,( $pReply | ConvertTo-Json -Compress ) ) | Write-Warning
                         $oReply | Write-Warning
                     }
                 }
@@ -858,6 +869,119 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
 }
 
+Function Get-ItemPackageCloudCopyDataCache {
+Param( [Parameter(ValueFromPipeline=$true)] $Item )
+
+    Begin {
+        $Found = @( )
+    }
+
+    Process {
+        If ( $Item | Get-Member -Name:CSPackageZip ) {
+            $ZipFiles = $Item.CSPackageZip
+        }
+        Else {
+            $ZipFiles = @( $Item )
+        }
+
+        $ZipFiles |% {
+            $ZipFile = $_
+            If ( $ZipFile -ne $null ) {
+                $FileName = ( $ZipFile.Name )
+                $LiteralPath = ( $ZipFile.FullName )
+            
+                If ( $FileName -like '*.json' ) {
+                    $Found += @( $ZipFile )
+                }
+                ElseIf ( $FileName -like '*.zip' ) {
+                    $Counter = ( "{0}.json" -f $LiteralPath )
+                    If ( Test-Path -LiteralPath:$Counter -PathType:Leaf ) {
+                        $Found += @( ( Get-Item -LiteralPath:$Counter -Force ) )
+                    }
+                }
+            }
+        }
+    }
+
+    End {
+        $Found | Sort-Object -Property:FullName -Descending -Unique | Write-Output
+    }
+
+}
+
+Function Add-ItemPackageCloudCopyDataCache {
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $WhatIf=$false )
+
+    Begin { }
+
+    Process {
+        
+        $Package = $File
+        
+        # We need the ZIP file name, if there is any available. Check to secure this.
+        $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedCloud )
+        If ( $NotYetChecked ) {
+            $Package = ( $File | Get-ItemPackage -At -CheckZipped -CheckCloud -Force )
+        }
+
+        If ( $Package.CSPackageCloudCopy ) {
+            $ZipFile = ( $Package.CSPackageZip | Select-Object -First:1 )
+            "[{0}] ZipFile=[{1}]" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( ( $ZipFile |% { $_.Name } ) -join ", " ) | Write-Verbose
+
+            $Keys = ( $Package | Get-ItemPackageCloudStorageKey )
+            If ( $Zip -eq $null ) {
+                $Keys = ( $Keys | Select-Object -First:1 )
+            }
+            Else {
+                $Keys = ( $Keys |? { "$_" -eq $Zip.Name } | Select-Object -First:1 )
+            }
+            "[{0}] Retrieving from listing: Keys=[{1}]" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( ( $Keys |% { "'{0}'" -f $_ } ) -join ", " ) | Write-Verbose
+
+            $Keys |% {
+                "[{0}] Key={0}" -f ( Get-CSDebugContext -Function:$MyInvocation ), $_  | Write-Verbose
+                $jsonFile = ( $ZipFile.Directory.FullName | Join-Path -ChildPath:( '{0}.json' -f $_ ) )
+                $jsonData = ( $Package.CSPackageCloudCopy | ConvertTo-Json )
+                
+                "JSON FILE: {0} :: Contents:" -f $jsonFile | Write-Host -ForegroundColor:Cyan
+                If ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) {
+                    
+                    # We have the JSON file already; by default, do not clobber it
+                    $jsonDataOld = ( Get-Content -LiteralPath:$jsonFile -Raw )
+                    "<<<" | Write-Host -ForegroundColor:Cyan
+                    "{0}" -f $jsonDataOld | Write-Output
+                    ">>>" | Write-Host -ForegroundColor:Cyan
+                    "{0}" -f $jsonData | Write-Host -ForegroundColor:Gray
+
+
+                }
+                ElseIf ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) {
+                    "[{0}] The path '{1}' exists but is not a file. I don't know what to do!" -f ( Get-CSDebugContext -Function:$MyInvocation ), $jsonFile | Write-Warning
+                }
+                Else {
+                    $jsonData | Out-File -Encoding:utf8 -LiteralPath:$jsonFile -WhatIf:$WhatIf
+
+                    "~~~" | Write-Host -ForegroundColor:Cyan
+                    "{0}" -f $jsonData
+                    "~~~" | Write-Host -ForegroundColor:Cyan
+                }
+    
+                $aS3Uris = ( $Package | Get-CloudStorageURI )
+                If ( $aS3Uris.Count -gt 0  ) {
+                    $Package | Add-ItemPackageMetadata -Name:"Location-Cloud" -Value:$aS3Uris -Force -Append -Unique -Make
+                }
+
+            }
+        }
+        Else {
+            "[{0}] '{1}': This package does not have a cloud copy that I can find # ZIP: [{2}]" -f ( Get-CSDebugContext -Function:$MyInvocation ), $Package.FullName, ( $Package.CSPackageZip -join ', ' ) | Write-Warning
+        }
+        
+    }
+
+    End { }
+
+}
+
 Function Add-PackageToCloudStorageBucket {
 Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [switch] $Recurse=$false )
 
@@ -905,7 +1029,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                     
                     "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 cp '${sFile}' 's3://${Bucket}/' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Warning
 
-                    & ${AWS} s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
+                    & "${AWS}" s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
                         # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
                         If ( "$_" -match "Completed\s+[0-9.]+\s+.*\s+with\s+[0-9]+.*\s+remaining\s*" ) {
                             Write-Progress -Id 107 -Status "$_" -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} )
@@ -1044,6 +1168,8 @@ Export-ModuleMember -Function Get-ItemPackageCloudStorageKey
 Export-ModuleMember -Function Get-CloudStorageListing
 Export-ModuleMember -Function Get-ItemPackageForCloudStorageBucket
 Export-ModuleMember -Function Add-PackageToCloudStorageBucket
+Export-ModuleMember -Function Get-ItemPackageCloudCopyDataCache
+Export-ModuleMember -Function Add-ItemPackageCloudCopyDataCache
 Export-ModuleMember -Function Stop-CloudStorageUploadsToBucket
 Export-ModuleMember -Function Stop-CloudStorageUploads
 Export-ModuleMember -Function Get-CloudStorageListOfBuckets
