@@ -104,13 +104,30 @@ $global:gBucketObjects = @{ }
         ( Get-Item -Force -LiteralPath "${ScriptPath}" )
     }
 
+    Function Get-CSScriptVersion {
+    Param ( [string] $Verb="", $Words=@( ), $Flags=@{ } )
+
+        $oHelpMe = ( Get-Help ${global:gCSScriptPath} )
+        $ver = ( $oHelpMe.Synopsis -split "@" |% { If ( $_ -match '^version\b' ) { $_ } } )
+        If ( $ver.Count -gt 0 ) { Write-Output "${global:gCSScriptName} ${ver}" }
+        Else { $oHelpMe }
+
+    }
+
+$global:gCSScriptVersion = ( Get-CSScriptVersion ); $versionChange = $false
+If ( $env:COLDSTORAGE_SCRIPT_VERSION -ne $global:gCSScriptVersion ) {
+    $versionChange = $true
+    "[coldstorage.ps1] Detected version change in script ({0} -> {1}). Forcing reload of all modules." -f $env:COLDSTORAGE_SCRIPT_VERSION, $global:gCSScriptVersion | Write-Verbose
+}
+$env:COLDSTORAGE_SCRIPT_VERSION = $global:gCSScriptVersion
+
 # External Dependencies - Modules
 Import-Module -Verbose:$false BitsTransfer
 Import-Module -Verbose:$false Posh-SSH
 
 # Internal Dependencies - Modules
 $bVerboseModules = ( $Debug -eq $true )
-$bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) -or ( $Force ) )
+$bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) -or ( $Force ) -or ( $versionChange ) )
 
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageData.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageInteraction.psm1" )

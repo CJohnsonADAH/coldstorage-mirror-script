@@ -1998,24 +1998,37 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name=$null )
 }
 
 Function Add-ItemPackageMetadata {
-Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $Append=$false, [switch] $Force=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $Append=$false, [switch] $Unique=$false, [switch] $Force=$false, [switch] $Make=$false )
 
     Begin { }
 
     Process {
         $file = ( $Package | Get-ItemPackageMetadataFile )
+        If ( $File -eq $null ) {
+            If ( $Make ) {
+                $file = ( $Package | New-ItemPackageMetadataFile )
+            }
+        }
+
         $meta = ( $Package | Get-ItemPackageMetadata )
         
         $dirty = $false
         If ( $meta | Get-Member -Name:$Name ) {
             
             If ( $Force ) {
+                
                 If ( $Append ) {
                     $meta.$Name = @( $meta.$Name ) + @( $Value )
+
+                    If ( $Unique ) {
+                        $meta.$Name = ( @( $meta.$Name ) | Select-Object -Unique )
+                    }
+
                 }
                 Else {
                     $meta.$Name = $Value
                 }
+
                 $dirty = $true
             }
 
