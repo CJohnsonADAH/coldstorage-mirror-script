@@ -1321,13 +1321,27 @@ Param(
     Process {
 
         $mContents = ( $Contents | Measure-Object -Sum Length )
-        #$mContents = ( $aContents |% { $File | Add-Member -MemberType NoteProperty -Name "CSFileSize" -Value ( 0 + ( $File | Select Length).Length ) } | Measure-Object -Sum CSFileSize )
+        $mSidecars = ( $Sidecars | Measure-Object )
 
         $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageSidecars" -Value:$Sidecars -Force
         $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageBagged" -Value:( [bool] $Bagged ) -Force
         $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageBagLocation" -Value:$BagLocation -Force
         $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageContents" -Value:$mContents.Count -Force
         $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageFileSize" -Value:$mContents.Sum -Force
+
+        $aAssociates = @( )
+        If ( $BagLocation -ne $null ) {
+            If ( $BagLocation.FullName -ne $Package.FullName ) {
+                $aAssociates += @( $BagLocation )
+            }
+        }
+        If ( $mSidecars.Count -gt 0 ) {
+            $aAssociates += @( $Sidecars )
+            $aAssociates += @( $Package | Get-ItemPackageMetadataFile )
+        }
+
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageAssociates" -Value:$aAssociates
+
     }
 
     End { }

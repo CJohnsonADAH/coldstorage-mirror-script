@@ -372,6 +372,7 @@ Process {
         If ( $AttnRpt -ne $null ) {
             $Lines = ( $AttnRpt | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip:$SkipCsvLines )
             $Lines | Out-File -Encoding utf8 -Append -LiteralPath $sAttnLog
+            "ATTN LOG: {0}" -f $sAttnLog | Write-Host -ForegroundColor Cyan
         }
         Else {
             $aAttn = [ordered] @{ "Path"=$null ; "Repository"=$null ; "File"=$null ; "Mirror"=$null; "Zip"=$null; "Cloud"=$null }
@@ -379,7 +380,6 @@ Process {
             $Lines | Out-File -Encoding utf8 -Append -LiteralPath $sAttnLog
         }
 
-        "ATTN LOG: {0}" -f $sAttnLog | Write-Host -ForegroundColor Cyan
     }
     If ( $Profile ) {
         "PROFILE LOG: {0}" -f $sProfileLog | Write-Host -ForegroundColor Yellow

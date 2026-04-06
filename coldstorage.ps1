@@ -764,7 +764,19 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 }
 
 Function Invoke-ColdStorageItemMirror {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch] $Batch, [switch] $Force=$false, [switch] $Forward=$false, [switch] $Reverse=$false, [switch] $NoScan=$false, [switch] $RoboCopy=$false, [switch] $Scheduled=$false, [switch] $WhatIf )
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File,
+    [int] $DiffLevel=1,
+    [switch] $Batch,
+    [switch] $Only=$false,
+    [switch] $Force=$false,
+    [switch] $Forward=$false,
+    [switch] $Reverse=$false,
+    [switch] $NoScan=$false,
+    [switch] $RoboCopy=$false,
+    [switch] $Scheduled=$false,
+    [switch] $WhatIf
+)
 
     Begin { }
 
@@ -796,25 +808,38 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
 
             $sSrc = ( "${Src}" | ConvertTo-CSFileSystemPath )
             $sDest = ( "${Dest}" | ConvertTo-CSFileSystemPath )
-            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Host -BackgroundColor:Black -ForegroundColor:White
+
+            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Verbose
+
             If ( ( "${sSrc}" -ne '' ) -and ( "${sDest}" -ne '' ) ) {
-                If ( -Not $WhatIf ) {
-                    Sync-MirroredFiles -From "${Src}" -To "${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
                 
-                    If ( Test-Path -LiteralPath "${Src}" -PathType Leaf ) {
-                        $srcPackage = ( $Src | Get-ItemPackage )
-                        $bBaggedElsewhere = ( $srcPackage.CSPackageBagLocation -and ( $srcPackage.CSPackageBagLocation.FullName -ne $srcPackage.FullName ) )
-                        If ( $bBaggedElsewhere ) {
+                If ( -Not $WhatIf ) {
 
-                            $bDoIt = ( -Not $Only )
-                            If ( $Only -and ( -Not $Batch ) ) {
-                                $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror bagged copy at {0}?" -f $srcPackage.CSPackageBagLocation ) )
-                            }
+                    Sync-MirroredFiles -From:"${Src}" -To:"${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
+                
+                    If ( ( -Not $Only ) -and ( $Src | Test-LooseFile ) ) {
 
-                            If ( $bDoIt ) {
-                                $srcPackage.CSPackageBagLocation | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
+                        $srcPackage = ( $Src | Get-ItemPackage -At )
+                        
+                        If ( $srcPackage.CSPackageAssociates.Count -gt 0 ) {
+
+                            $srcPackage.CSPackageAssociates |? { $_ -ne $null } |? { $_.FullName -ne $srcPackage.FullName } |% {
+                                $AssociatedItem = $_
+
+                                $AIRelPath = ( $_.FullName | Resolve-PathRelativeTo -Base:$srcPackage.FullName )
+                                "[{0}] Mirror Associated item: '{1}'" -f ( Get-CSDebugContext -Function:$MyInvocation), $AIRelPath | Write-Host -ForegroundColor:Cyan
+                                
+                                $bDoIt = ( -Not $Only )
+                                If ( $Only -and ( -Not $Batch ) ) {
+                                    $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror associated files at {0}?" -f $_.FullName ) )
+                                }
+                                If ( $bDoIt ) {
+                                    $AssociatedItem | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -Only -WhatIf:$WhatIf
+                                }
+
                             }
                         }
+
                     }
 
                 }
@@ -823,7 +848,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [int] $DiffLevel=1, [switch]
                 }
             }
             Else {
-                ( '[{0}:{1:N0}] ( "{2}", "{3}" ) has an empty file path parameter.' -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $sSrc, $sDest ) | Write-Error
+                ( '[{0}] ( "{1}", "{2}" ) has an empty file path parameter.' -f ( Get-CSDebugContext -Function:$MyInvocation ), $sSrc, $sDest ) | Write-Error
             }
 
         }
@@ -1448,16 +1473,6 @@ Param ($cmd)
     }
     "       `t${cmd} -?" | Write-Output
     "       `t`tfor detailed documentation" | Write-Output
-}
-
-Function Get-CSScriptVersion {
-Param ( [string] $Verb="", $Words=@( ), $Flags=@{ } )
-
-    $oHelpMe = ( Get-Help ${global:gCSScriptPath} )
-    $ver = ( $oHelpMe.Synopsis -split "@" |% { If ( $_ -match '^version\b' ) { $_ } } )
-    If ( $ver.Count -gt 0 ) { Write-Output "${global:gCSScriptName} ${ver}" }
-    Else { $oHelpMe }
-
 }
 
 Function Invoke-BatchCommandEpilog {
