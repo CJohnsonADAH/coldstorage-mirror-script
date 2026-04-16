@@ -1649,14 +1649,28 @@ Param (
                         $Wildcards = ( $metaLocationZip |% { $Prefix = ( $_ -replace '[.]zip$','' ) ; ( "{0}*" -f $Prefix ) } | Sort-Object -Unique )
                         
                         $aZipped = ( $Wildcards |% {
+                            $found = @( )
                             $Parent = ( $_ | Split-Path -Parent )
                             $Wildcard = ( $_ | Split-Path -Leaf )
 
                             Push-Location -LiteralPath:$Parent
                             If ( Test-Path -Path:$Wildcard -PathType:Leaf ) {
-                                Get-Item -Path:$Wildcard -Force
+                                $found = ( Get-Item -Path:$Wildcard -Force )
                             }
                             Pop-Location
+
+                            If ( $found.Count -eq 0 ) {
+                                    $oZippedBagsContainer = ( $oFile | Get-ZippedBagsContainer )
+                                    If ( $oZippedBagsContainer ) {
+                                        Push-Location -LiteralPath:$oZippedBagsContainer.FullName
+                                        $found = ( Get-Item -Path:$Wildcard -Force )
+                                        Pop-Location
+                                    }
+                            }
+
+                            If ( $found.Count -gt 0 ) {
+                                $found | Write-Output
+                            }
                         } )
                     }
 
@@ -1713,7 +1727,7 @@ Param (
             If ( $Profile ) { $tN += , ( Get-Date ) ; Write-Progress -Id:068 -Activity:"Getting preservation packages" -Status:( "{0}: Adding cloud data to return object: {1}" -f ( $tN[-1] - $tN[-2] ), $oFile.FullName ) }
 
             If ( $CheckCloud ) {
-                $Package | Add-ItemPackageCloudCopyData
+                $Package | Add-ItemPackageCloudCopyData -Force:$Force
             }
 
             $aPackageChecked = @{
