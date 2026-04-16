@@ -145,9 +145,12 @@ Function Get-CurrentLine {
 }
 
 Function Get-CSDebugContext {
-Param ( $Function, $Format="{0}:{1}" )
+Param ( $Function=$null, $Format="{0}:{1}" )
 
-    If ( $Function -is [String] ) {
+    If ( $Function -eq $null ) {
+        $sName = ( $MyInvocation.ScriptName | Split-Path -Leaf )
+    }
+    ElseIf ( $Function -is [String] ) {
         $sName = $Function
     }
     ElseIf ( $Function | Get-Member -Name MyCommand ) {
@@ -161,9 +164,12 @@ Param ( $Function, $Format="{0}:{1}" )
     $Format -f $sName, $nLine | Write-Output
 }
 
+Set-Alias -Name:CSDbg -Value:Get-CSDebugContext
+
+Export-ModuleMember -Function ConvertTo-HttpDataString
+Export-ModuleMember -Function ConvertFrom-HttpDataString
 Export-ModuleMember -Function Get-StringMD5
 Export-ModuleMember -Function Get-StringChecksum
 Export-ModuleMember -Function Get-CurrentLine
 Export-ModuleMember -Function Get-CSDebugContext
-Export-ModuleMember -Function ConvertTo-HttpDataString
-Export-ModuleMember -Function ConvertFrom-HttpDataString
+Export-ModuleMember -Alias CSDbg
