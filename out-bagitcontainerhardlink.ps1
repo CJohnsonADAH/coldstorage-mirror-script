@@ -209,7 +209,7 @@ Process {
         Push-Location -LiteralPath:$BagContainer.FullName
         
         If ( -Not ( Test-Path -LiteralPath:"data" ) ) {
-            $Payload = ( New-Item -ItemType:Directory -Path:"data" -Verbose )
+            $Payload = ( New-Item -ItemType:Directory -Path:"data" )
         }
         Else {
             $Payload = ( Get-Item -LiteralPath:"data" -Force )

@@ -30,7 +30,7 @@ param (
 	[switch] $Batch = $false,
     [switch] $Interactive = $false,
     [switch] $Fast = $false,
-    [switch] $Repository = $true,
+    [switch] $Repository = $false,
     [switch] $Items = $false,
     [switch] $Recurse = $false,
     [switch] $At = $false,
@@ -330,6 +330,7 @@ Begin {
 }
 
 Process {
+
     $Item | Get-ItemPackage -At -Force -CheckMirrored |% {
         
         $ToValidate = $null
@@ -367,15 +368,28 @@ Process {
                 }
             }
         }
-        "[{0}] Final sLiteralPath: {1}" -f $Cmd, $sLiteralPath | Write-Debug
+        "[{0}] Final sLiteralPath: {1}" -f $Cmd, $sLiteralPath | Write-Verbose
 
+        $ValidationMethod = $null
         If ( Test-BagItFormattedDirectory -File $sLiteralPath ) {
             $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sLiteralPath -Verbose:$Verbose -NoLog:$NoLog -Fast:$Fast )
             $ValidationMethod = "BagIt"
         }
+        ElseIf ( ( $sLiteralPath | Test-LooseFile ) -and ( $_.CSPackageSidecars.Count -gt 0 ) ) {
+            $Validated = ( $sLiteralPath | test-checksumsidecarvalidates-cs.ps1 -Algorithm:"*" )
+            $ValidationMethod = "Sidecars"
+        }
         ElseIf ( Test-ZippedBag -LiteralPath $sLiteralPath ) {
             $Validated = ( $_ | Test-ZippedBagIntegrity  )
             $ValidationMethod = "ZIP/MD5"
+        }
+
+        If ( $ValidationMethod ) {
+            "[{0}] Validation test using method {1} ... [{2}]" -f ( Get-CSDebugContext -Function:$MyInvocation ), $ValidationMethod, $( If ( $Validated ) { "OK" } Else { "failed!" } ) | Write-Verbose
+            If ( $Validated ) {
+                $oBag | Add-ItemPackageMetadata -Name:"Time-Validated" -Value:( Get-Date ).ToUniversalTime() -Force -Make
+            }
+            $oBag | Add-ItemPackageMetadata -Name:"Time-TestValidation" -Value:( [PSCustomObject] @{ "Time"=( Get-Date | ConvertTo-ItemPackageMetadataDateTime ); "Result"=$Validated } ) -Force -Append -Last:7 -Make
         }
         Else {
             "[{0}] I do not know how to validate this: {1}" -f "Get-CSItemValidation",$sLiteralPath | Write-Warning
@@ -949,11 +963,11 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "validate" ) {
-        If ( $Items ) {
-            $allObjects | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -PassThru:$PassThru
+        If ( $Repository ) {
+            Invoke-ColdStorageValidate -Pairs $allObjects -Copy:$Copy -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped
         }
         Else {
-            Invoke-ColdStorageValidate -Pairs $allObjects -Copy:$Copy -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped
+            $allObjects | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -PassThru:$PassThru
         }
     }
     ElseIf ( $Verb -eq "stats" ) {

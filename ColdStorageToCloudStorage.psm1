@@ -76,9 +76,8 @@ Process {
                     $RelativePathParts = ( $RelativePath | Split-PathEntirely )
                     $BucketPath = @(
                         ( $oRepository.Domain | Get-CloudStorageBucketNamePart ), #$SectionSlug
-                        ( $oRepository.Repository | Get-CloudStorageBucketNamePart ), #$RepositorySlug
-                        ( $RelativePathParts[0] | Get-CloudStorageBucketNamePart ) #$RelativePathTop
-                    ) 
+                        ( $oRepository.Repository | Get-CloudStorageBucketNamePart ) #$RepositorySlug
+                    ) + @( $RelativePathParts | Select-Object -Skip:1 | Get-CloudStorageBucketNamePart ) #$RelativePath
                     $sBucket = ( $BucketPath -join "-" )
                 }
             }
@@ -481,7 +480,8 @@ Param(
     [Parameter(ValueFromPipeline=$true)] $Bucket,
     $Prefix=$null,
     $Cache=$null,
-    $CacheExpiration=3600
+    $CacheExpiration=3600,
+    [switch] $Force=$false
 )
 
     Begin {
@@ -519,7 +519,7 @@ Param(
         }
 
         $jsonReply = $null
-        If ( $sCacheFile -ne $null ) {
+        If ( -Not $Force -and ( $sCacheFile -ne $null ) ) {
             If ( Test-Path -LiteralPath $sCacheFile -PathType Leaf ) {
                 $oCachedReply = ( Get-Content $sCacheFile -Raw | ConvertFrom-Json )
 
@@ -616,7 +616,18 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [Int] $N=-1 )
 }
 
 Function Get-CloudStorageListing {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Unmatched=$false, $Side=@("local","cloud"), [switch] $ReturnObject, [switch] $Recurse=$false, [switch] $All=$false, [string] $From="", [string] $To="", [string] $Context="Get-CloudStorageListing" )
+Param (
+    [Parameter(ValueFromPipeline=$true)] $File,
+    [switch] $Unmatched=$false,
+    $Side=@("local","cloud"),
+    [switch] $ReturnObject,
+    [switch] $Recurse=$false,
+    [switch] $All=$false,
+    [switch] $Force=$false,
+    [string] $From="",
+    [string] $To="",
+    [string] $Context="Get-CloudStorageListing"
+)
 
 Begin {
     $bucketFiles = @{ }
@@ -676,7 +687,7 @@ End {
 
         # 1. First, try to fill it from $global:gBucketObjects
 
-        If ( $global:gBucketObjects.ContainsKey( $Bucket ) ) {
+        If ( -Not $Force -and ( $global:gBucketObjects.ContainsKey( $Bucket ) ) ) {
             "in-memory variable ... " | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Green -NoNewline # DBG
             
             $cachedObject = $global:gBucketObjects[$Bucket]
@@ -696,7 +707,7 @@ End {
             
             If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
                 "going to file cache {0}" -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
-                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Cache:$sPropsDir -CacheExpiration:3600 )
+                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Cache:$sPropsDir -CacheExpiration:3600 -Force:$Force )
                 If ( $oReply ) {
                     $awsExitCode = $oReply.AWSCLIExitCode
                 }
@@ -706,7 +717,7 @@ End {
             }
             Else {
                 "going to API request" -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
-                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Prefix:$Files.Name -Cache:$sPropsDir -CacheExpiration:600 )
+                $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Prefix:$Files.Name -Cache:$sPropsDir -CacheExpiration:600 -Force:$Force )
                 If ( $oReply ) {
                     $awsExitCode = $oReply.AWSCLIExitCode
                 }
@@ -831,9 +842,16 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $Recurse=$false, [s
     Begin { }
 
     Process {
-        $aItems = ( $File | Get-ItemPackageZippedBag -Recurse:$Recurse -Force:$Force )
+        $oFile = $File
+
+        # If we have -Force turned on, we should strip out any previous checking of package for ZIPs, etc.
+        If ( $Force ) {
+            $oFile = ( $oFile | Get-FileLiteralPath | Get-FileObject )
+        }
+
+        $aItems = ( $oFile | Get-ItemPackageZippedBag -Recurse:$Recurse -Force:$Force )
         If ( $aItems ) {
-            $aItems | Sort-Object -Unique -Property Name
+            $aItems | Sort-Object -Unique -Property Name |? { $_.Name -like '*.zip' }
         }
         ElseIf ( $ShowWarnings ) {
             ( "[{0}{1}] Could not find preservation package: {2}" -f $ShowWarnings,$( If ( $Recurse ) { " -Recurse" } Else { "" } ),$File ) | Write-Warning
@@ -851,6 +869,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
     Process {
         "[Remove-PackageCloudStorageBucketListingCache] Removing cached listing data ..." | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -NoNewline -ForegroundColor:Yellow #DBG
+
+        $Bucket = ( $File | Get-CloudStorageBucket )
+        If ( $Bucket ) {
+            $global:gBucketObjects[ $Bucket ] = $null
+        }
 
         $sCacheDirectory = ( $File | Get-PackageCloudStorageBucketCacheDirectory )
         If ( ( $sCacheDirectory -ne $null ) -and ( Test-Path -LiteralPath $sCacheDirectory -PathType Container ) ) {
@@ -917,7 +940,9 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $WhatIf=
     Process {
         
         $Package = $File
-        
+
+        $Package | Remove-PackageCloudStorageBucketListingCache
+
         # We need the ZIP file name, if there is any available. Check to secure this.
         $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedCloud )
         If ( $NotYetChecked ) {
@@ -967,7 +992,10 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $WhatIf=
     
                 $aS3Uris = ( $Package | Get-CloudStorageURI )
                 If ( $aS3Uris.Count -gt 0  ) {
+                    $jsonFileRel = ( $jsonFile | Resolve-PathRelativeTo -Base:( $Package | Get-FileRepositoryLocation ).FullName )
                     $Package | Add-ItemPackageMetadata -Name:"Location-Cloud" -Value:$aS3Uris -Force -Append -Unique -Make
+                    $Package | Add-ItemPackageMetadata -Name:"Location-Cloud-Description" -Value:$jsonFile -Force -Append -Unique -Make
+                    $Package | Add-ItemPackageMetadata -Name:"Time-CloudUpload" -Value:( ( Get-Date ).ToUniversalTime() ) -Force -Append -Unique -Make
                 }
 
             }
@@ -988,7 +1016,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
     Begin { $AWS = $( Get-ExeForAWSCLI ); If ( $WhatIf ) { $sWhatIf = "--dryrun" } Else { $sWhatIf = $null } }
 
     Process {
-        "[{0}] HERE WE ARE ... ({1})" -f ( Get-CSDebugContext -Function:$MyInvocation ),( $tN = @( Get-Date ) )[-1] | Write-Warning
+        "[{0}] Entering Add-PackageToCloudStorage Bucket ... ({1})" -f ( Get-CSDebugContext -Function:$MyInvocation ),( $tN = @( Get-Date ) )[-1] | Write-Verbose
         $File | Remove-PackageCloudStorageBucketListingCache
         "[{0}] CACHED CLEARED ... ({2} / {1})" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
 
@@ -1021,13 +1049,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                 
                 $s3Uri = ( "s3://{0}/{1}" -f $Bucket,$sFileName )
                 
-                "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 ls '${s3Uri}' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Warning
+                "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 ls '${s3Uri}' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
                 $s3Ls = ( & "${AWS}" s3 ls $s3Uri ) ; $s3LsExit = $LASTEXITCODE
 
                 If ( $s3LsExit -ne 0 ) {
 				    $sCmd = ( '& {0} s3 cp "{1}" "s3://{2}/" --storage-class DEEP_ARCHIVE {3}' -f ${AWS},${sFile},${Bucket},${sWhatIf} )
                     
-                    "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 cp '${sFile}' 's3://${Bucket}/' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Warning
+                    "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 cp '${sFile}' 's3://${Bucket}/' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
 
                     & "${AWS}" s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
                         # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
@@ -1175,3 +1203,4 @@ Export-ModuleMember -Function Stop-CloudStorageUploads
 Export-ModuleMember -Function Get-CloudStorageListOfBuckets
 Export-ModuleMember -Function Test-CSDatedObject
 Export-ModuleMember -Function Select-CSDatedObject
+Export-ModuleMember -Function Remove-PackageCloudStorageBucketListingCache

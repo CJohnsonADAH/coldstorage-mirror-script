@@ -1,7 +1,9 @@
 ﻿Param(
     [Parameter(ValueFromPipeline=$true)] $Package,
     [string] $Output="",
+    [switch] $Not,
     [switch] $Bagged,
+    [switch] $BagItFormatted,
     [switch] $Unbagged,
     [switch] $Mirrored,
     [switch] $Unmirrored,
@@ -27,103 +29,15 @@ Begin {
         $modSource = ( $global:gWritePackagesReportCSCmd.Source | Get-Item -Force )
         $modPath = ( $modSource.Directory | Get-Item -Force )
 
-    Function Get-ScriptPath {
-    Param ( $Command, $File=$null )
-
-        $Source = ( $Command.Source | Get-Item -Force )
-        $Path = ( $Source.Directory | Get-Item -Force )
-
-        If ( $File -ne $null ) {
-            $Path = ($Path.FullName | Join-Path -ChildPath $File)
-        }
-
-        $Path
-    }
-
-    $bVerboseModules = ( $Debug -eq $true )
-    $bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) )
-
-    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageInteraction.psm1" )
-    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
-    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStorageFiles.psm1" )
-    Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
-
     $ExitCode = 0
 }
 
 Process {
-    
-    $CheckBagged = $Package.CSPackageCheckedBagged
-    $CheckMirrored = $Package.CSPackageCheckedMirrored
-    $CheckZipped = $Package.CSPackageCheckedZipped
-    $CheckCloud = $Package.CSPackageCheckedCloud
+    $o = ( $Package | & select-cs-package-where.ps1 -Output:$Output -Not:$Not -Bagged:$Bagged -BagItFormatted:$BagItFormatted -Unbagged:$Unbagged -Mirrored:$Mirrored -Unmirrored:$Unmirrored -Zipped:$Zipped -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -FullName:$FullName -Timestamp:$Timestamp -Context:$Context )
 
-    $bResult = ( $Package -ne $null )
-    
-    # -BAGGED / -UNBAGGED
-    If ( $CheckBagged ) {
-        $checked = $Package
-    }
-    Else {
-        # This can be checked on the fly if we don't have a cached result.
-        $checked = ( $Package | coldstorage-get-packages.ps1 for -Items -Bagged )
-        $CheckBagged = ( $checked -ne $null )
-    }
-    If ( $CheckBagged ) {
-        If ( $Bagged ) {
-            $bResult = ( $bResult -and $checked.CSPackageBagged )
-        }
-        If ( $Unbagged ) {
-            $bResult = ( $bResult -and ( -Not $checked.CSPackageBagged ) )
-        }
-    }
+    $bResult = ( $o -ne $null )
 
-    # -MIRRORED / -NOTMIRRORED
-    If ( $CheckMirrored ) {
-        $checked = $Package
-    }
-    Else {
-        # This can be checked on the fly if we don't have a cached result.
-        $checked = ( $Package | coldstorage-get-packages.ps1 for -Items -Mirrored )
-        $CheckMirrored = ( $checked -ne $null )
-    }
-    If ( $CheckMirrored ) {
-        $bIsMirrored = $checked.CSPackageMirrored
-        $sMirrorLocation = $checked.CSPackageMirrorLocation
-
-        If ( $Mirrored ) {
-            $bResult = ( $bResult -and $bIsMirrored )
-        }
-        If ( $Unmirrored ) {
-            $bResult = ( $bResult -and ( -Not $bIsMirrored ) )
-        }
-    }
-
-    # -ZIPPED / -UNZIPPED
-    If ( $CheckZipped ) {
-        $bIsZipped = ( $Package.CSPackageZip.Count -gt 0 )
-        If ( $Zipped ) {
-            $bResult = ( $bResult -and $bIsZipped )
-        }
-        If ( $Unzipped ) {
-            $bResult = ( $bResult -and ( -Not $bIsZipped ) )
-        }
-    }
-
-    # -INCLOUD / -NOTINCLOUD
-    If ( $CheckCloud ) {
-        $sZippedFile = $( If ( $Package.CSPackageZip.Count -gt 0 ) { $Package.CSPackageZip[0].Name } Else { "" } )
-        $bIsInCloud = ( $Package.CloudCopy -and $sZippedFile )
-
-        If ( $InCloud ) {
-            $bResult = ( $bResult -and $bIsInCloud )
-        }
-        If ( $NotInCloud ) {
-            $bResult = ( $bResult -and ( -Not $bIsInCloud ) )
-        }
-    }
-
-    $bResult
+    $bResult | Write-Output
     If ( -Not $bResult ) {
         $ExitCode = 1
     }

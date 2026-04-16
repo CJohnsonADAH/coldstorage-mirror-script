@@ -25,7 +25,7 @@ Process {
 
 		$Package = ( $Item | & get-itempackage-cs.ps1 -At -Bagged -Force )
 
-		If ( $Package | & test-cs-package-is.ps1 -Bagged ) {
+		If ( $Package | & test-cs-package-is.ps1 -BagItFormatted ) {
 
 			$Bag = ( $Package.CSPackageBagLocation | Sort-Object -Descending -Property LastWriteTime | Select-Object -First 1 )
 			$LogContainer = ( $Bag | & get-bagitbagcomponent-cs.ps1 -Subdirectory:"logs" -Force:$Force )

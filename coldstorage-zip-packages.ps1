@@ -116,6 +116,7 @@ Process {
 		"LOG: {0}" -f $vLogFile | Write-Verbose
 
         $Validated = ( Test-CSBaggedPackageValidates -DIRNAME $sFile -Skip:$Skip -NoLog )
+        "[{0}] Pre-Compress validation: Test-CSBaggedPackageValidates returned {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ), $Validated | Write-Debug
 
         $Progress.Update( "Validated bagged preservation package" )
         If ( $Validated | Test-CSOutputForValidationErrors | Test-ShallWeContinue ) {
@@ -126,10 +127,18 @@ Process {
 
             # Idempotent: if you have created a zip of this bag before in a location that we know to look in, return that zip or its JSON placeholder
             If ( $oZip.Count -gt 0 ) {
+                
                 $asArchiveHashed = ( $oZip | Sort-Object -Property LastWriteTime -Descending |% { $oZip.FullName } )
                 $sArchiveHashed = ( $asArchiveHashed | Select-Object -First 1 )
                 $Result = @( [PSCustomObject] @{ "Bag"=$sFile; "Zip"=$sArchiveHashed; "Zips"=$asArchiveHashed; "New"=$false; "Validated"=$Validated; "Compressed"=$null } )
                 $Progress.Update( "Located archive with MD5 Checksum", 2 )
+
+                $metaZipLocationOld = ( $oPackage | Get-ItemPackageMetadata -Name:"Location-Zip" )
+                $metaZipLocationNew = ( $oZip |? { $_.Name -like '*.zip' } | Sort-Object -Property LastWriteTime -Descending ).FullName
+                If ( $metaZipLocationOld -ne $metaZipLocationNew ) {
+                    $oPackage | Add-ItemPackageMetadata -Name:"Location-Zip" -Value:$metaZipLocationNew -Force
+                }
+
             }
             Else {
                 $Result = @( )
@@ -159,7 +168,7 @@ Process {
                             $oZip | Add-CSFileChecksum -Algorithm:$sAlgorithm
                             $sArchiveHashed = ( $Package | Get-ZippedBagNameWithMetadata -Repository:$sRepository -TS:$oTS -Hash:( $oZip | Get-CSFileChecksum -Algorithm:$sAlgorithm ) -HashAlgorithm:$sAlgorithm )
                             If ( $sArchiveHashed ) {
-                                Move-Item -LiteralPath:$oZip.FullName -Destination:$sArchiveHashed -Verbose -WhatIf:$WhatIf
+                                Move-Item -LiteralPath:$oZip.FullName -Destination:$sArchiveHashed -WhatIf:$WhatIf
                             }
                             Else {
                                 ( "[Compress-CSBaggedPackage] Failed to move '{0}' to '{1}'" -f $oZip.FullName,$sArchiveHashed ) | Write-Warning

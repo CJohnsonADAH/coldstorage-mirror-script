@@ -2,7 +2,8 @@
     $Repositories=@( 'Access', 'Masters' ),
     $Window=60,
     $IPG=75,
-    $Schedule='6:00 PM'
+    $Schedule='6:00 PM',
+    [switch] $Randomize
 )
 
 Function Write-RoboCopyOutput {
@@ -15,7 +16,17 @@ Param (
     [switch] $ChangeLog=$false
 )
 
-    Begin { $Status = $null; $pct = 0.0; $Sect = 0; $CurDir = $null ; $DisplayedDir = $null ; $roboCopyParams = @{ } }
+    Begin {
+        $Status = $null
+        $pct = 0.0
+        $Sect = 0
+        $CurDir = $null
+        $DisplayedDir = $null
+        $roboCopyParams = @{ }
+
+        $ChangeLogText = @{ "PRE"=@( ) ; "POST"=@( ) }
+
+    }
 
     Process {
         If ( "${Line}" ) {
@@ -62,6 +73,12 @@ Param (
             }
 
             If ( $LogLine -ne $null ) {
+
+                If ( ( $ChangeLogText[ 'PRE' ] | Measure-Object ).Count -gt 0 ) {
+                    $ChangeLogText[ 'PRE' ] | Write-Host -ForegroundColor Gray -BackgroundColor Black
+                    $ChangeLogText[ 'PRE' ] = @( )
+                }
+
                 If ( ( $DisplayedDir -eq $null ) -or ( $CurDir -ne $DisplayedDir ) ) {
                     $DisplayedDir = $CurDir
                     $DisplayedDir | Write-Host -ForegroundColor Cyan -BackgroundColor Black
@@ -74,7 +91,14 @@ Param (
 
         If ( $Prolog -Or $Epilog ) {
             If ( $Prolog -and ( $Sect -le 2 ) ) {
-                "${Line}" | Write-Host
+                
+                If ( -Not $ChangeLog ) {
+                    "${Line}" | Write-Host
+                }
+                Else {
+                    $ChangeLogText[ "PRE" ] = @( $ChangeLogText[ "PRE" ] ) + @( "${Line}" )
+                }
+
                 If ( "${Line}" -match "^\s*([^:]+)\s*[:]\s*(\S(.*\S)?)\s*$" ) {
                     $Key = $Matches[1].Trim()
                     $Value = $Matches[2]
@@ -86,7 +110,12 @@ Param (
                 "${Line}" | Write-Host -ForegroundColor Red
             }
             ElseIf ( $Epilog -and ( $sect -gt 3 ) ) {
-                "${Line}" | Write-Host
+                If ( -Not $ChangeLog ) {
+                    "${Line}" | Write-Host
+                }
+                Else {
+                    $ChangeLogText[ "POST" ] = @( $ChangeLogText[ "POST" ] ) + @( "${Line}" )
+                }
             }
              
         }
@@ -98,7 +127,41 @@ Param (
 
     }
 
-    End { }
+    End {
+    
+        If ( ( $ChangeLogText[ 'POST' ] | Measure-Object ).Count -gt 0 ) {
+        
+            If ( ( $ChangeLogText[ 'PRE' ] | Measure-Object ).Count -eq 0 ) {
+
+                    $ChangeLogText[ 'POST' ] | Write-Host -ForegroundColor Gray -BackgroundColor Black
+                    $ChangeLogText[ 'POST' ] = @( )
+                
+            }
+
+        }
+
+    }
+
+}
+
+Function Format-TextHeaderBlock {
+Param( [Parameter(ValueFromPipeline=$true)] $Line, $Width=80, $BoxCharacter="=", $PadCharacter=" " )
+
+    Begin {
+        ( $BoxCharacter * ( $Width / $BoxCharacter.Length ) ) | Write-Output
+    }
+
+    Process {
+        $PaddedLine = ( "{0} {1}" -f ( $BoxCharacter * 2), $Line )
+        $Remaining = ( $Width - $PaddedLine.Length - ( $BoxCharacter.Length * 2 ) ) / $PadCharacter.Length
+        $PaddedLine = ( "{0}{1}{2}" -f $PaddedLine, ( $PadCharacter * $Remaining ), ( $BoxCharacter * 2 ) )
+
+        $PaddedLine | Write-Output
+    }
+
+    End {
+        ( $BoxCharacter * ( $Width / $BoxCharacter.Length ) ) | Write-Output
+    }
 }
 
 If ( $Schedule -ne $null ) {
@@ -110,10 +173,31 @@ Else {
     $sSchedule = ""
 }
 
-If ( & read-yesfromhost-cs.ps1 -Prompt:( "Initiate mirror{0}:" -f $sSchedule ) -Timeout:$Timeout -DefaultInput:"Y" ) {
+$aRepositories = ( $Repositories )
+If ( $Randomize ) {
+    $aRepositories = ( $aRepositories | Sort-Object { Get-Random } )
+}
 
-    $Repositories |% {
+$OKtoStart = $true
+If ( $Schedule -ne $null ) {
+    $OKtoStart = ( & read-yesfromhost-cs.ps1 -Prompt:( "Initiate mirror [{0}]{1}:" -f ( $aRepositories -join ", " ), $sSchedule ) -Timeout:$Timeout -DefaultInput:"Y" )
+}
+Else {
+    ( "INITIATING MIRROR DATA TRANSFERS [{0}]" -f ( $aRepositories -join ", " ) ) | Format-TextHeaderBlock | Write-Host -ForegroundColor:Cyan
+}
+
+
+If ( $OKtoStart ) {
+
+    $aRepositories |% {
+        $sRepository = $_
         $repo = ( & coldstorage repository $_ -Location:Original )
+
+        $Lines = @( ( "DAILY MIRROR: {0} [{1}]" -f $sRepository, $repo.File ), ( "Date/Time: {0}" -f ( Get-Date ) ) )
+        $FlexWidth = ( [Math]::Max( 80, ( $Lines | Sort-Object -Property:Length -Descending | Select-Object -First:1 ).Length + 6 ) )
+
+        $Lines | Format-TextHeaderBlock -Width:$FlexWidth | Write-Host -ForegroundColor:Cyan
+
 
         If ( Test-Path -LiteralPath $repo.File -PathType Container ) {
             $Local = ( $repo.File | & get-mirrormatcheditem-cs.ps1 -Original | Convert-Path )

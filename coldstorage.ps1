@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0403
+@version 2026.0410-1035
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -114,6 +114,9 @@ $global:gBucketObjects = @{ }
 
     }
 
+$global:gCSScriptName = $MyInvocation.MyCommand
+$global:gCSScriptPath = $MyInvocation.MyCommand.Definition
+
 $global:gCSScriptVersion = ( Get-CSScriptVersion ); $versionChange = $false
 If ( $env:COLDSTORAGE_SCRIPT_VERSION -ne $global:gCSScriptVersion ) {
     $versionChange = $true
@@ -144,9 +147,6 @@ Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDir
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageToCloudStorage.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageToADPNet.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "LockssPluginProperties.psm1" )
-
-$global:gCSScriptName = $MyInvocation.MyCommand
-$global:gCSScriptPath = $MyInvocation.MyCommand.Definition
 
 If ( $global:gScriptContextName -eq $null ) {
     $global:gScriptContextName = $global:gCSScriptName
@@ -884,13 +884,14 @@ Param(
     [switch] $NoScan,
     [switch] $Bundle,
     [switch] $Manifest,
-    [switch] $Mirrored,
+    [switch] $Mirrored=$false,
+    [switch] $Forward=$false,
     [switch] $Batch,
     [switch] $Interactive,
     [switch] $Force=$false
 )
 
-    "[{0}] Entering function" -f ( Get-CSDebugContext -Function:$MyInvocation ) |Write-Debug
+    "[{0}] Entering function" -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-Debug
     $SkipScan = @( )
     If ( $NoScan ) {
         $SkipScan = @( "clamav" )
@@ -898,7 +899,12 @@ Param(
 
     $Items | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -At:$At -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
     If ( $Mirrored ) {
-        $Items | Get-FileObject |? { $_ -ne $null } |% { $_ | Invoke-ColdStorageItemMirror -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false }
+        $Items | Get-FileObject |? { $_ -ne $null } |% {
+            $_ | Invoke-ColdStorageItemMirror -Batch:$true -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false
+            If ( $Forward ) {
+                $_ | Invoke-ColdStorageItemMirror -Batch:$true -Forward -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false
+            }
+        }
     }
 }
 
@@ -1334,7 +1340,7 @@ Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch
                 $sBucket, $Remainder = ( $Remainder )
 
                 If ( -Not $sBucket ) {
-                    $DefaultBucket = $oFile.FullName | Get-CloudStorageBucket -Force 
+                    $DefaultBucket = ( $oFile.FullName | Get-CloudStorageBucket -Force )
                     $iWhich = $Host.UI.PromptForChoice("${sCommandWithVerb}", "Use default bucket name [${DefaultBucket}]?", @("&Yes", "&No"), 1)
                     If ( $iWhich -eq 0 ) {
                         $sBucket = $DefaultBucket
@@ -1361,34 +1367,37 @@ Param ( $Words, [switch] $Bucket=$false, [switch] $Force=$false, [switch] $Batch
             }
 
             If ( ( $oFile -ne $null ) -and ( $DefaultProps -ne $null ) ) {
-                $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket } | Add-ZippedBagsContainer |% {
-                    $_ | Write-Output
 
+                $oFile | Add-CSPropsFile -PassThru -Props:@( $Props, $DefaultProps ) -Name:$PropsFileName -Force:$Force | Where { $Bucket ; "[{0}]: Add-CSPropsFile returned {1}" -f ( CSDbg ), $_ | Diagnostics -Context:@( "cloud" ) -ForegroundColor:DarkMagenta } | Add-ZippedBagsContainer |% {
                     If ( $Bucket ) {
                         $s3Uri = ( "s3://{0}" -f $sBucket )
                         If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt ( "Create Cloud Storage bucket {0}?" -f $s3Uri ) ) ) {
-                            $oFile | & $global:gCSScriptPath bucket -Items -Make
+                            $oFile | & $global:gCSScriptPath bucket -Items -Make |% { "BUCKET: {0}" -f ( $_ | ConvertTo-Json -Compress ) | Write-Host -ForegroundColor:Green }
                         }
                     }
-                    If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt ( "Move preservation package ZIP files from repository root to {0}?" -f $_.FullName ) ) ) {
-                        & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
+                    $aZipsHere = ( & $global:gCSScriptPath packages -Items . -Zipped -Only -Recurse -PassThru | Get-ItemPackageZippedBag )
+                    $nZipsHere = ( $aZipsHere | Measure-Object ).Count
+                    If ( $nZipsHere -gt 0 ) {
+                        If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt ( "Move {0:N0} preservation package ZIP files from repository root to: {1}?" -f ( $nZipsHere ), $_.FullName ) ) ) {
+                            $aZipsHere | Get-ItemPackageZippedBag | Move-Item -Destination $_ -Verbose
 
-                        If ( ( -Not $Batch ) -and ( $Bucket ) ) {
-                            If ( & read-yesfromhost-cs.ps1 -Prompt ( "Upload preservation package ZIP files from {0} to cloud storage {1}?" -f $_.FullName, $s3Uri ) ) {
+                            If ( ( -Not $Batch ) -and ( $Bucket ) ) {
+                                If ( & read-yesfromhost-cs.ps1 -Prompt ( "Upload preservation package ZIP files from {0} to cloud storage {1}?" -f $_.FullName, $s3Uri ) ) {
                                 
-                                $oHere = ( Get-Item . -Force )
-                                $oHere | & coldstorage packages -Items -Bagged -Zipped -Only -Recurse -PassThru | Select-Object -First 1 | & coldstorage to cloud -Items
-                                $oHere | & coldstorage packages -Items -Bagged -Zipped -NotInCloud -Recurse | & coldstorage to cloud -Items
+                                    $oHere = ( Get-Item . -Force )
+                                    $oHere | & coldstorage packages -Items -Bagged -Zipped -Only -Recurse -PassThru | Select-Object -First 1 | & coldstorage to cloud -Items
+                                    $oHere | & coldstorage packages -Items -Bagged -Zipped -NotInCloud -Recurse | & coldstorage to cloud -Items
 
-                                $oRepository = ( Get-FileRepositoryProps -File $oHere )
-                                $sRepositoryBucket = ( $oRepository.Location | & coldstorage bucket -Items -Force )
-                                $oldS3Uri = ( "s3://{0}" -f $sRepositoryBucket )
-                                If ( & read-yesfromhost-cs.ps1 -Prompt ( "Remove redundant preservation package ZIP files from cloud storage {0}?" -f $oldS3Uri ) ) {
-                                    $oo = ( & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Retrieve )
-                                    $oo | & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Remove -WhatIf -N:5
+                                    $oRepository = ( Get-FileRepositoryProps -File $oHere )
+                                    $sRepositoryBucket = ( $oRepository.Location | & coldstorage bucket -Items -Force )
+                                    $oldS3Uri = ( "s3://{0}" -f $sRepositoryBucket )
+                                    If ( & read-yesfromhost-cs.ps1 -Prompt ( "Remove redundant preservation package ZIP files from cloud storage {0}?" -f $oldS3Uri ) ) {
+                                        $oo = ( & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Retrieve )
+                                        $oo | & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Remove -WhatIf -N:5
 
-                                    If ( & read-yesfromhost-cs.ps1 -Prompt ( "REALLY REALLY Remove redundant preservation package ZIP files from cloud storage {0}?!" -f $oldS3Uri ) ) {
-                                        $oo | & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Remove
+                                        If ( & read-yesfromhost-cs.ps1 -Prompt ( "REALLY REALLY Remove redundant preservation package ZIP files from cloud storage {0}?!" -f $oldS3Uri ) ) {
+                                            $oo | & move-cloudstorageobjects-cs.ps1 -OldBucket:$sRepositoryBucket -NewBucket:$sBucket -Remove
+                                        }
                                     }
                                 }
                             }
@@ -1911,7 +1920,38 @@ Else {
         $CSGetPackages = $( Get-CSScriptDirectory -File "get-itempackage-cs.ps1" )
         $CSWritePackagesReport = $( Get-CSScriptDirectory -File "write-packages-report-cs.ps1" )
         $CSSyncPackageToPreservation = $( Get-CSScriptDirectory -File "sync-cs-packagetopreservation.ps1" )
-        $allObjects | & $CSGetPackages -Bagged -CheckMirrored -CheckZipped -CheckCloud |% { $_ | & $CSWritePackagesReport ; $_ | & $CSSyncPackageToPreservation }
+
+        If ( ( $allObjects | Measure-Object ).Count -eq 0 ) {
+            $Here = ( Get-Item -LiteralPath:. -Force )
+            If ( $Here | Test-BagItFormattedDirectory ) {
+                $allObjects = @( $Here )
+            }
+            Else {
+                $allObjects = @( ( Get-ChildItem -LiteralPath:$Here.FullName -File -Force ) )
+            }
+        }
+        $oo = ( $allObjects | & $CSGetPackages -Check321 |% {
+            If ( $_ | & test-cs-package-is.ps1 -Not -Bagged -Mirrored -Zipped -InCloud ) {
+                $FGColor = "Yellow"
+                $_ | Write-Output
+            }
+            Else {
+                $FGColor = "Green"
+            }
+            $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:$FGColor -BackgroundColor:Black
+
+        } )
+        If ( -Not $Report ) {
+            "" | Write-Host -ForegroundColor:Cyan
+            "=== 3-2-1 Digital Preservation ===" | Write-Host -ForegroundColor:Cyan
+            $oo |% {
+                $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:Yellow -BackgroundColor:Black
+                If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt:"[321] Proceed to digital preservation steps" -DefaultInput:"Y" -Timeout:60 ) ) {
+                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$Batch -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:60 -Context:"321"
+                }
+            }
+
+        }
     }
     ElseIf ( $Verb -eq "diff" ) {
         
@@ -2147,8 +2187,9 @@ Else {
         }
     }
     ElseIf ( ("validate") -ieq $Verb ) {
-        $Locations = $( If ($Items) { $allObjects | Get-FileLiteralPath } Else { $Words } )
+        $Locations = $( If (-Not $Repository ) { $allObjects | Get-FileLiteralPath } Else { $Words } )
         $CSGetPackages = $( Get-CSScriptDirectory -File "coldstorage-get-packages.ps1" )
+        
         $Locations | & "${CSGetPackages}" "${Verb}" -Items:$Items -Repository:$Repository -Copy:$Copy `
             -Fast:$Fast `
             -Recurse:$Recurse `
@@ -2169,7 +2210,7 @@ Else {
         ( "[{0}] Not currently implemented for repositories. Use: {0} [File1] [File2] ..." -f $sCommandWithVerb ) | Write-Warning
     }
     ElseIf ( $Verb -eq "bag" ) {
-        Invoke-ColdStorageItemBag -Items:$allObjects -PassThru:$PassThru -At:$At -Recurse:$Recurse -NoScan:$NoScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -Mirrored:$Mirrored -Batch:$Batch -Interactive:$Interactive
+        Invoke-ColdStorageItemBag -Items:$allObjects -PassThru:$PassThru -At:$At -Recurse:$Recurse -NoScan:$NoScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -Mirrored:$Mirrored -Forward:$Forward -Batch:$Batch -Interactive:$Interactive
     }
     ElseIf ( $Verb -eq "rebag" ) {
         $allObjects | Get-FileObject |% { Write-Verbose ( "[$Verb] CHECK: " + $_.FullName ) ; $_ } | Out-BagItFormattedDirectoryWhenCleared -Rebag -PassThru:$PassThru

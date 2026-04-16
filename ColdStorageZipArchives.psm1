@@ -449,18 +449,18 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Location, [switch] $All=$false )
         $Props = ( $Location.FullName | Get-ItemColdStorageProps -Cascade )
         If ( $Props.ContainsKey( "Zip" ) ) {
             $ZipUniverse = $Props[ "Zip" ]
-            $ZipUniverse | ConvertTo-ColdStorageSettingsFilePath
+            $ZipUniverse = ( $ZipUniverse | ConvertTo-ColdStorageSettingsFilePath )
         }
 
         $JunctionDestination = $null
         If ( $ZipUniverse ) {
             $ZipUniverse = ( $ZipUniverse | Get-LocalPathFromUNC )
-        "ZIP UNIVERSE: {0}" -f $ZipUniverse|Write-Warning
+            "[{0}] ZIP UNIVERSE: {1}" -f (Get-CSDebugContext -Function:$MyInvocation ), $ZipUniverse | Diagnostics -Context:@( "zip", $MyInvocation ) -ForegroundColor:Magenta
             $JunctionDestination = ( $Props.Cascade | Select-Object -First 1 | Split-MirrorMatchedPath -Stem |% { $ZipUniverse | Join-Path -ChildPath $_ } )
             If ( $JunctionDestination ) {
-                $JunctionDestination = $JunctionDestination | Join-Path -ChildPath "ZIP"
+                $JunctionDestination = ( $JunctionDestination | Join-Path -ChildPath "ZIP" )
             }
-        "JUNCTION DESTINATION: {0}" -f $JunctionDestination|Write-Warning
+            "[{0}] JUNCTION DESTINATION: {1}" -f (Get-CSDebugContext -Function:$MyInvocation ),$JunctionDestination| Diagnostics -Context:@( "zip", $MyInvocation ) -ForegroundColor:Magenta
         }
 
         $oZipDir = $null
@@ -484,7 +484,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Location, [switch] $All=$false )
 }
 
 Function Add-ZippedBagsContainer {
-Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ), [switch] $All=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ), [switch] $All=$false, [switch] $PassThru=$false )
 
     Begin { }
 
@@ -496,7 +496,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, $Repository=@( ), [switch] $
             $Loc = $_
             $oZipDir = ( Get-ChildItem "ZIP" -LiteralPath $Loc.FullName )
             If ( -Not $oZipDir ) {
-                $Loc | New-ZippedBagsContainer
+                $o = ( $Loc | New-ZippedBagsContainer )
+                $o | Write-Output
+                "o: {0}" -f $o | Diagnostics -Context:@( "zip", $MyInvocation ) -ForegroundColor:Magenta
             }
         }
     }
