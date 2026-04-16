@@ -275,7 +275,7 @@ Param (
 
                 If ( $oPackageZippedBag.Count -eq 0 ) {
                     If ( $Force ) {
-                        "[Get-ItemPackageZippedBag -Force] We should CREATE a zipped bag..." | Write-Warning
+                        "[{0}] Get-ItemPackageZippedBag -Force: No ZIP; we should CREATE a zipped bag..." -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-Verbose
                         $CSZipPackages = $( Get-CSScriptDirectory -File "coldstorage-zip-packages.ps1" )
                         $Zip = ( $oPackage | & "${CSZipPackages}" )
                         If ( $Zip ) {
@@ -1239,6 +1239,7 @@ Param(
         $NotYetChecked = -Not ( [bool] $Package.CSPackageCheckedCloud )
 
         If ( $CloudCopy -ne -1 ) {
+        
             $oCloudCopy = [PSCustomObject] $CloudCopy
 
             $Package.CSPackageCheckedCloud = $true
@@ -1247,6 +1248,7 @@ Param(
             
         }
         ElseIf ( $Force -or $NotYetChecked ) {
+        
             $aZipped = $Package.CSPackageZip
             If ( ( $aZipped | Measure-Object ).Count -gt 0 ) {
 
@@ -1272,13 +1274,16 @@ Param(
 
                 }
                 Else {
-                    $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject )
+                    "[{0}] No cloud data cache files: [{1}]. Retrieving listing." -f ( Get-CSDebugContext -Function:$MyInvocation ), ( ( $aZipped |% { "'{0}'" -f $_.FullName } ) -join ', ' ) | Write-Verbose
+
+                    $oListing = ( $Package | Get-CloudStorageListing -All -Side:"local" -ReturnObject -Force:$Force )
                     $aListing = ( $oListing | Get-TablesMerged )
-                    
+                                       
                     $itemZipKeys = ( $Package | Get-ItemPackageCloudStorageKey )
                     $itemZipKeys |% {
 
                         $Key = $_
+                        "[{0}] Looked it up. Key='{1}' in aListing={2}" -f ( Get-CSDebugContext -Function:$MyInvocation ), $Key, ( $aListing.ContainsKey( $Key ) ) | Write-Verbose
 
                         $bCloudCopy = ( $bCloudCopy -or ( $aListing.ContainsKey( $Key ) ) )
                         If ( $aListing.ContainsKey( $Key ) ) {
