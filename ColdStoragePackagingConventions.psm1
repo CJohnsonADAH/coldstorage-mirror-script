@@ -1345,7 +1345,7 @@ Param(
             $aAssociates += @( $Package | Get-ItemPackageMetadataFile )
         }
 
-        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageAssociates" -Value:$aAssociates
+        $Package | Add-Member -MemberType:NoteProperty -Name:"CSPackageAssociates" -Value:$aAssociates -Force
 
     }
 
