@@ -2017,7 +2017,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name=$null )
 }
 
 Function Add-ItemPackageMetadata {
-Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $Append=$false, [switch] $Unique=$false, [switch] $Force=$false, [switch] $Make=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $Append=$false, [switch] $Unique=$false, [int] $Last=-1, [switch] $Force=$false, [switch] $Make=$false )
 
     Begin { }
 
@@ -2031,21 +2031,29 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $
 
         $meta = ( $Package | Get-ItemPackageMetadata )
         
+        $vValue = $Value
+        If ( $vValue -is [DateTime] ) {
+            $vValue = $vValue.ToString( (  Get-ItemPackageMetadataDateTimeFormat ) )
+        }
+
         $dirty = $false
         If ( $meta | Get-Member -Name:$Name ) {
             
             If ( $Force ) {
                 
                 If ( $Append ) {
-                    $meta.$Name = @( $meta.$Name ) + @( $Value )
+                    $meta.$Name = @( $meta.$Name ) + @( $vValue )
 
                     If ( $Unique ) {
                         $meta.$Name = ( @( $meta.$Name ) | Select-Object -Unique )
                     }
+                    If ( $Last -gt 0 ) {
+                        $meta.$Name = ( @( $meta.$Name ) | Select-Object -Last:$Last )
+                    }
 
                 }
                 Else {
-                    $meta.$Name = $Value
+                    $meta.$Name = $vValue
                 }
 
                 $dirty = $true
@@ -2053,7 +2061,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $
 
         }
         Else {
-            $meta | Add-Member -MemberType:NoteProperty -Name:$Name -Value:$Value
+            $meta | Add-Member -MemberType:NoteProperty -Name:$Name -Value:$vValue
             $dirty = $true
         }
 
