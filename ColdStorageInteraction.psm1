@@ -544,14 +544,27 @@ Param( [Parameter(ValueFromPipeline=$true)] $For, [switch] $Each=$false, [switch
     }
 
     Process {
-        $TotalList = @( $TotalList ) + @( $For )
-        If ( $global:gCSIDiagnostics.ContainsKey( $For ) ) {
-            $Value = $global:gCSIDiagnostics[ $For ]
+        If ( $For -is [string] ) {
+            $Name = "${For}"
+        }
+        ElseIf ( ( $For -is [object] ) -and ( $For | Get-Member -Name:Name ) ) {
+            $Name = $For.Name
+        }
+        ElseIf ( ( $For -is [object] ) -and ( $For | Get-Member -Name:MyCommand ) -and ( $For.MyCommand | Get-Member -Name:Name ) ) {
+            $Name = $For.MyCommand.Name
+        }
+        Else {
+            $Name = "${For}"
+        }
+
+        $TotalList = @( $TotalList ) + @( $Name )
+        If ( $global:gCSIDiagnostics.ContainsKey( $Name ) ) {
+            $Value = $global:gCSIDiagnostics[ $Name ]
             If ( [bool] $Value ) {
                 If ( $Each ) {
                     $Value | Write-Output
                 }
-                $GoodList = @( $GoodList ) + @( $For )
+                $GoodList = @( $GoodList ) + @( $Name )
             }
         }
     }
@@ -601,6 +614,8 @@ Param( [Parameter(ValueFromPipeline)] $Line, $ForegroundColor=$null, $Background
 
 }
 
+Set-Alias -Name:Diagnostics -Value:Write-CSIDiagnosticMessageStream
+
 Export-ModuleMember -Function Write-BleepBloop
 Export-ModuleMember -Function Select-UserApproved
 
@@ -619,3 +634,4 @@ Export-ModuleMember -Function Write-CSOutputWithLogMaybe
 Export-ModuleMember -Function Set-CSIDiagnosticMessageStream
 Export-ModuleMember -Function Get-CSIDiagnosticMessageStream
 Export-ModuleMember -Function Write-CSIDiagnosticMessageStream
+Export-ModuleMember -Alias Diagnostics
