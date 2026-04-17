@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0410-1035
+@version 2026.0416-1141
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -844,7 +844,9 @@ Param (
                                 $AssociatedItem = $_
 
                                 $AIRelPath = ( $_.FullName | Resolve-PathRelativeTo -Base:$srcPackage.FullName )
-                                "[{0}] Mirror Associated item: '{1}'" -f ( Get-CSDebugContext -Function:$MyInvocation), $AIRelPath | Write-Host -ForegroundColor:Cyan
+                                
+                                $sCmd = ( Get-CommandWithVerb ) ; If ( $sCmd -notlike '*mirror*' ) { $subVerb = "mirror " } Else { $subVerb = "" }
+                                "[{0}] {1}associated item: '{2}'" -f $sCmd, $subVerb, $AIRelPath | Write-Host -ForegroundColor:Gray
                                 
                                 $bDoIt = ( -Not $Only )
                                 If ( $Only -and ( -Not $Batch ) ) {
@@ -1916,42 +1918,10 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "321" ) {
-        $CSScript = $( Get-CSScriptDirectory -File "coldstorage.ps1" )
-        $CSGetPackages = $( Get-CSScriptDirectory -File "get-itempackage-cs.ps1" )
-        $CSWritePackagesReport = $( Get-CSScriptDirectory -File "write-packages-report-cs.ps1" )
-        $CSSyncPackageToPreservation = $( Get-CSScriptDirectory -File "sync-cs-packagetopreservation.ps1" )
-
-        If ( ( $allObjects | Measure-Object ).Count -eq 0 ) {
-            $Here = ( Get-Item -LiteralPath:. -Force )
-            If ( $Here | Test-BagItFormattedDirectory ) {
-                $allObjects = @( $Here )
-            }
-            Else {
-                $allObjects = @( ( Get-ChildItem -LiteralPath:$Here.FullName -File -Force ) )
-            }
-        }
-        $oo = ( $allObjects | & $CSGetPackages -Check321 |% {
-            If ( $_ | & test-cs-package-is.ps1 -Not -Bagged -Mirrored -Zipped -InCloud ) {
-                $FGColor = "Yellow"
-                $_ | Write-Output
-            }
-            Else {
-                $FGColor = "Green"
-            }
-            $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:$FGColor -BackgroundColor:Black
-
-        } )
-        If ( -Not $Report ) {
-            "" | Write-Host -ForegroundColor:Cyan
-            "=== 3-2-1 Digital Preservation ===" | Write-Host -ForegroundColor:Cyan
-            $oo |% {
-                $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:Yellow -BackgroundColor:Black
-                If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt:"[321] Proceed to digital preservation steps" -DefaultInput:"Y" -Timeout:60 ) ) {
-                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$Batch -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:60 -Context:"321"
-                }
-            }
-
-        }
+        $CS321Script = $( Get-CSScriptDirectory -File "sync-321preservation.ps1" )
+        $allObjects | & "$CS321Script" -Report:$Report -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
+        
+        $ExitCode = $Sync321Exit
     }
     ElseIf ( $Verb -eq "diff" ) {
         

@@ -183,7 +183,7 @@ Param (
     Process {
         $exe = Get-ExeForClamAV
         $params = @( "--stdout", "--bell", "--suppress-ok-results", "--recursive", ( "{0}" -f $Path.FullName ) )
-        $Path | Get-CSFilesExeScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -Exe:$exe -ExeParams:$params -Tag:$Tag -Verbose:$Verbose
+        $Path | Get-CSFilesExeScanCode -Skip:$Skip -OKCodes:$OKCodes -ContinueCodes:$ContinueCodes -Exe:$exe -ExeParams:$params -Tag:$Tag
     }
     
     End { }
@@ -221,7 +221,9 @@ Param (
 
 )
 
-    Begin { }
+    Begin {
+        $ProgressId = 676
+    }
 
     Process {
         # VARIABLES
@@ -240,9 +242,9 @@ Param (
         }
 
         If ( ( $Skip -ieq $tag ).Count -eq 0 ) {
-            ( "[{0}] {1}: {2}" -f $tag, $Labels["Scanning"], $outPath.FullName ) | Write-Verbose -InformationAction Continue
+            ( "[{0}] {1}: {2}" -f $tag, $Labels["Scanning"], $outPath.FullName ) |% { Write-Progress -Id:$ProgressId -Activity:( $Labels["Scanning" ] ) -Status:"$_" ; $_ | Write-Verbose -InformationAction:Continue }
 
-            $sStdOut = ( ( & "${Exe}" @ExeParams ) |% { If ( $Verbose ) { $_ | Write-Verbose -InformationAction Continue }; $_ } )
+            $sStdOut = ( ( & "${Exe}" @ExeParams ) |% { If ( "$_" ) { Write-Progress -Id:$ProgressId -Activity:( $Labels["Scanning" ] ) -Status:"$_" } ; If ( $Verbose ) { $_ | Write-Verbose -InformationAction:Continue }; $_ } )
 
             $ExeExitCode = $LastExitCode
             
@@ -252,7 +254,7 @@ Param (
 
             if ( ( $OKCodes -eq $ExeExitCode ).Count -gt 0 ) {
             # Success: At least one item of $OKCodes matches
-                ( "[{0}] (ok) {1} of {2} returned {3:N0}" -f ( $tag, $Labels["Scan"], $outPath.FullName, $ExeExitCode ) ) | Write-Verbose
+                ( "[{0}] (ok) {1} of {2} returned {3:N0}" -f ( $tag, $Labels["Scan"], $outPath.FullName, $ExeExitCode ) ) |% { If ( "$_" ) { Write-Progress -Id:$ProgressId -Activity:( $Labels["Scanning" ] ) -Status:"$_" } ; $_ | Write-Verbose }
             }
             Else {
             # Failure: no items of $OKCodes match
@@ -261,7 +263,7 @@ Param (
             }
         }
         Else {
-            ( "[{0}] (ok-SKIPPED) {1}: {2}" -f $tag, $Labels["Scanned"], $outPath.FullName ) | Write-Verbose -InformationAction Continue
+            ( "[{0}] (ok-SKIPPED) {1}: {2}" -f $tag, $Labels["Scanned"], $outPath.FullName ) |% { If ( "$_" ) { Write-Progress -Id:$ProgressId -Activity:( $Labels["Scanning" ] ) -Status:"$_" } ; $_ | Write-Verbose -InformationAction:Continue }
 
             $ok[$tag] = [PSCustomObject] @{ "ExitCode"=$OKCodes[0]; "Executed"=$false; "OK"=$OKCodes; "Continue"=$ContinueCodes }
 
@@ -269,7 +271,9 @@ Param (
         }
     }
 
-    End { }
+    End {
+        Write-Progress -Id:$ProgressId -Activity:( $Labels[ "Scanning" ] ) -Status:"DONE" -Completed
+    }
 }
 
 Function Get-CSScannedFilesErrorCodes {

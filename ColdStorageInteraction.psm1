@@ -440,10 +440,22 @@ Param (
     [switch] $Prolog=$false,
     [switch] $Epilog=$false,
     [switch] $Echo=$false,
-    [switch] $Directories=$false
+    [switch] $Directories=$false,
+    [switch] $ChangeLog=$false
 )
 
-    Begin { $Status = $null; $pct = 0.0; $Sect = 0; $roboCopyParams = @{ } }
+    Begin {
+        $Status = $null
+        $pct = 0.0
+        $Sect = 0
+        $CurDir = $null
+        $DisplayedDir = $null
+        $DisplayedLogLine = $null
+        $roboCopyParams = @{ }
+
+        $ChangeLogText = @{ "PRE"=@( ) ; "POST"=@( ) }
+
+    }
 
     Process {
         If ( "${Line}" ) {
@@ -463,6 +475,7 @@ Param (
             Write-Progress -Activity ( "Robocopy.exe {0} {1} {2}" -f "${Options}","${Source}","${Destination}" ) -Status "${Status}" -PercentComplete $pct
             
             If ( "${Line}" -match "\s([0-9]+)\s+(\S.*[\\])\s*$" ) {
+                $CurDir = $Line ; $DisplayedDir = $null ; $DisplayedLogLine = $null
                 If ( $Directories ) {
                     $Line | Write-Host -ForegroundColor Yellow -BackgroundColor Black
                 }
@@ -477,10 +490,47 @@ Param (
         If ( $Echo ) {
             "${Line}"
         }
+        ElseIf ( $ChangeLog ) {
+            $LogLine = $null
+            If ( $pct -eq 100 ) {
+                $LogLine = $Status
+                $LogFG = 'Green'
+            }
+            ElseIf ( "${Line}" -match '^(\s*)([*]EXTRA File)(\s+)([0-9]+)(\s+)(\S.*)$' ) {
+                $LogLine = $Line
+                $LogFG = 'Yellow'
+            }
+
+            If ( $LogLine -ne $null ) {
+
+                If ( ( $ChangeLogText[ 'PRE' ] | Measure-Object ).Count -gt 0 ) {
+                    $ChangeLogText[ 'PRE' ] | Write-Host -ForegroundColor Gray -BackgroundColor Black
+                    $ChangeLogText[ 'PRE' ] = @( )
+                }
+
+                If ( ( $DisplayedDir -eq $null ) -or ( $CurDir -ne $DisplayedDir ) ) {
+                    $DisplayedDir = $CurDir
+                    $DisplayedDir | Write-Host -ForegroundColor Cyan -BackgroundColor Black
+                }
+                If ( ( $DisplayedLogLine -eq $null ) -or ( $LogLine -ne $DisplayedLogLine ) ) {
+                    $LogLine | Write-Host -ForegroundColor:$LogFG -BackgroundColor:Black
+                    $DisplayedLogLine = $LogLine
+                }
+            }
+
+        }
+               
 
         If ( $Prolog -Or $Epilog ) {
             If ( $Prolog -and ( $Sect -le 2 ) ) {
-                "${Line}" | Write-Host
+                
+                If ( -Not $ChangeLog ) {
+                    "${Line}" | Write-Host
+                }
+                Else {
+                    $ChangeLogText[ "PRE" ] = @( $ChangeLogText[ "PRE" ] ) + @( "${Line}" )
+                }
+
                 If ( "${Line}" -match "^\s*([^:]+)\s*[:]\s*(\S(.*\S)?)\s*$" ) {
                     $Key = $Matches[1].Trim()
                     $Value = $Matches[2]
@@ -492,7 +542,12 @@ Param (
                 "${Line}" | Write-Host -ForegroundColor Red
             }
             ElseIf ( $Epilog -and ( $sect -gt 3 ) ) {
-                "${Line}" | Write-Host
+                If ( -Not $ChangeLog ) {
+                    "${Line}" | Write-Host
+                }
+                Else {
+                    $ChangeLogText[ "POST" ] = @( $ChangeLogText[ "POST" ] ) + @( "${Line}" )
+                }
             }
              
         }
@@ -504,7 +559,21 @@ Param (
 
     }
 
-    End { }
+    End {
+    
+        If ( ( $ChangeLogText[ 'POST' ] | Measure-Object ).Count -gt 0 ) {
+        
+            If ( ( $ChangeLogText[ 'PRE' ] | Measure-Object ).Count -eq 0 ) {
+
+                    $ChangeLogText[ 'POST' ] | Write-Host -ForegroundColor Gray -BackgroundColor Black
+                    $ChangeLogText[ 'POST' ] = @( )
+                
+            }
+
+        }
+
+    }
+
 }
 
 Function Set-CSIDiagnosticMessageStream {

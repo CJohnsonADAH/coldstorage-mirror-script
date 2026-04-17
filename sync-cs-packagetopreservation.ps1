@@ -54,14 +54,20 @@ Begin {
 
 Process {
     $sConfirm = "CONFIRM"
+    $sContext = $global:gColdStorageSyncToPreservationCmd.Name
+
     If ( $Context -ne $null ) {
         If ( ( "${Context}" ).Length -gt 0 ) {
+            $sContext = $Context
             $sConfirm = ( "[{0}] {1}" -f "${Context}", $sConfirm )
         }
     }
 
     $DeferredFile = ( & get-deferred-preservation-jobs-cs.ps1 | Select-Object -First 1 )
     If ( $Package | test-cs-package-is ) {
+
+        $sPackageRepositoryLocation = ( $Package | Get-FileRepositoryLocation )
+        $sPackageRelPath = ( $Package.FullName | Resolve-PathRelativeTo -Base:$sPackageRepositoryLocation )
 
         $PassThru = $false
         $SkipOver = $false
@@ -132,7 +138,13 @@ Process {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Zip package {1}?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
-                $Package | & coldstorage zip -Items | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage zip -Items"
+                $Package | & coldstorage zip -Items | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage zip -Items" |% {
+                    $FGColor = "Gray"
+                    If ( $_.New -eq $false ) {
+                        $FGColor = "DarkGray"
+                    }
+                    "[{0}] Zipped package: {1} -> {2}" -f $sContext, ( $_.Bag | Resolve-PathRelativeTo -Base:$sPackageRepositoryLocation ), ( $_.Zip | Resolve-PathRelativeTo -Base:$sPackageRepositoryLocation ) | Write-Host -ForegroundColor:$FGColor
+                }
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false

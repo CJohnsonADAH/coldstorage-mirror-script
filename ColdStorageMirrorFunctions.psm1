@@ -216,7 +216,7 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
                 $rcDestination = ( Convert-Path -LiteralPath "${DestinationContainer}" )
                 
                 If ( $File -ne $null ) {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
                     $RoboCode = $LASTEXITCODE
                 }
                 Else {
@@ -291,7 +291,7 @@ Param (
                     $rcFile = ( Split-Path "${From}" -Leaf )
 
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog
+                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
                     }
                 }
                 Else {
