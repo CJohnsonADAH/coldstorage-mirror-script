@@ -194,12 +194,16 @@ Param( $File, $Status=$null, $Message=$null, [switch] $Quiet=$false, [switch] $V
 }
 
 Function Test-IsYesNoString {
-Param ( [Parameter(ValueFromPipeline=$true)] $In, [switch] $AllowEmpty )
+Param ( [Parameter(ValueFromPipeline=$true)] $In, [string[]] $OtherOptions=@( ), [switch] $AllowEmpty )
 
     Begin { }
 
     Process {
         $ok = ( $In -match '^\s*[YyNn].*$' )
+        If ( ( $OtherOptions | Measure-Object ).Count -gt 0 ) {
+            $FirstCharacters = ( $OtherOptions |% { $_.Substring( 0, 1 ).ToUpper(), $_.Substring( 0, 1 ).ToLower() } | Select-Object -Unique )
+            $ok = ( $ok -or ( $In.Substring( 0, 1 ) -iin $FirstCharacters ) )
+        }
         If ( $AllowEmpty ) {
             $ok = ( $ok -or ( $In -match '^\s*$' ) )
         }
@@ -222,7 +226,15 @@ Param ( [Parameter(ValueFromPipeline=$true)] $In )
 }
 
 Function Read-YesFromHost {
-Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="", $DefaultTimeout = 5.0 )
+Param (
+    [string] $Prompt,
+    $OtherOptions=@( ),
+    $Timeout = -1.0,
+    $DefaultInput="Y",
+    $DefaultAction="",
+    $DefaultTimeout = 5.0,
+    $PromptColor="Yellow"
+)
 
     If ( $global:psISE ) {
         If ( $Timeout -gt 0 ) {
@@ -250,8 +262,26 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
 
     }
     Else {
-        $Prompt | Write-Host -ForegroundColor Yellow
-        $YNPrompt = ( '[Y]es [N]o (default is "{0}")' -f $DefaultInput )
+
+        If ( $PromptColor -is [string] ) {
+            $FGColor = $PromptColor
+            $BGColor = $null
+        }
+        ElseIf ( $PromptColor -is [Hashtable] ) {
+            $FGColor = $PromptColor[ 'Foreground' ]
+            $BGColor = $PromptColor[ 'Background' ]
+        }
+
+        If ( $BGColor -ne $null ) {
+            $Prompt | Write-Host -ForegroundColor:$FGColor -BackgroundColor:$BGColor
+        }
+        Else {
+            $Prompt | Write-Host -ForegroundColor:$FGColor
+        }
+
+        $TextOptions = @( "[Y]es", "[N]o" )
+        $OtherOptions |% { $Opt = ( '[{0}]{1}' -f $_.Substring(0, 1).ToUpper(), $_.Substring(1) ) ; $TextOptions = ( @( $TextOptions ) + @( $Opt ) ) }
+        $YNPrompt = ( '{0} (default is "{1}")' -f ( $TextOptions -join " " ), $DefaultInput )
         Do {
             If ( $Timeout -lt 0.0 ) {
                 $InKey = ( Read-Host -Prompt $YNPrompt )
@@ -275,7 +305,7 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
                 }
 
             }
-        } While ( -Not ( Test-IsYesNoString -In:$InKey -AllowEmpty ) )
+        } While ( -Not ( Test-IsYesNoString -In:$InKey -OtherOptions:$OtherOptions -AllowEmpty ) )
         
         If ( $InKey -match '^\s*$' ) {
             $T0 = ( Get-Date ) ; $TN = ( $DefaultTimeout + 0.25 ) ; $keyinfo = $null
@@ -310,7 +340,18 @@ Param ( [string] $Prompt, $Timeout = -1.0, $DefaultInput="Y", $DefaultAction="",
 
         }
 
-        ( $InKey -match '^\s*[Yy].*$' )
+        $MatchesYes = ( $InKey -match '^\s*[Yy].*$' )
+        $MatchesNo = ( $InKey -match '^\s*[Nn].*$' )
+        
+        $Result = $MatchesYes
+        If ( ( $OtherOptions | Measure-Object ).Count -gt 0 ) {
+            If ( ( -Not $MatchesYes ) -and ( -Not $MatchesNo ) ) {
+                $Result = $InKey.Substring( 0, 1 ).ToUpper()
+            }
+        }
+
+        $Result | Write-Output
+
     }
 }
 
@@ -692,6 +733,7 @@ Export-ModuleMember -Function Get-BaggedItemNoticeMessage
 Export-ModuleMember -Function Write-BaggedItemNoticeMessage
 Export-ModuleMember -Function Write-UnbaggedItemNoticeMessage
 
+Export-ModuleMember -Function Test-IsYesNoString
 Export-ModuleMember -Function Read-YesFromHost
 
 Export-ModuleMember -Function Get-PluralizedText

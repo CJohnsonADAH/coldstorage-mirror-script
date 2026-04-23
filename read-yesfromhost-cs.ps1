@@ -1,9 +1,11 @@
 ﻿Param(
     $Prompt,
+    $OtherOptions=@( ),
     $Timeout=-1.0,
     $DefaultInput="Y",
     $DefaultAction="",
-    $DefaultTimeout=5.0
+    $DefaultTimeout=5.0,
+    $PromptColor="Yellow"
 )
 
 $global:gColdStorageReadYesFromHostCmd = $MyInvocation.MyCommand
@@ -13,4 +15,4 @@ $global:gColdStorageReadYesFromHostCmd = $MyInvocation.MyCommand
 
 Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageInteraction.psm1" )
 
-Read-YesFromHost -Prompt:$Prompt -Timeout:$Timeout -DefaultInput:$DefaultInput -DefaultAction:$DefaultAction -DefaultTimeout:$DefaultTimeout
+Read-YesFromHost -Prompt:$Prompt -OtherOptions:$OtherOptions -Timeout:$Timeout -DefaultInput:$DefaultInput -DefaultAction:$DefaultAction -DefaultTimeout:$DefaultTimeout -PromptColor:$PromptColor

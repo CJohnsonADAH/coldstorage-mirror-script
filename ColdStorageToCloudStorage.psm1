@@ -933,7 +933,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Item )
 }
 
 Function Add-ItemPackageCloudCopyDataCache {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $WhatIf=$false )
+Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $Quiet=$false, [switch] $WhatIf=$false )
 
     Begin { }
 
@@ -967,15 +967,22 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $WhatIf=
                 $jsonFile = ( $ZipFile.Directory.FullName | Join-Path -ChildPath:( '{0}.json' -f $_ ) )
                 $jsonData = ( $Package.CSPackageCloudCopy | ConvertTo-Json )
                 
-                "JSON FILE: {0} :: Contents:" -f $jsonFile | Write-Host -ForegroundColor:Cyan
+                If ( -Not $Quiet ) {
+                    "JSON FILE: {0} :: Contents:" -f $jsonFile | Write-Host -ForegroundColor:Cyan
+                }
+
                 If ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) {
                     
                     # We have the JSON file already; by default, do not clobber it
                     $jsonDataOld = ( Get-Content -LiteralPath:$jsonFile -Raw )
-                    "<<<" | Write-Host -ForegroundColor:Cyan
+                    If ( -Not $Quiet ) {
+                        "<<<" | Write-Host -ForegroundColor:Cyan
+                    }
                     "{0}" -f $jsonDataOld | Write-Output
-                    ">>>" | Write-Host -ForegroundColor:Cyan
-                    "{0}" -f $jsonData | Write-Host -ForegroundColor:Gray
+                    If ( -Not $Quiet ) {
+                        ">>>" | Write-Host -ForegroundColor:Cyan
+                        "{0}" -f $jsonData | Write-Host -ForegroundColor:Gray
+                    }
 
 
                 }
@@ -985,9 +992,13 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Zip=$null, [switch] $WhatIf=
                 Else {
                     $jsonData | Out-File -Encoding:utf8 -LiteralPath:$jsonFile -WhatIf:$WhatIf
 
-                    "~~~" | Write-Host -ForegroundColor:Cyan
+                    If ( -Not $Quiet ) {
+                        "~~~" | Write-Host -ForegroundColor:Cyan
+                    }
                     "{0}" -f $jsonData
-                    "~~~" | Write-Host -ForegroundColor:Cyan
+                    If ( -Not $Quiet ) {
+                        "~~~" | Write-Host -ForegroundColor:Cyan
+                    }
                 }
     
                 $aS3Uris = ( $Package | Get-CloudStorageURI )

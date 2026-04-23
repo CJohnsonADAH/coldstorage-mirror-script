@@ -67,12 +67,41 @@ End {
     If ( -Not $Report ) {
         "" | Write-Host -ForegroundColor:Cyan
         If ( ( $oo | Measure-Object ).Count -gt 0 ) {
-            "=== 3-2-1 Digital Preservation ===" | Write-Host -ForegroundColor:Cyan
+            "=== 3-2-1 Digital Preservation: Pending Actions ===" | Write-Host -ForegroundColor:Cyan
             $oo |% {
+                "" | Write-Host
                 $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:Yellow -BackgroundColor:Black
-                If ( $Batch -or ( & read-yesfromhost-cs.ps1 -Prompt:"Proceed to 3-2-1 digital preservation steps" -DefaultInput:"Y" -Timeout:60 ) ) {
-                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$Batch -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:60 -Context:"321"
+                
+                $RepositoryProps = ( $_ | Get-FileRepositoryProps )
+                $RepositoryLocation = ( $_ | Get-FileRepositoryLocation )
+                $RepositoryName = ( "{0}-{1}" -f $RepositoryProps.Domain, $RepositoryProps.Repository )
+                $RelPath = ( $_.FullName | Resolve-PathRelativeTo -Base:$RepositoryLocation.FullName )
+
+                $DoItAll = $Batch
+                $Proceed = $Batch
+                If ( -Not $Batch ) {
+                    
+                    $SyncConfirm = ( & read-yesfromhost-cs.ps1 -Prompt:( "PRESERVE: Perform all 3-2-1 digital preservation steps AUTOMATICALLY for {0}: {1}" -f $RepositoryName, $RelPath ) -OtherOptions:@( "Select steps" ) -DefaultInput:"Y" -Timeout:60 )
+                    
+                    $Proceed = ( $DoItAll -or ( $SyncConfirm -ne $false ) )
+                    $DoItAll = ( $DoItAll -or ( $SyncConfirm -eq $true ) )
+
                 }
+
+                If ( -Not $DoItAll ) {
+                    $SyncConfirmTimeout=-1
+                }
+                Else {
+                    $SyncConfirmTimeout=60
+                }
+
+                If ( $Proceed ) {
+                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$DoItAll -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:$SyncConfirmTimeout -Context:"321"
+                }
+                Else {
+                    "[321] skipping for now: {0}: {1}" -f $RepositoryName, $RelPath | Write-Host -ForegroundColor:Gray
+                }
+
             }
         }
         Else {

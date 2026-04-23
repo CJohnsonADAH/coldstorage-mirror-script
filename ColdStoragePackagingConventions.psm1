@@ -1914,17 +1914,26 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
     Begin { }
 
     Process {
-        $jsonFile = ( $Package | Get-ItemPackageMetadataFilePath )
-        "JSON: {0}" -f $jsonFile|Write-Debug
-        If ( $jsonFile -ne $null ) {
+        $jsonFiles = ( $Package | Get-ItemPackageMetadataFilePath -All )
 
-            "Test-Path -LiteralPath:{0} -PathType:Leaf :: {1}" -f $jsonFile, ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) |Write-Debug
-            If ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) {
-                Get-Item -LiteralPath $jsonFile -Force
+        $out = ( $jsonFiles |% {
+            $jsonFile = $_
+            "JSON: {0}" -f $jsonFile|Write-Debug
+            If ( $jsonFile -ne $null ) {
+
+                "Test-Path -LiteralPath:{0} -PathType:Leaf :: {1}" -f $jsonFile, ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) |Write-Debug
+                If ( Test-Path -LiteralPath:$jsonFile -PathType:Leaf ) {
+                    Get-Item -LiteralPath $jsonFile -Force
+                }
+
             }
-
-        }
+        } )
         
+        "[{0}] found {1:N0} candidates" -f ( CSDbg -Function:$MyInvocation ), ( $out | Measure-Object ).Count | Write-CSIDiagnosticMessageStream -Context:@( "metadata" ) -ForegroundColor:Yellow
+        If ( ( $out | Measure-Object ).Count -gt 0 ) {
+            $out | Select-Object -First:1 | Write-Output
+        }
+
     }
 
     End { }

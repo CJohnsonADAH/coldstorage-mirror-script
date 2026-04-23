@@ -4,6 +4,7 @@
     [switch] $Not,
     [switch] $Bagged,
     [switch] $BagItFormatted,
+    [switch] $Sidecars,
     [switch] $Unbagged,
     [switch] $Mirrored,
     [switch] $Unmirrored,
@@ -33,7 +34,7 @@ Begin {
 }
 
 Process {
-    $o = ( $Package | & select-cs-package-where.ps1 -Output:$Output -Not:$Not -Bagged:$Bagged -BagItFormatted:$BagItFormatted -Unbagged:$Unbagged -Mirrored:$Mirrored -Unmirrored:$Unmirrored -Zipped:$Zipped -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -FullName:$FullName -Timestamp:$Timestamp -Context:$Context )
+    $o = ( $Package | & select-cs-package-where.ps1 -Output:$Output -Not:$Not -Bagged:$Bagged -BagItFormatted:$BagItFormatted -Sidecars:$Sidecars -Unbagged:$Unbagged -Mirrored:$Mirrored -Unmirrored:$Unmirrored -Zipped:$Zipped -Unzipped:$Unzipped -InCloud:$InCloud -NotInCloud:$NotInCloud -FullName:$FullName -Timestamp:$Timestamp -Context:$Context )
 
     $bResult = ( $o -ne $null )
 

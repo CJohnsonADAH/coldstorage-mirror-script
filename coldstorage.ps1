@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0416-1141
+@version 2026.0420
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1129,7 +1129,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Word, [String] $Output="" )
 }
 
 Function Invoke-ColdStorageTo {
-Param ( [string] $Destination, $What, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly, [switch] $Halt=$false, [switch] $Batch=$false )
+Param ( [string] $Destination, $What, [switch] $Repository, [switch] $Diff, [switch] $WhatIf, [switch] $Report, [switch] $ReportOnly, [switch] $Halt=$false, [switch] $Quiet=$false, [switch] $Batch=$false )
 
     $Destinations = ("cloud", "drop", "adpnet")
 
@@ -1151,11 +1151,26 @@ Param ( [string] $Destination, $What, [switch] $Repository, [switch] $Diff, [swi
             $Candidates = ( $What | Get-ItemPackageZippedBag -ReturnContainer | Get-CloudStorageListing -Unmatched:$true -Side:("local") -ReturnObject )
             $Candidates | Write-Verbose
             $Candidates | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
-            $Candidates | Get-ItemPackage -At -Force -CheckZipped -CheckCloud | Add-ItemPackageCloudCopyDataCache -WhatIf:${WhatIf}
+            $Candidates | Get-ItemPackage -At -Force -CheckZipped -CheckCloud | Add-ItemPackageCloudCopyDataCache -Quiet:$Quiet -WhatIf:${WhatIf}
         }
         Else {
-            $What | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf}
-            $What | Get-ItemPackage -At -Force -CheckZipped -CheckCloud | Add-ItemPackageCloudCopyDataCache -WhatIf:${WhatIf}
+            $What | Add-PackageToCloudStorageBucket -WhatIf:${WhatIf} |% {
+                If ( -Not $Quiet ) {
+                    "$_" | Write-Output
+                }
+                ElseIf ( "$_" -match 'upload: (.*) to (s3://.*)$' ) {
+                    $UploadedFile = ( $Matches[1] | Get-FileObject )
+                    If ( -Not $UploadedFile ) {
+                        $UploadedFile = $What
+                    }
+
+                    "[{0} {1}] uploaded {2} to cloud: {3}" -f ( Get-CommandWithVerb ), $Destination, $UploadedFile.Name, $Matches[2] | Write-Host -ForegroundColor:DarkCyan
+                }
+                Else {
+                    "$_" | Write-Warning
+                }
+            }
+            $What | Get-ItemPackage -At -Force -CheckZipped -CheckCloud | Add-ItemPackageCloudCopyDataCache -Quiet:$Quiet -WhatIf:${WhatIf} |? { -Not $Quiet }
         }
     }
     ElseIf ( $Destination -eq "drop" ) {
@@ -2264,7 +2279,7 @@ Else {
     ElseIf ( $Verb -eq "to" ) {
         $Object, $Remainder = $Words
         $allObjects = ( ( $Remainder + $Input ) | ColdStorage-Command-Line -Default "${PWD}" )
-        Invoke-ColdStorageTo -Destination:$Object -What:$allObjects -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -WhatIf:$WhatIf
+        Invoke-ColdStorageTo -Destination:$Object -What:$allObjects -Repository:$Repository -Diff:$Diff -Report:$Report -ReportOnly:$ReportOnly -Halt:$Halt -Batch:$Batch -Quiet:$Quiet -WhatIf:$WhatIf
     }
     ElseIf ( ("cloud", "drop") -ieq $Verb ) {
         $allObjects = ( $allObjects | ColdStorage-Command-Line -Default "${PWD}" )

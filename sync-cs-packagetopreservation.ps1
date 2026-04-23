@@ -5,7 +5,8 @@
     [int] $InputTimeout=60,
     $Automatically=@( ),
     $InputDefault="N",
-    $Context=$null
+    $Context=$null,
+    [switch] $Quiet=$false
 )
 
 Begin {
@@ -19,8 +20,27 @@ Begin {
 
     $Interactive = ( -Not $Batch )
 
+    $TimeoutBase = $InputTimeout
+    If ( $InputTimeout -lt 0 ) {
+        $TimeoutBase = $null
+    }
+
+    Function Write-HostSectionHeader {
+    Param ( [Parameter(ValueFromPipeline=$true)] $Line, $ForegroundColor="DarkGreen" )
+
+        Begin {
+            "" | Write-Host -ForegroundColor:$ForegroundColor
+        }
+
+        Process {
+            $Line | Write-Host -ForegroundColor:$ForegroundColor
+        }
+
+        End { }
+    }
+
     Function Write-OutputWithLogMaybe {
-    Param ( [Parameter(ValueFromPipeline)] $Line, $Package, $Command=$null, $Log )
+    Param ( [Parameter(ValueFromPipeline=$true)] $Line, $Package, $Command=$null, $Log )
 
         Begin {
             If ( $Log -ne $null ) {
@@ -78,44 +98,21 @@ Process {
 			"LOG: {0}" -f $LogFile | Write-Verbose
         }
 
-        If ( ( -Not $NoMirror ) -and ( $Package | test-cs-package-is -Unmirrored ) ) {
-
-            $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
-            $DefaultLeaveDo = $( If ( $DefaultYN -eq "Y" ) { "mirror package" } Else { "leave unmirrored" } )
-            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $InputTimeout } )
-
-            $DoIt = ( $Batch -or ( "mirror" -iin $Automatically ) )
-            If ( ( -Not $DoIt ) -and $Interactive ) {
-                $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Mirror package {1}?" -f $sConfirm, $Package.Name ) -Timeout:$InputTimeout -DefaultInput:N -DefaultTimeout:60 -DefaultAction:"leave unmirrored" )
-            }
-            If ( $DoIt ) {
-                $Package | & coldstorage mirror -Items -RoboCopy | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage mirror -Items -RoboCopy"
-                $PassThru = $true
-            }
-            Else {
-                ( "{0} | & coldstorage mirror -Items -RoboCopy" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
-            }
-
-        }
-
         If ( $Package | test-cs-package-is -Unbagged ) {
             $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
             $DefaultLeaveDo = $( If ( $DefaultYN -eq "Y" ) { "bag package" } Else { "leave unbagged" } )
-            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $InputTimeout } )
+            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $TimeoutBase } )
 
             $PassThru = $false
             $SkipOver = $true
         
             $DoIt = ( $Batch -or ( "bag" -iin $Automatically ) )
             If ( ( -Not $DoIt ) -and $Interactive ) {
-                If ( ( $InputTimeout -lt 0 ) -and ( $Package.Name -like '*.pdf' ) ) {
-                    $DefaultYN = "Y"
-                    $TimeoutYN = 10
-                }
-
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Bag up package {1}?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
+                If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: PACKAGING Copy-1 and MIRRORING Copy-2 local preservation copy" -f $Context | Write-HostSectionHeader }
+
                 $Package | & coldstorage bag -Mirrored
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
@@ -125,10 +122,32 @@ Process {
                 ( "{0} | & coldstorage bag -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
             }
         }
-        If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -Unzipped ) ) ) {
+ 
+        If ( ( -Not $NoMirror ) -and ( $Package | test-cs-package-is -Unmirrored ) ) {
+
+            $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
+            $DefaultLeaveDo = $( If ( $DefaultYN -eq "Y" ) { "mirror package" } Else { "leave unmirrored" } )
+            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $TimeoutBase } )
+
+            $DoIt = ( $Batch -or ( "mirror" -iin $Automatically ) )
+            If ( ( -Not $DoIt ) -and $Interactive ) {
+                $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Mirror package {1}?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:N -DefaultTimeout:60 -DefaultAction:"leave unmirrored" )
+            }
+            If ( $DoIt ) {
+                If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: MIRRORING Copy-2 local preservation copy" -f $Context | Write-HostSectionHeader }
+                $Package | & coldstorage mirror -Items -RoboCopy | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage mirror -Items -RoboCopy"
+                $PassThru = $true
+            }
+            Else {
+                ( "{0} | & coldstorage mirror -Items -RoboCopy" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
+            }
+
+        }
+
+       If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -Unzipped ) ) ) {
             $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
             $DefaultLeaveDo = $( If ( $DefaultYN -eq "Y" ) { "zip package" } Else { "leave unzipped" } )
-            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $InputTimeout } )
+            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $TimeoutBase } )
 
             $PassThru = $false
             $SkipOver = $true
@@ -156,7 +175,7 @@ Process {
         If ( -Not $SkipOver -and ( $PassThru -or ( $Package | test-cs-package-is -NotInCloud ) ) ) {
             $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
             $DefaultLeaveDo = $( If ( $DefaultYN -eq "Y" ) { "upload to cloud" } Else { "leave not in cloud" } )
-            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $InputTimeout } )
+            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $TimeoutBase } )
 
             $PassThru = $false
             $SkipOver = $true
@@ -167,7 +186,9 @@ Process {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Upload {1} to cloud?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
-                $Package | & coldstorage to cloud -Items | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage to cloud -Items"
+                If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: SENDING Copy-3 off-site preservation copy TO CLOUD STORAGE" -f $Context | Write-HostSectionHeader }
+
+                $Package | & coldstorage to cloud -Quiet:( $Quiet -or ( $Context -ne $null ) ) | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage to cloud -Items"
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false

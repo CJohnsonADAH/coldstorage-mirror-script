@@ -902,7 +902,9 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Item, [switch] $InCloud, [switch] 
 }
 
 $sCommandWithVerb = ( $MyInvocation.MyCommand |% { "$_" } )
-$global:gCSCommandWithVerb = $sCommandWithVerb
+If ( $global:gCSCommandWithVerb -eq $null ) {
+    $global:gCSCommandWithVerb = $sCommandWithVerb
+}
 
 If ( $Verbose ) {
     $VerbosePreference = "Continue"
