@@ -1876,7 +1876,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $DateTime )
 }
 
 Function Get-ItemPackageMetadataFilePath {
-Param ( [Parameter(ValueFromPipeline=$true)] $Package )
+Param ( [Parameter(ValueFromPipeline=$true)] $Package, [switch] $All=$false )
     Begin { }
 
     Process {
@@ -1884,7 +1884,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
         $pack = $Package
         If ( ( -Not ( $Package -is [object] ) ) -or ( -Not ( $Package | Get-Member -Name:CSPackageBagged ) ) ) {
             "[{0}] Bare path or file object piped in. Call Get-ItemPackage to secure packaging-convention metadata." -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-Debug
-            $pack = ( $Package | Get-ItemPackage -At )
+            $pack = ( $Package | Get-ItemPackage -At -Force )
         }
 
         If ( $pack | Test-LooseFile ) {
@@ -1894,14 +1894,32 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
                 $packName = ( $pack.Name -replace '[\[\]]','_' )
                 Join-Path $SidecarLocation -ChildPath:( "{0}.package.json" -f $packName ) | Write-Output
             }
+            
+            If ( $All -and $pack.CSPackageBagLocation ) {
+                $BagLocation = ( $pack.CSPackageBagLocation )
+                ( Join-Path $BagLocation.FullName -ChildPath "package.json" ) | Write-Output
+            }
+
 
         }
         ElseIf ( $pack.CSPackageBagged ) {
-        
+
             $BagLocation = ( $pack.CSPackageBagLocation )
             ( Join-Path $BagLocation.FullName -ChildPath "package.json" ) | Write-Output
 
         }
+        ElseIf ( $pack | Test-BagItFormattedDirectory ) {
+        
+            $BagLocation = ( $pack.FullName )
+            ( Join-Path $BagLocation.FullName -ChildPath "package.json" ) | Write-Output
+
+        }
+        Else {
+        
+            "[{0}] ELSE: {1}" -f ( CSDbg -Function:$MyInvocation ), $pack | Write-CSIDiagnosticMessageStream -Context:@( "metadata" ) -ForegroundColor:Yellow
+
+        }
+
         
     }
 
@@ -1950,7 +1968,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package )
             $pack = ( $Package | Get-ItemPackage -At )
         }
 
-        $jsonFile = ( $pack | Get-ItemPackageMetadataFilePath )
+        $jsonFile = ( $pack | Get-ItemPackageMetadataFilePath -All | Select-Object -First:1 )
         If ( $jsonFile -ne $null ) {
 
             If ( -Not ( Test-Path -LiteralPath $jsonFile -PathType Leaf ) ) {
@@ -1999,6 +2017,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name=$null )
 
     Process {
         $jsonItem = ( $Package | Get-ItemPackageMetadataFile )
+        "META FILE: {0}" -f $jsonItem.FullName | Write-CSIDiagnosticMessageStream -Context:@( "metadata" ) -ForegroundColor:DarkYellow
         If ( $jsonItem ) {
         
             $json = ( Get-Content -LiteralPath $jsonItem.FullName )
@@ -2031,10 +2050,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $
     Begin { }
 
     Process {
-        $file = ( $Package | Get-ItemPackageMetadataFile )
+        $File = ( $Package | Get-ItemPackageMetadataFile )
+        "[{0}] FILE: {1}" -f ( CSDbg -Function:$MyInvocation ), ( $File.FullName | ConvertTo-Json -Compress ) | Write-CSIDiagnosticMessageStream -Context:@( "metadata" ) -ForegroundColor:DarkYellow
         If ( $File -eq $null ) {
             If ( $Make ) {
-                $file = ( $Package | New-ItemPackageMetadataFile )
+                $File = ( $Package | New-ItemPackageMetadataFile )
             }
         }
 
@@ -2046,7 +2066,7 @@ Param ( [Parameter(ValueFromPipeline=$true)] $Package, $Name, $Value, [switch] $
         }
 
         $dirty = $false
-        If ( $meta | Get-Member -Name:$Name ) {
+        If ( ( $meta -is [object] ) -and ( $meta | Get-Member -Name:$Name ) ) {
             
             If ( $Force ) {
                 
