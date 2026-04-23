@@ -225,7 +225,11 @@ If ( $OKtoStart ) {
                 }
 
                 If ( $mirror ) {
-                    & Robocopy.exe /copy:DAT /dcopy:DAT /maxage:${Window} /ipg:${IPG} /z /r:1 /w:1 /e $_.FullName $mirror /XD .coldstorage ZIP | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
+                    $roboCopyPre = @( "/copy:DAT", "/dcopy:DAT", "/maxage:${Window}", "/ipg:${IPG}", "/z", "/r:1", "/w:1", "/e" )
+                    $roboCopyPost = @( "/XN", "/XO" )
+                    & Robocopy.exe @roboCopyPre $_.FullName $mirror @roboCopyPost /XD .coldstorage ZIP | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
+                    # /copy:DAT /dcopy:DAT /maxage:${Window} /ipg:${IPG} /z /r:1 /w:1 /e 
+                    # /xn /xo 
                 }
 
                 Pop-Location
