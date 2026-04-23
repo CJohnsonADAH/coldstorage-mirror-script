@@ -2445,6 +2445,38 @@ Else {
         $oEcho = @{ "FLAGS"=( $MyInvocation.BoundParameters ); "WORDS"=( $Words ); "VERB"=( $Verb ); "PIPED"=( $Input ) }
         [PSCustomObject] $oEcho | Out-CSStream -Stream:$Output
     }
+    ElseIf ( $Verb -eq "diagnose" ) {
+        
+        $aContexts = ( $Words | Select-Object -First:1 )
+        If ( ( ( $aContexts | Measure-Object ).Count -eq 0 ) -or ( $aContexts -eq 'get' ) ) {
+            Get-CSIDiagnosticMessageStreamsActive |% {
+                If ( $Output -ne 'text/plain' ) {
+                    $vValue = ( $_ | Get-CSIDiagnosticMessageStream -Each )
+                    
+                    If ( ( $vValue -is [string] ) -and ( $vValue -iin [ConsoleColor]::GetNames( [ConsoleColor] ) ) ) {
+                        "{0} :: {1} (" -f $_, $vValue | Write-Host -NoNewline -ForegroundColor:Gray
+                        $vValue.ToUpper() | Write-Host -NoNewline -ForegroundColor:$vValue
+                        ")" | Write-Host -ForegroundColor:Gray
+                    }
+                    Else {
+                        $_ | Write-Host -ForegroundColor:Gray
+                    }
+                }
+                Else {
+                    $_ | Write-Output
+                }
+            }
+        }
+        Else {
+            If ( ( $Words | Measure-Object ).Count -gt 1 ) {
+                $vValue = ( $Words | Select-Object -Skip:1 )
+            }
+            Else {
+                $vValue = $true
+            }
+            $aContexts | Set-CSIDiagnosticMessageStream -Value:$vValue
+        }
+    }
     Else {
         "[{0}] No recognized verb. Display usage notes." -f $sCommandWithVerb | Write-Debug
         Get-CSUsageNotes -cmd $MyInvocation.MyCommand

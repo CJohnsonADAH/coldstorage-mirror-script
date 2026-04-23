@@ -689,6 +689,14 @@ Param( [Parameter(ValueFromPipeline=$true)] $For, [switch] $Each=$false, [switch
     }
 }
 
+Function Get-CSIDiagnosticMessageStreamsActive {
+
+    If ( $global:gCSIDiagnostics -is [Hashtable] ) {
+        $global:gCSIDiagnostics.Keys
+    }
+
+}
+
 Function Write-CSIDiagnosticMessageStream {
 Param( [Parameter(ValueFromPipeline)] $Line, $ForegroundColor=$null, $BackgroundColor=$null, [switch] $NoNewline, $Context=@( ) )
 
@@ -701,8 +709,11 @@ Param( [Parameter(ValueFromPipeline)] $Line, $ForegroundColor=$null, $Background
     Process {
         
         If ( $Context | Get-CSIDiagnosticMessageStream ) {
-
-            If ( ( $ForegroundColor -eq $null ) -and ( $BackgroundColor -eq $null ) ) {
+            $Colors = ( $Context | Get-CSIDiagnosticMessageStream -Each |? { $_ -is [string] } |? { $_ -iin [ConsoleColor]::GetNames( [ConsoleColor] ) } )
+            If ( $Colors.Count -gt 0 ) {
+                $Line | Write-Host -NoNewline:$NoNewline -ForegroundColor:( $Colors | Select-Object -First:1 )
+            }
+            ElseIf ( ( $ForegroundColor -eq $null ) -and ( $BackgroundColor -eq $null ) ) {
                 $Line | Write-Host -NoNewline:$NoNewline
             }
             ElseIf ( $ForegroundColor -eq $null ) {
@@ -744,5 +755,6 @@ Export-ModuleMember -Function Write-CSOutputWithLogMaybe
 
 Export-ModuleMember -Function Set-CSIDiagnosticMessageStream
 Export-ModuleMember -Function Get-CSIDiagnosticMessageStream
+Export-ModuleMember -Function Get-CSIDiagnosticMessageStreamsActive
 Export-ModuleMember -Function Write-CSIDiagnosticMessageStream
 Export-ModuleMember -Alias Diagnostics

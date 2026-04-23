@@ -5,7 +5,8 @@
     [switch] $ColdStorage=$false,
     [switch] $Original=$false,
     [switch] $Reflection=$false,
-    [switch] $Forward=$false
+    [switch] $Forward=$false,
+    [switch] $Quiet=$false
 )
 
     Function Get-CSScriptDirectory {
@@ -21,6 +22,27 @@ $bForceModules = ( ( $Debug -eq $true ) -or ( $psISE ) )
 
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageFiles.psm1" )
 Import-Module -Verbose:$bVerboseModules -Force:$bForceModules $( Get-CSScriptDirectory -File "ColdStorageMirrorFunctions.psm1" )
+
+    $ExitCode = 0
+
+    Function Write-SLTMNotice {
+    Param(
+        [Parameter(ValueFromPipeline=$true)] $Line,
+        [switch] $Quiet=$false,
+        $ForegroundColor="Yellow",
+        $BackgroundColor="Black"
+    )
+
+        Begin { }
+
+        Process {
+            If ( -Not $Quiet ) {
+                "[{0}] {1}" -f ( $global:gCSCommandWithVerb ), $Line | Write-Host -ForegroundColor:$ForegroundColor -BackgroundColor:$BackgroundColor
+            }
+        }
+
+        End { }
+    }
 
 If ( ( $LiteralPath -eq $null ) -or ( $LiteralPath.Count -eq 0 ) ) {
     $Destinations = @( Get-Item -LiteralPath ( ( Get-Location ).Path ) -Force )
@@ -40,19 +62,22 @@ $Destinations |% {
 
     If ( $Mirror ) {
         If ( $Push ) {
-            "[{0}] Pushing Location '{1}' onto stack" -f $global:gCSCommandWithVerb, $Mirror.FullName | Write-Host -ForegroundColor Yellow -BackgroundColor Black
+            "Pushing Location '{0}' onto stack" -f $Mirror.FullName | Write-SLTMNotice -Quiet:$Quiet
             Push-Location -LiteralPath $Mirror.FullName -Verbose
         }
         ElseIf ( $Pop ) {
-            "[{0}] Popping Location from stack" -f $global:gCSCommandWithVerb, $Mirror.FullName | Write-Host -ForegroundColor Yellow -BackgroundColor Black
+            "Popping Location from stack" | Write-SLTMNotice -Quiet:$Quiet
             Pop-Location
         }
         Else {
-            "[{0}] Setting Location to '{1}'" -f $global:gCSCommandWithVerb, $Mirror.FullName | Write-Host -ForegroundColor Yellow -BackgroundColor Black
+            "Setting Location to '{0}'" -f $Mirror.FullName | Write-SLTMNotice -Quiet:$Quiet
             Set-Location -LiteralPath $Mirror.FullName -Verbose
         }
     }
     Else {
-        "[{0}] Cannot find mirrored Location for '{1}'" -f $global:gCSCommandWithVerb, $Location.FullName | Write-Host -ForegroundColor Red -BackgroundColor Black
+        "Cannot find mirrored Location for '{0}'" -f $Destination.FullName | Write-SLTMNotice -Quiet:$Quiet -ForegroundColor:Red
+        $ExitCode = 1
     }
 }
+
+Exit $ExitCode
