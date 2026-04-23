@@ -380,6 +380,35 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, [Switch] $Quiet, [String] $Ex
 
 }
 
+Function Test-BagItFormattedInMirror {
+Param (
+    [Parameter(ValueFromPipeline=$true)] $Item,
+    [switch] $ColdStorage=$false,
+    [switch] $Original=$false,
+    [switch] $Forward=$false,
+    [switch] $Reflection=$false
+)
+
+    Begin { }
+
+    Process {
+        $Item | Get-FileObject | & invoke-in-mirror-location-cs.ps1 -Original:$Original -ColdStorage:$ColdStorage -Forward:$Forward -Reflection:$Reflection -Job:{
+            Get-Item -LiteralPath:. -Force | Test-BagItFormattedDirectory
+        } 2>&1 |% {
+            If ( -Not ( $_ -is [System.Management.Automation.ErrorRecord] ) ) {
+                $_ | Write-Output
+            }
+        }
+
+        If ( $LASTEXITCODE -gt 0 ) {
+            $false | Write-Output
+        }
+    }
+
+    End { }
+
+}
+
 # Out-BagItFormattedDirectoryWhenCleared: invoke a malware scanner (ClamAV) to clear preservation packages, then a bagger (BagIt.py) to bag them
 # @package coldstorage bag
 Function Out-BagItFormattedDirectoryWhenCleared {
@@ -462,39 +491,91 @@ param (
                 }
 
             }
-            ElseIf ( Test-ERInstanceDirectory($File) ) {
-
-                Push-Location -LiteralPath $DirName
-                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-bagitformatteddirectory-cs.ps1
-                Pop-Location
-
-                If ( $PassThru ) {
-                    If ( Test-BagItFormattedDirectory($File) ) {
-                        $File | Write-Output
-                    }
-                }
-
-            }
-            ElseIf ( Test-IndexedDirectory($File) ) {
-
-                $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
-            
-                If ( $PassThru ) {
-                    If ( Test-BagItFormattedDirectory($File) ) {
-                        $File | Write-Output
-                    }
-                }
-
-            }
             Else {
+            
+                $BaggedFromMirror = $false
+                If ( $File | Test-BagItFormattedInMirror ) {
 
-                Get-ChildItem -File -LiteralPath $File.FullName |% {
+                    If ( & read-yesfromhost-cs.ps1 -Prompt:"Bag from mirror location" -Timeout:60 ) {
+                        
+                        $BaggedFromMirror = $true
+                        
+                        Push-Location -LiteralPath:$File.FullName
+                        Do {
+                            $dataName = ( "data-{0}" -f ( Get-Date -Format:"yyyyMMddHHmmss" ) )
+                        } While ( Test-Path -LiteralPath:$dataName )
+
+                        $Payload = ( New-Item -ItemType:Directory -Path:$dataName )
+                        If ( $Payload ) {
+                            
+                            Get-ChildItem . -Force |? { $_.Name -ne $dataName } |% {
+                                Move-Item -LiteralPath:$_.Name -Destination:( $dataName | Join-Path -ChildPath $_.Name ) -Verbose 4>&1 |% { Write-Progress -Activity:"Moving files into payload directory" -Status:$_ }
+                            }
+                            Move-Item $dataName -Destination:data
+
+                            $Here = ( Get-Item -LiteralPath:. -Force )
+                            & set-location-to-mirror-cs.ps1 -Push -Quiet
+                            If ( $LASTEXITCODE -eq 0 ) {
+                                $There = ( Get-Item -LiteralPath:. -Force )
+                                & set-location-to-mirror-cs.ps1 -Pop -Quiet
+                            }
+                            Else {
+                                $There = $null
+                            }
+
+                            If ( ( $Here -ne $null ) -and ( $There -ne $null ) ) {
+
+                                & robocopy.exe /copy:DAT /dcopy:DAT /e /r:1 /w:1 $There.FullName $Here.FullName /xd data | Write-RoboCopyOutput -ChangeLog
+
+                                & coldstorage validate .
+
+                            }
+
+                        }
+
+                        Pop-Location
+
+                    }
+
+                }
                 
-                    $ChildItem = $_
-                    $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
+                If ( -Not $BaggedFromMirror ) {
+                    If ( Test-ERInstanceDirectory($File) ) {
 
-                    If ( $PassThru ) {
-                        $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
+                        Push-Location -LiteralPath $DirName
+                        $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-bagitformatteddirectory-cs.ps1
+                        Pop-Location
+
+                        If ( $PassThru ) {
+                            If ( Test-BagItFormattedDirectory($File) ) {
+                                $File | Write-Output
+                            }
+                        }
+
+                    }
+                    ElseIf ( Test-IndexedDirectory($File) ) {
+
+                        $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
+            
+                        If ( $PassThru ) {
+                            If ( Test-BagItFormattedDirectory($File) ) {
+                                $File | Write-Output
+                            }
+                        }
+
+                    }
+                    Else {
+
+                        Get-ChildItem -File -LiteralPath $File.FullName |% {
+                
+                            $ChildItem = $_
+                            $ChildItem | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"loose file" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
+
+                            If ( $PassThru ) {
+                                $ChildItem | Get-BaggedCopyOfLooseFile | Write-Output
+                            }
+                        }
+
                     }
                 }
 
