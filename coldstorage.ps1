@@ -2008,7 +2008,8 @@ Else {
     }
 
     $allObjects = ( @( $Words | Where { $_ -ne $null } ) + @( $Input | Where { $_ -ne $null } ) )
-
+    $FirstWord = ( $Words | Where { $_ -ne $null } | Select-Object -First:1 )
+    
     If ( $Verb -eq "mirror" ) {
         $DiffLevel = 0
         if ($Diff) {
@@ -2026,10 +2027,20 @@ Else {
         }
     }
     ElseIf ( $Verb -eq "321" ) {
-        $CS321Script = $( Get-CSScriptDirectory -File "sync-321preservation.ps1" )
-        $allObjects | & "$CS321Script" -Report:$Report -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
         
-        $ExitCode = $Sync321Exit
+        If ( $FirstWord -eq 'count' ) {
+            $allObjects = ( @( $Words | Where { $_ -ne $null } | Select-Object -Skip:1 ) + @( $Input | Where { $_ -ne $null } ) )
+            
+            $PreservationReportVerb = $( If ( $Report ) { "get" } Else { "out" } )
+            $CS321Script = $( Get-CSScriptDirectory -File ( "{0}-321preservationreport.ps1" -f $PreservationReportVerb ) )
+            $allObjects | & "$CS321Script" -Attn -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
+        }
+        Else {
+            $CS321Script = $( Get-CSScriptDirectory -File "sync-321preservation.ps1" )
+            $allObjects | & "$CS321Script" -Report:$Report -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
+        
+            $ExitCode = $Sync321Exit
+        }
     }
     ElseIf ( $Verb -eq "diff" ) {
         
