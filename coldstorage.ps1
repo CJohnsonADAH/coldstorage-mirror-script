@@ -511,7 +511,15 @@ param (
                             Get-ChildItem . -Force |? { $_.Name -ne $dataName } |% {
                                 Move-Item -LiteralPath:$_.Name -Destination:( $dataName | Join-Path -ChildPath $_.Name ) -Verbose 4>&1 |% { Write-Progress -Activity:"Moving files into payload directory" -Status:$_ }
                             }
-                            Move-Item $dataName -Destination:data
+
+                            Try {
+                                Move-Item $dataName -Destination:data
+                            }
+                            Catch [System.IO.IOException] {
+                                $_ | Write-Warning
+                                Sleep 5
+                                Move-Item $dataName -Destination:data
+                            }
 
                             $Here = ( Get-Item -LiteralPath:. -Force )
                             & set-location-to-mirror-cs.ps1 -Push -Quiet
@@ -527,8 +535,12 @@ param (
 
                                 & robocopy.exe /copy:DAT /dcopy:DAT /e /r:1 /w:1 $There.FullName $Here.FullName /xd data | Write-RoboCopyOutput -ChangeLog
 
-                                & coldstorage validate .
-
+                                If ( Test-BagItFormattedDirectory( $Here ) ) {
+                                    & coldstorage validate .
+                                }
+                                Else {
+                                    "[{0}] Failed to produce BagIt-formatted directory!" -f ( CSDbg -Function:$MyInvocation ) | Write-Warning
+                                }
                             }
 
                         }
