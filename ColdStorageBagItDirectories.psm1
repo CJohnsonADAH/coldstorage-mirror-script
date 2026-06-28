@@ -136,11 +136,12 @@ Param ( $LiteralPath, [switch] $NoLog = $false, [switch] $Fast = $false )
     $LogFile = $null
 
     If ( -Not $NoLog ) {
-        $LogDirItem = ( Get-CSBaggedPackageLogDirectory -LiteralPath $DIRNAME -NoLog:$NoLog )
+        $LogDirItem = ( Get-CSBaggedPackageLogDirectory -LiteralPath:$LiteralPath -NoLog:$NoLog )
         If ( $LogDirItem ) {
             $Timestamp = @( ( Get-Date -Format 'yyyyMMdd' ), ( Get-Date -Format 'HHmmss' ) )
             $Method = $( If ( $Fast ) { "-FAST" } Else { "" } )
-            $LogFile = ( Join-Path -Path $LogDirItem.FullName -ChildPath ( "validation-{0}-{1}-{2}-{3}{4}.txt" -f "bagit",$Timestamp[0], $Timestamp[1], $env:COMPUTERNAME, $Method ) )
+            $RepositoryLocation = ( $LiteralPath | Get-FileRepositoryLocation |% { ( ( $_.FullName -replace '^[^0-9A-Za-z_]+','') -replace '[^0-9A-Za-z_]+','-' ) } )
+            $LogFile = ( Join-Path -Path $LogDirItem.FullName -ChildPath ( "validation-{0}-{1}-{2}-{3}-{4}{5}.txt" -f "bagit",$Timestamp[0], $Timestamp[1], $RepositoryLocation, $env:COMPUTERNAME, $Method ) )
         }
     }
 
