@@ -81,7 +81,14 @@ Param ( [Parameter(ValueFromPipeline=$true)] $LiteralPath )
 }
 
 Function Get-ColdStorageRepositories {
-Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [switch] $Tag=$false, [switch] $NoTrash=$false, [switch] $Passive=$false )
+Param (
+    $Groups=@(),
+    [Parameter(ValueFromPipeline=$true)] $Repository=$null,
+    $FileLocations=@( "ColdStorage", "Forward" ),
+    [switch] $Tag=$false,
+    [switch] $NoTrash=$false,
+    [switch] $Passive=$false 
+)
 
     Begin {
         $GroupMeta = ( Get-ColdStorageSettings -Name "Repository-Groups" )
@@ -104,7 +111,8 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                 $Locations += ( $Row.Groups |% { $Key = $_; $GroupMeta.${Key} } )
                 
                 # 1. Let's fill in Original and Reflection and ColdStorage
-                "Original", "Reflection", "ColdStorage", "Forward" |% { 
+                $aLocations = ( @( "Original", "Reflection" ) + @( $FileLocations ) | Select-Object -Unique )
+                $aLocations |% { 
                     $Aspect = $_
                     If ( $Row | Get-Member -Name $Aspect ) { 
                         If ( $Row.$Aspect -is [String] ) {
@@ -154,7 +162,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
             }
             Else {
                 "[{0}] Tag and filter out ({1})..." -f ( Get-CSDebugContext -Function:$MyInvocation ), $Repository | Write-Debug 
-                $taggedOut = ( $Repository | Get-ColdStorageRepositories  -Groups:$Groups -Tag -NoTrash -Passive:$Passive )
+                $taggedOut = ( $Repository | Get-ColdStorageRepositories  -Groups:$Groups -Tag -NoTrash -Passive:$Passive -FileLocations:$FileLocations )
                 $filteredOut = @( $taggedOut.Collection, $taggedOut.Locations.Reflection, $taggedOut.Locations.Original, $taggedOut.Locations.ColdStorage )
 
             }
@@ -172,7 +180,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
                 $Intersect = ( $Groups |? { $Row.Groups -icontains $_ } )
                 If ( $Intersect ) {
                     ( "FILTERED IN ({0}): {1}" -f ($Intersect -join ", "), $Key ) | Write-Debug
-                    $Key | Get-ColdStorageRepositories -Groups:$Intersect -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive
+                    $Key | Get-ColdStorageRepositories -Groups:$Intersect -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive -FileLocations:$FileLocations
                 }
                 Else {
                     ( "FILTERED OUT: {0}" -f $Key) | Write-Debug
@@ -184,7 +192,7 @@ Param ( $Groups=@(), [Parameter(ValueFromPipeline=$true)] $Repository=$null, [sw
             "[{0}] Assemble output ..." -f ( Get-CSDebugContext -Function:$MyInvocation ), $Repository | Write-Debug 
             $out = @{ }
             $Repositories = ( $MirrorsMeta | Get-Member -MemberType NoteProperty |% { $_.Name } )
-            $Repositories |% { $Key = $_; $out[$Key] = ( $Key | Get-ColdStorageRepositories -Groups:$Groups -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive ) }
+            $Repositories |% { $Key = $_; $out[$Key] = ( $Key | Get-ColdStorageRepositories -Groups:$Groups -Tag:$Tag -NoTrash:$NoTrash -Passive:$Passive -FileLocations:$FileLocations ) }
             $out | Write-Output
         }
 
@@ -392,24 +400,44 @@ End { }
 
 }
 
+$global:gColdStorageRepositoryDirectoryProps = @{ }
+
 Function Get-ColdStorageRepositoryDirectoryProps {
 Param ( [Parameter(ValueFromPipeline=$true)] $File )
 
     Begin { }
 
     Process {
-        $oFile = Get-FileObject($File)
-        $sContainer = $oFile.FullName
-        If ( Test-Path -LiteralPath "${sContainer}\.coldstorage" -PathType Container ) {
-            Get-ChildItem -LiteralPath "${sContainer}\.coldstorage" |% {
-                If ( $_.Name -like "*.json" ) {
-                    $Source = $_
-                    $Source | Get-Content | ConvertFrom-Json |
-                        Add-Member -PassThru -MemberType NoteProperty -Name Location -Value $oFile |
-                        Add-Member -PassThru -MemberType NoteProperty -Name SourceLocation -Value ( $Source.Directory ) |
-                        Add-Member -PassThru -MemberType NoteProperty -Name Source -Value ( $Source )
-                }
+        $oFile = ( $File | Get-FileObject )
+        $sCSContainer = ( $oFile.FullName | Join-Path -ChildPath ".coldstorage" )
+        
+        $TS, $Props = $null
+        If ( $global:gColdStorageRepositoryDirectoryProps.ContainsKey( $sCSContainer ) ) {
+            $Cached = $global:gColdStorageRepositoryDirectoryProps[ $sCSContainer ]
+            $TS = $Cached[ 'TS' ]
+            $Props = $Cached[ 'Props' ]
+        }
+
+        If ( ( $Props -ne $null ) -and ( $TS -ne $null ) -and ( ( ( Get-Date ) - $TS ).TotalMinutes -lt 10 ) ) {
+            $Props | Write-Output
+        }
+        ElseIf ( Test-Path -LiteralPath:$sCSContainer -PathType:Container ) {
+            $CachedProps = @( )
+            
+            Get-ChildItem -LiteralPath:$sCSContainer -File |? { $_.Name -like '*.json' } |% {
+                $Source = $_
+                $Props = ( $Source | Get-Content | ConvertFrom-Json |
+                    Add-Member -PassThru -MemberType:NoteProperty -Name:Location -Value:( $oFile ) |
+                    Add-Member -PassThru -MemberType:NoteProperty -Name:SourceLocation -Value:( $Source.Directory ) |
+                    Add-Member -PassThru -MemberType:NoteProperty -Name:Source -Value:( $Source ) )
+            
+                $Props | Write-Output
+            
+                $CachedProps = @( $CachedProps ) + @( $Props )
             }
+
+            $global:gColdStorageRepositoryDirectoryProps[ $sCSContainer ] = @{ TS=( Get-Date ); Props=$CachedProps }
+
         }
     }
 
@@ -422,10 +450,10 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
     Begin { }
 
     Process {
-        $oFile = Get-FileObject($File)
-        
+        $oFile = $( If ( $File -is [string] ) { $File | Get-FileObject } Else { $File } )
         $Parent = $( If ( $oFile.Directory ) { $oFile.Directory } ElseIf ( $oFile.Parent ) { $oFile.Parent } )
-        
+
+        #"[{0}/{1}:{2}] FILE={3} / PARENT={4}" -f ( CSDbg -Function:$MyInvocation ),( ( Get-PSCallStack )[1].FunctionName ),( ( Get-PSCallStack )[1].ScriptLineNumber ),($oFile.FullName|ConvertTo-Json),($Parent.FullName|ConvertTo-Json) | Write-CSIDiagnosticMessageStream -Context:@( "props" ) -ForegroundColor:Cyan #DBG
         $Props = ( $Parent | Get-FileRepositoryProps )
         If ( $Props ) {
             $Props
@@ -748,10 +776,141 @@ Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null )
 
 }
 
-Function Get-MirrorMatchedItem {
-Param( [Parameter(ValueFromPipeline=$true)] $File, $Pair=$null, $In=@(), [switch] $Original=$false, [switch] $Reflection=$false, [switch] $ColdStorage=$false, [switch] $Forward=$false, [switch] $Trashcan=$false, [switch] $Self=$false, [switch] $Other=$false, [switch] $All=$false, [switch] $IgnoreBagging=$false, [switch] $Passive=$false, $Repositories=$null, [switch] $ShowWarnings=$false )
+Function Get-CSItemMirrorObjects {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Item,
+    $MirrorsArray=$null,
+    $Repository=$null,
+    $FileLocations=@( "ColdStorage", "Forward" )
+)
 
-Begin { $mirrors = ( Get-ColdStorageRepositories -NoTrash -Tag ) }
+    Begin {
+        If ( $MirrorsArray -eq $null ) {
+            $MirrorsArray = ( Get-ColdStorageRepositories -NoTrash -Tag -FileLocations:$FileLocations )
+        }
+    }
+
+    Process {
+        $Repository = ( $Item | Get-MirrorMatchedItemPair -Pair:$Repository )
+        
+        $Locations = $null
+        If ( $MirrorsArray.ContainsKey( "${Repository}" ) ) {
+            $Locations = $MirrorsArray[ "${Repository}" ].Locations
+        }
+        
+        If ( $Locations -ne $null ) {
+            $Locations | Get-Member -MemberType:NoteProperty |% {
+                $Name = $_.Name
+                If ( ( $Name -ne "Groups" ) -and ( $Locations."${Name}" -ne $null ) ) {
+                    [PSCustomObject] @{ "Name"="${Name}"; "Value"=( $Locations."${Name}" ) } | Write-Output
+                }
+            }
+        }
+    }
+
+    End { }
+}
+
+Function Get-CSItemMirrorNames {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Item,
+    $MirrorsArray=$null,
+    $Repository=$null
+)
+
+    Begin { }
+
+    Process {
+        $Locations = ( $Item | Get-CSItemMirrorObjects -MirrorsArray:$MirrorsArray -Repository:$Repository )
+        $Locations |% {
+            If ( $_.Value -ne $null ) {
+                $_.Name | Write-Output
+            }
+        }
+    }
+
+
+}
+
+Function Test-CSItemHasMirror {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $Item,
+    $At=$null,
+    [switch] $Resolve=$false,
+    $MirrorsArray=$null,
+    $Repository=$null
+)
+
+    Begin { }
+
+    Process {
+        $MirrorObjects = ( $Item | Get-CSItemMirrorObjects -FileLocations:$At )
+        If ( $Resolve ) {
+            # Determine this Item's RelPath relative to its repository
+            $RepositoryLocation = ( $Item | Get-FileRepositoryLocation )
+            $RelPath = ( $Item | Resolve-PathRelativeTo -Base:$RepositoryLocation.FullName )
+        }
+
+        $At |? { $_ -ne $null } |% {
+            $AtName = $_
+
+            $objects = ( $MirrorObjects |? { $_.Name -eq $AtName } )
+            
+            $OK = $false
+            If ( -Not $Resolve ) {
+                $OK = ( ( $objects | Measure-Object ).Count -gt 0 )
+            }
+            Else {
+
+                # Determine what this Item's RelPath would be relative to the other repository
+                $objects |% {
+                    $_.Value |% {
+                        $ToResolve = ( $_ | Join-Path -ChildPath:$RelPath )
+                        $OK = ( $OK -or ( Test-Path -LiteralPath:$ToResolve ) )
+                    }
+                }
+                
+            }
+            $OK | Write-Output
+
+        }
+    }
+
+    End { }
+}
+
+Function Get-MirrorMatchedItem {
+Param(
+    [Parameter(ValueFromPipeline=$true)] $File,
+    $Pair=$null,
+    $In=@(),
+    [switch] $Original=$false,
+    [switch] $Reflection=$false,
+    [switch] $ColdStorage=$false,
+    [switch] $Forward=$false,
+    $Mirror=$null,
+    [switch] $Trashcan=$false,
+    [switch] $Self=$false,
+    [switch] $Other=$false,
+    [switch] $All=$false,
+    [switch] $IgnoreBagging=$false,
+    [switch] $Passive=$false,
+    $Repositories=$null,
+    [switch] $ShowWarnings=$false
+)
+
+Begin {
+    $Range = $In
+
+    If ( $Original ) { $Range += , "Original" }
+    If ( $Reflection ) { $Range += , "Reflection" }
+    If ( $ColdStorage ) { $Range += , "ColdStorage" }
+    If ( $Forward ) { $Range += , "Forward" }
+    If ( $Mirror -ne $null ) { $Range += @( $Mirror ) }
+    If ( $Trashcan ) { $Range += , "Trashcan" }
+
+    $mirrors = ( Get-ColdStorageRepositories -NoTrash -Tag -FileLocations:$Range )
+}
 
 Process {
     
@@ -761,6 +920,7 @@ Process {
     If ( $Reflection ) { $Range += , "Reflection" }
     If ( $ColdStorage ) { $Range += , "ColdStorage" }
     If ( $Forward ) { $Range += , "Forward" }
+    If ( $Mirror -ne $null ) { $Range += @( $Mirror ) }
     If ( $Trashcan ) { $Range += , "Trashcan" }
 
     If ( $Range.Count -eq 0 ) { $Range = ( "Original", "Reflection" ); $Implicit = $true }
@@ -782,15 +942,7 @@ Process {
         If ( $mirrors.ContainsKey( "${Pair}" ) ) {
             $Locations = $mirrors[ "${Pair}" ].Locations
         }
-        "[{0}:{1}] Locations: {2}" -f "Get-MirrorMatchedItem",( Get-CurrentLine ),( $Locations | ConvertTo-Json -Compress ) | Write-Debug
-
-        $HereThereDiagLines = @(
-            ( "PAIR: '{0}'" -f ( $Pair -join "'; '" ) ),
-            ( "MIRRORS: [ {0} ]" -f ( $mirrors | ConvertTo-Json -Compress ) ),
-            "----",
-            "HERE",
-            "----"
-        )
+        "[{0}] Locations: {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ),( $Locations | ConvertTo-Json -Compress ) | Write-Debug
 
         $Here = (
             $Locations | Get-Member -MemberType NoteProperty |% {
@@ -801,17 +953,7 @@ Process {
                     [PSCustomObject] @{ "Name"=$PropName; "Value"=$PropValue }
                 }
 
-                $HereThereDiagLines = @( $HereThereDiagLines ) + @(
-                    "PROP: '${PropName}'='${PropValue}'",
-                    "INCLUDED: ${Include}",
-                    "-----"
-                )
             }
-        )
-
-        $HereThereDiagLines = @( $HereThereDiagLines ) + @(
-            "THERE",
-            "-----"
         )
 
         $There = (
@@ -827,12 +969,6 @@ Process {
 
                 $Include = ( ( -Not $Implicit ) -or ( $All ) -or ( $ItsMe -eq $Self ) )
 
-                $HereThereDiagLines = @( $HereThereDiagLines ) + @(
-                    "PROP: '${PropName}'='${PropValue}'",
-                    "INCLUDED: ${Include}",
-                    "-----"
-                )
-
                 # default = return only the requested locations in $Range that are alternative counterparts to the selected item; never the item itself
                 # -Self = return only the requested locations in $Range that are the item itself, not alternative counterparts
                 # -All = return all the requested locations in $Range, whether the item itself or alternative counterparts
@@ -841,6 +977,8 @@ Process {
                 }
             }
         )
+
+        "[{0}] THERE: {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ), ( $There|ConvertTo-Json -Compress ) | Write-Debug
 
         $Container = ( Get-ItemFileSystemLocation $File | Get-UNCPathResolved -ReturnObject | Get-LocalPathFromUNC )
 
@@ -858,7 +996,6 @@ Process {
             }
             Else {
                 ( "[Get-MirrorMatchedItem] FILE '{0} \\ {1}' LOCATION SEEMS TO BE NULL! {2} / {3}" -f $Stock,$Stem,$_,( $Range -join "," ) ) | Write-Warning
-                $HereThereDiagLines | Write-Warning
                 $ProspectivePath = $null
             }
 
@@ -952,10 +1089,6 @@ Process {
         ( "[{0}] Does not appear to be in a mirrored location: '{1}'" -f $MyInvocation.MyCommand,$sFile ) | Write-Warning
     }
 
-    If ( ( $HereThereDiagLines.Count -gt 0 ) -and $ShowWarnings ) {
-        $HereThereDiagLines | Write-Warning
-    }
-
 }
 
 End { }
@@ -1007,6 +1140,9 @@ Export-ModuleMember -Function Test-ColdStorageRepositoryPropsDirectory
 Export-ModuleMember -Function Test-ColdStorageRepositoryPropsFile
 Export-ModuleMember -Function Split-PathEntirely
 Export-ModuleMember -Function Split-MirrorMatchedPath
+Export-ModuleMember -Function Get-CSItemMirrorObjects
+Export-ModuleMember -Function Get-CSItemMirrorNames
+Export-ModuleMember -Function Test-CSItemHasMirror
 Export-ModuleMember -Function Get-MirrorMatchedItemPair
 Export-ModuleMember -Function Get-MirrorMatchedItem
 Export-ModuleMember -Function Test-MirrorMatchedItem

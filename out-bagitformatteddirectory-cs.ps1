@@ -72,8 +72,25 @@ Process {
 
     $ExitCode = $NotOK
     If ( $NotOK -gt 0 ) {
-        "ERR-BagIt: returned ${NotOK}" | Write-Verbose
-        $Output | Write-Error
+
+        $Output |% {
+            If ( $_ -match '^[0-9]+-[0-9]+-[0-9]+\s+[0-9]+:[0-9]+:[0-9,]+\s+-\s+(INFO|WARN.*|ERROR)\s+-' ) {
+                If ( $Matches[1] -eq 'INFO' ) {
+                    $_ | Write-Verbose
+                }
+                ElseIf ( $Matches[2] -like 'WARN*' ) {
+                    $_ | Write-Warning
+                }
+                Else {
+                    $_ | Write-Error
+                }
+            }
+            Else {
+                $_ | Write-Warning
+            }
+        }
+
+        "ERR-BagIt: returned ${NotOK}" | Write-Error
     }
     Else {
             

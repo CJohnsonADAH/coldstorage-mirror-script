@@ -386,10 +386,16 @@ Process {
 
         If ( $ValidationMethod ) {
             "[{0}] Validation test using method {1} ... [{2}]" -f ( Get-CSDebugContext -Function:$MyInvocation ), $ValidationMethod, $( If ( $Validated ) { "OK" } Else { "failed!" } ) | Write-Verbose
-            If ( $Validated ) {
-                $oBag | Add-ItemPackageMetadata -Name:"Time-Validated" -Value:( Get-Date ).ToUniversalTime() -Force -Make
+            
+            If ( -Not $NoLog ) {
+            
+                If ( $Validated ) {
+                    $oBag | Add-ItemPackageMetadata -Name:"Time-Validated" -Value:( Get-Date ).ToUniversalTime() -Force -Make
+                }
+                $oBag | Add-ItemPackageMetadata -Name:"Time-TestValidation" -Value:( [PSCustomObject] @{ "Time"=( Get-Date | ConvertTo-ItemPackageMetadataDateTime ); "Result"=$Validated } ) -Force -Append -Last:7 -Make
+
             }
-            $oBag | Add-ItemPackageMetadata -Name:"Time-TestValidation" -Value:( [PSCustomObject] @{ "Time"=( Get-Date | ConvertTo-ItemPackageMetadataDateTime ); "Result"=$Validated } ) -Force -Append -Last:7 -Make
+
         }
         Else {
             "[{0}] I do not know how to validate this: {1}" -f "Get-CSItemValidation",$sLiteralPath | Write-Warning

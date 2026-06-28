@@ -65,6 +65,29 @@ Param( [Parameter(ValueFromPipeline=$true)] $SyncOptions )
 	
 }
 
+Function Test-CSSyncOptionsFlag {
+Param( [Parameter(ValueFromPipeline=$true)] $SyncOptions, [string] [Parameter(Position=0)] $Flag, $Default=$false )
+
+    Begin { }
+
+    Process {
+
+        $Result = $Default
+        If ( ( $SyncOptions -ne $null ) -and ( $SyncOptions.Contains( $Flag ) ) ) {
+            If ( $SyncOptions[ $Flag ] -ne $null ) {
+                $Result = ( [bool] ( $SyncOptions[ $Flag ] ) )
+            }
+        }
+
+        $Result | Write-Output
+
+    }
+
+    End { }
+
+}
+
+
 #############################################################################################################
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
@@ -152,6 +175,8 @@ Function Sync-ItemMetadata ($From, $To, $SyncOptions=$null, $Progress=$null, [sw
 Function Copy-MirroredFile {
 Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch] $Batch=$false, [switch] $ReadOnly=$false, $Progress=$null, [switch] $Discard=$false )
 
+    $PacketGap = 30
+
     $SourceContainer = $From
     $DestinationContainer = $To
     $FileName = $File
@@ -216,11 +241,11 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
                 $rcDestination = ( Convert-Path -LiteralPath "${DestinationContainer}" )
                 
                 If ( $File -ne $null ) {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT /IPG:$PacketGap "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
                     $RoboCode = $LASTEXITCODE
                 }
                 Else {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT "${rcSource}" "${rcDestination}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT /IPG:$PacketGap "${rcSource}" "${rcDestination}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
                     $RoboCode = $LASTEXITCODE
                 }
                 $Fallback = ( $RoboCode -ge 5 )
@@ -259,6 +284,8 @@ Param (
 )
 
     $sStatus = "*.*"
+    
+    $PacketGap = 30
 
     $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
     $UseRoboCopy = ( $RoboCopy -And $RoboCopyExe )
@@ -291,12 +318,12 @@ Param (
                     $rcFile = ( Split-Path "${From}" -Leaf )
 
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
+                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 /IPG:$PacketGap "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
                     }
                 }
                 Else {
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 "${rcFrom}" "${rcTo}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog
+                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 /IPG:$PacketGap "${rcFrom}" "${rcTo}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
                     }
                 }
 
@@ -639,11 +666,11 @@ Param (
 )
 
     If ( "${To}" -eq "" ) {
-        "[{0}:{1}] ('{2}', '{3}'): Parameter TO appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        "[{0}] ('{1}', '{2}'): Parameter TO appears to be empty." -f ( Get-CSDebugContext -Function:$MyInvocation ), $From, $To | Write-Error
         Return
     }
     ElseIf ( "${From}" -eq "" ) {
-        "[{0}:{1}] ('{2}', '{3}'): Parameter FROM appears to be empty." -f $MyInvocation.MyCommand, $MyInvocation.ScriptLineNumber, $From, $To | Write-Error
+        "[{0}] ('{1}', '{2}'): Parameter FROM appears to be empty." -f ( Get-CSDebugContext -Function:$MyInvocation ), $From, $To | Write-Error
         Return
     }
 
@@ -658,7 +685,7 @@ Param (
                 $YNTimeout=$null
             }
 
-            & read-yesfromhost-cs.ps1 -Prompt ( "Move {0} contents into a BagIt data payload directory?" -f "${To}" ) -Timeout:$YNTimeout
+            & read-yesfromhost-cs.ps1 -Prompt:( "Move {0} contents into a BagIt data payload directory?" -f "${To}" ) -Timeout:$YNTimeout
         }
     }
 
@@ -671,7 +698,7 @@ Param (
             If ( Test-Path -PathType Container "${From}" ) {
                 $ToDir = ( New-Item -Type Directory "${To}" -Force:$Force -Verbose )
                 If ( ( -Not $ToDir ) -or ( -Not ( Test-Path -LiteralPath "${To}" ) ) ) {
-                    $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' could neither be found NOR created." -f $global:gCSSCriptName, $To )
+                    $ErrMesg = ( "[{0}] Sync-MirroredFiles: Destination '{1}' could neither be found NOR created." -f ( Get-CSDebugContext -Function:$MyInvocation ), $To )
                     Write-Error $ErrMesg
                     Return
                 }
@@ -739,10 +766,11 @@ Param (
 
 		$Items = ( Get-ChildItem -Force -LiteralPath "${To}" )
 		If ( $Items.Count -gt 0 ) {
-			$DoTheMove = $Force
+			
+            $DoTheMove = $Force
 			$DoTheRepair = $false
 
-			If ( -Not $DoTheMove ) {
+            If ( -Not $DoTheMove ) {
 				If ( -Not $Batch ) {
 					$DoTheMove = ( $TestMoveIntoBag.Invoke( $Scheduled ) )
 				}
@@ -829,8 +857,13 @@ Param (
         ### CLEAN UP (rm): Files on destination not (no longer) on source get tossed out. ################################
         ##################################################################################################################
 
-        $Progress.Update( $sActScanning, "${sStatus} (rm)" )
-        Remove-MirroredFilesWhenObsolete -From $From -To $To -Batch:$Batch -Depth $Depth -RepositoryOf:$RepositoryOf
+        If ( -Not ( $SyncOptions | Test-CSSyncOptionsFlag -Flag:"Fast" ) ) {
+            $Progress.Update( $sActScanning, "${sStatus} (rm)" )
+            Remove-MirroredFilesWhenObsolete -From $From -To $To -Batch:$Batch -Depth $Depth -RepositoryOf:$RepositoryOf
+        }
+        Else {
+            "[{0}] Skipping Remove-MirroredFilesWhenObsolete due to FAST flag" -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-CSIDiagnosticMessageStream -Context:@( "mirror" ) -ForegroundColor:Yellow
+        }
     }
 
     $RoboCopyExe = ( Get-Command ROBOCOPY -ErrorAction SilentlyContinue )
@@ -861,17 +894,24 @@ Param (
     $Progress.Redraw()
 
     $sFiles = ( "file" | Get-PluralizedText($N) )
-    $aFiles | ForEach {
-        $BaseName = $_.Name
-        $MirrorFrom = $_.FullName
-        $MirrorTo = ($_ | ConvertTo-MirroredPath -Within "${To}")
 
-        $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
-        $Progress.Update( $Mesg, 0 )
-        $Mesg | Write-Debug
-        Sync-MirroredFiles -From:"${MirrorFrom}" -To:"${MirrorTo}" -DiffLevel:$DiffLevel -Depth:($Depth + 1) -SyncOptions:$SyncOptions -Batch:$Batch -NoScan:$NoScan -NoLog:$NoLog -LogFile:$vLogFile -RoboCopy:$RoboCopy -AlreadyCopied:$RoboCopy
-        $Progress.Update( $Mesg )
+    If ( -Not ( $UseRoboCopy -and ( $SyncOptions | Test-CSSyncOptionsFlag -Flag:"Fast" ) ) ) {
+        $aFiles | ForEach {
+            $BaseName = $_.Name
+            $MirrorFrom = $_.FullName
+            $MirrorTo = ($_ | ConvertTo-MirroredPath -Within "${To}")
+
+            $Mesg = ( "{4:N0}/{5:N0}: ${BaseName}" )
+            $Progress.Update( $Mesg, 0 )
+            $Mesg | Write-Debug
+            Sync-MirroredFiles -From:"${MirrorFrom}" -To:"${MirrorTo}" -DiffLevel:$DiffLevel -Depth:($Depth + 1) -SyncOptions:$SyncOptions -Batch:$Batch -NoScan:$NoScan -NoLog:$NoLog -LogFile:$vLogFile -RoboCopy:$RoboCopy -AlreadyCopied:$UseRoboCopy
+            $Progress.Update( $Mesg )
+        }
     }
+    Else {
+        "[{0}] Skipping Sync-MirroredFiles recursion due to -ROBOCOPY and FAST flags" -f ( Get-CSDebugContext -Function:$MyInvocation ) | Write-CSIDiagnosticMessageStream -Context:@( "mirror" ) -ForegroundColor:Yellow
+    }
+
 
     $Progress.Complete()
 
@@ -901,7 +941,6 @@ Param (
 ## FILE / DIRECTORY COMPARISON FUNCTIONS ###################################################################
 ############################################################################################################
 
-# Is-Matched-File
 Function Test-MatchedFile ($From, $To, $SyncOptions=$null, $DiffLevel=0) {
 
     $ToPath = $To
@@ -924,7 +963,6 @@ Function Test-MatchedFile ($From, $To, $SyncOptions=$null, $DiffLevel=0) {
 
 }
 
-# Get-Unmatched-Items
 Function Select-UnmatchedItems {
     [CmdletBinding()]
 
@@ -1095,3 +1133,5 @@ Export-ModuleMember -Function Sync-Metadata
 Export-ModuleMember -Function Sync-MirroredFiles
 
 Export-ModuleMember -Function Test-MirrorSyncBidirectionally
+
+Export-ModuleMember -Function Test-CSSyncOptionsFlag

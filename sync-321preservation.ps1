@@ -1,6 +1,7 @@
 ﻿Param(
     [Parameter(ValueFromPipeline=$true)] $Location,
     [switch] $Report=$false,
+    [switch] $Brief=$false,
     [switch] $Batch=$false
 )
 
@@ -54,20 +55,28 @@ End {
     $aObjects = ( $aObjects | & "${CSGet321ChildItemPackages}" )
 
     $oo = ( $aObjects | & "${CSGetPackages}" -Check321 |% {
+        $BGColor="Black"
         If ( $_ | & "${CSTestPackageIs}" -Not -Bagged -Mirrored -Zipped -InCloud ) {
             $FGColor = "Yellow"
             $_ | Write-Output
         }
-        Else {
+        ElseIf ( -Not $Brief ) {
             $FGColor = "Green"
         }
-        $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:$FGColor -BackgroundColor:Black
+        Else {
+            $FGColor = $null
+        }
+        If ( $FGColor -ne $null ) {
+            $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:$FGColor -BackgroundColor:$BGColor
+        }
     } )
 
     If ( -Not $Report ) {
         "" | Write-Host -ForegroundColor:Cyan
         If ( ( $oo | Measure-Object ).Count -gt 0 ) {
-            "=== 3-2-1 Digital Preservation: Pending Actions ===" | Write-Host -ForegroundColor:Cyan
+            If ( -Not $Brief ) {
+                "=== 3-2-1 Digital Preservation: Pending Actions ===" | Write-Host -ForegroundColor:Cyan
+            }
             $oo |% {
                 "" | Write-Host
                 $_ | & "${CSWritePackagesReport}" | Write-Host -ForegroundColor:Yellow -BackgroundColor:Black

@@ -205,7 +205,7 @@ Process {
     ElseIf ( $WSFA ) {
         $out = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } |% { Get-ChildItem $_.FullName -Directory } )
     }
-    Else {
+    ElseIf ( $Bags ) {
         $out = ( Get-ChildItem -Directory -Recurse -Force |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } |? {
             ( $_.Name -eq 'data' )
         } |% {
@@ -219,6 +219,10 @@ Process {
             -Not ( $_ | Test-BagItFormattedDirectoryContent )
         } )
     }
+    Else {
+        $out = ( Get-Item -LiteralPath:. -Force |  get-321childitempackages.ps1 )
+    }
+
 
     If ( $N -ne $null ) {
         $out = ( $out | Select-Object -First:$N )

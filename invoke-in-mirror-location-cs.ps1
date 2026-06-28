@@ -4,7 +4,8 @@
     [switch] $Original=$false,
     [switch] $ColdStorage=$false,
     [switch] $Forward=$false,
-    [switch] $Reflection=$false
+    [switch] $Reflection=$false,
+    $Mirror=$null
 )
 
 Begin {
@@ -33,7 +34,7 @@ Process {
     If ( $here ) {
         Push-Location -LiteralPath:$here.FullName
 
-        & set-location-to-mirror-cs.ps1 -LiteralPath:$here.FullName -Original:$Original -ColdStorage:$ColdStorage -Reflection:$Reflection -Push -Quiet ; $SLTMExitCode = $LASTEXITCODE
+        & set-location-to-mirror-cs.ps1 -LiteralPath:$here.FullName -Original:$Original -ColdStorage:$ColdStorage -Reflection:$Reflection -Mirror:$Mirror -Push -Quiet ; $SLTMExitCode = $LASTEXITCODE
 
         If ( $SLTMExitCode -eq 0 ) {
 

@@ -86,7 +86,6 @@ Process {
                 $sBucket = ( "er-collections-${RepositorySlug}" )
             }
             'Masters' {
-                "WUT"|Write-Warning
                 $SectionSlug = "da"
 
                 $ContainingDirectory = $( If ( $oPackage.Directory ) { $oPackage.Directory } ElseIf ( $oPackage.Parent ) { $oPackage.Parent } )
@@ -126,7 +125,7 @@ Process {
     }
 
     If ( $sBucket ) {
-        $sBucket | Write-Output
+        $sBucket | ConvertTo-CloudStorageBucketName | Write-Output
     }
 
 }
@@ -142,6 +141,27 @@ End {
 
 }
 
+}
+
+Function ConvertTo-CloudStorageBucketName {
+Param( [Parameter(ValueFromPipeline=$true)] $Name, [int] $Max=64 )
+
+    Begin { }
+
+    Process {
+        $Result = ( $Name -replace "[^A-Za-z0-9\-]+","-" )
+        If ( $Result.Length -gt $Max ) {
+            $sN = ( "{0:D3}" -f $Result.Length )
+            $SubLength = ( $Max - ( $sN.Length + 2 ) )
+
+            $Result = ( '{0}{1}{2}' -f $Result.Substring(0, $SubLength), $sN, $Result.Substring( $Result.Length - 1 ) )
+        }
+        $Result = $Result.ToLower()
+        
+        $Result | Write-Output
+    }
+
+    End { }
 }
 
 Function New-CloudStorageBucket {
@@ -1197,6 +1217,7 @@ Param ( [string] $Output, [string] $From, [string] $To, [switch] $PassThru=$fals
 
 Export-ModuleMember -Function Get-CloudStorageBucketNamePart
 Export-ModuleMember -Function Get-CloudStorageBucket
+Export-ModuleMember -Function ConvertTo-CloudStorageBucketName
 Export-ModuleMember -Function New-CloudStorageBucket
 Export-ModuleMember -Function Get-CloudStorageURI
 Export-ModuleMember -Function Get-CloudStorageTimestamp

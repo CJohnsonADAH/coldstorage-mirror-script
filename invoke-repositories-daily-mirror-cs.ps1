@@ -1,9 +1,11 @@
 ﻿Param(
-    $Repositories=@( 'Access', 'Masters' ),
+    $Repositories=@( 'Access', 'Masters', 'Processed', 'Unprocessed' ),
+    $Directories='*',
     $Window=60,
-    $IPG=75,
+    $IPG=50,
     $Schedule='6:00 PM',
-    [switch] $Randomize
+    [switch] $Randomize,
+    [switch] $Forward=$false
 )
 
 Function Write-RoboCopyOutput {
@@ -145,7 +147,7 @@ Param (
 }
 
 Function Format-TextHeaderBlock {
-Param( [Parameter(ValueFromPipeline=$true)] $Line, $Width=80, $BoxCharacter="=", $PadCharacter=" " )
+Param( [Parameter(ValueFromPipeline=$true)] $Line, $Width=100, $BoxCharacter="=", $PadCharacter=" " )
 
     Begin {
         ( $BoxCharacter * ( $Width / $BoxCharacter.Length ) ) | Write-Output
@@ -191,7 +193,35 @@ If ( $OKtoStart ) {
 
     $aRepositories |% {
         $sRepository = $_
-        $repo = ( & coldstorage repository $_ -Location:Original )
+        
+        $sRepositoryCode = $sRepository
+        $nWindow = $Window
+        $bForwardFlag = ( [bool] $Forward )
+        $sDirectories = $Directories
+
+        If ( $sRepository -match '^([^#@/]*)([#]([^@/]*))?([@]([^/]*))?([/](.*))?$') {
+            
+            $sRepositoryCode = $Matches[1]
+            $vRepositoryFlag = $Matches[3]
+            $vRepositoryWindow = $Matches[5]
+            $vDirectories = $Matches[7]
+
+            $vWindow = $null
+            If ( ( $vRepositoryWindow -ne $null ) -and ( [int]::TryParse( $vRepositoryWindow, [ref] $vWindow ) ) ) {
+                $nWindow = $vWindow
+            }
+
+            If ( ( $vRepositoryFlag -ne $null ) -and ( $vRepositoryFlag -imatch '^(Forward|Fwd)$' ) ) {
+                $bForwardFlag = $true
+            }
+
+            If ( ( $vDirectories -ne $null ) -and ( $vDirectories.Length -gt 0 ) ) {
+                $sDirectories = $vDirectories
+            }
+            
+        }
+        
+        $repo = ( & coldstorage repository $sRepositoryCode -Location:Original )
 
         $Lines = @( ( "DAILY MIRROR: {0} [{1}]" -f $sRepository, $repo.File ), ( "Date/Time: {0}" -f ( Get-Date ) ) )
         $FlexWidth = ( [Math]::Max( 80, ( $Lines | Sort-Object -Property:Length -Descending | Select-Object -First:1 ).Length + 6 ) )
@@ -206,8 +236,12 @@ If ( $OKtoStart ) {
             Push-Location -LiteralPath $o.FullName
 
             $t0 = ( Get-Date )
-            $sActivityLabel = ( "Daily Repository Data Transfer ({0} / time window: {1:N0})" -f $t0, $Window )
+            $sActivityLabel = ( "Daily Repository Data Transfer ({0} / time window: {1:N0})" -f $t0, $nWindow )
             $TopDirectories = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } )
+            If ( $sDirectories -ne $null ) {
+                $TopDirectories = ( $TopDirectories |? { $_.Name -like $sDirectories } )
+            }
+
             $I = 0 ; $N = ( $TopDirectories | Measure-Object ).Count
             $TopDirectories |% {
                 $Pct = ( 100.0 * $I / $N ) ; $I++ ; $tN = ( Get-Date )
@@ -215,7 +249,12 @@ If ( $OKtoStart ) {
                 Push-Location -LiteralPath $_.FullName
                 Write-Progress -Id 002 -Activity:$sActivityLabel -Status:( "({0} / {1}) {2}" -f $tN,( $tN - $t0 ),( $_.FullName ) ) -PercentComplete:$Pct
 
-                $mirror = ( Get-Item . | get-mirrormatcheditem-cs.ps1 -ColdStorage )
+                If ( -Not $bForwardFlag ) {
+                    $mirror = ( Get-Item . | get-mirrormatcheditem-cs.ps1 -ColdStorage )
+                }
+                Else {
+                    $mirror = ( Get-Item . | get-mirrormatcheditem-cs.ps1 -Forward )
+                }
                 If ( Test-Path $mirror ) {
                     $mirror = ( $mirror | Convert-Path )
                 }
@@ -225,10 +264,10 @@ If ( $OKtoStart ) {
                 }
 
                 If ( $mirror ) {
-                    $roboCopyPre = @( "/copy:DAT", "/dcopy:DAT", "/maxage:${Window}", "/ipg:${IPG}", "/z", "/r:1", "/w:1", "/e" )
+                    $roboCopyPre = @( "/copy:DAT", "/dcopy:DAT", "/maxage:${nWindow}", "/ipg:${IPG}", "/z", "/r:1", "/w:1", "/e" )
                     $roboCopyPost = @( "/XN", "/XO" )
-                    & Robocopy.exe @roboCopyPre $_.FullName $mirror @roboCopyPost /XD .coldstorage ZIP | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
-                    # /copy:DAT /dcopy:DAT /maxage:${Window} /ipg:${IPG} /z /r:1 /w:1 /e 
+                    & Robocopy.exe @roboCopyPre $_.FullName $mirror @roboCopyPost /XD .coldstorage ZIP /XF Thumbs.db | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
+                    # /copy:DAT /dcopy:DAT /maxage:${nWindow} /ipg:${IPG} /z /r:1 /w:1 /e 
                     # /xn /xo 
                 }
 

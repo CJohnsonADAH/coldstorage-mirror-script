@@ -9,6 +9,7 @@
     [switch] $Reflection=$false,
     [switch] $ColdStorage=$false,
     [switch] $Forward=$false,
+    $Mirror=$null,
     [switch] $Trashcan=$false,
     [switch] $Self=$false,
     [switch] $Other=$false,
@@ -55,7 +56,7 @@ Process {
     If ( $Item -ne $null ) {
         $Item | get-file-cs.ps1 -Object |% {
         
-            $result = ( $_ | Get-MirrorMatchedItem -Pair:$Pair -In:$In -Original:$Original -Reflection:$Reflection -ColdStorage:$ColdStorage -Forward:$Forward -Self:$Self -Other:$Other -All:$All -IgnoreBagging:$IgnoreBagging -Passive:$Passive -Repositories:$Repositories -Verbose:$Verbose -Debug:$Debug )
+            $result = ( $_ | Get-MirrorMatchedItem -Pair:$Pair -In:$In -Original:$Original -Reflection:$Reflection -ColdStorage:$ColdStorage -Forward:$Forward -Mirror:$Mirror -Self:$Self -Other:$Other -All:$All -IgnoreBagging:$IgnoreBagging -Passive:$Passive -Repositories:$Repositories -Verbose:$Verbose -Debug:$Debug )
             
             # Get-MirrorMatchedItem returns a string containing a LiteralPath; convert to Item object if desired
             If ( $Object ) {

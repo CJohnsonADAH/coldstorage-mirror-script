@@ -6,6 +6,7 @@
     [switch] $Original=$false,
     [switch] $Reflection=$false,
     [switch] $Forward=$false,
+    $Mirror=$null,
     [switch] $Quiet=$false
 )
 
@@ -53,8 +54,8 @@ Else {
 
 $Destinations |% {
     $Destination = $_
-    If ( ( $Original -or ( $ColdStorage -or $Reflection ) ) -or $Forward ) {
-        $Mirror = ( $Destination | get-mirrormatcheditem-cs.ps1 -ColdStorage:$ColdStorage -Reflection:$Reflection -Original:$Original -Forward:$Forward | Get-FileObject )
+    If ( ( ( $Original -or ( $ColdStorage -or $Reflection ) ) -or $Forward ) -or ( $Mirror -ne $null ) ) {
+        $Mirror = ( $Destination | get-mirrormatcheditem-cs.ps1 -ColdStorage:$ColdStorage -Reflection:$Reflection -Original:$Original -Forward:$Forward -Mirror:$Mirror | Get-FileObject )
     }
     Else {
         $Mirror = ( $Destination | get-mirrormatcheditem-cs.ps1 -Other | Get-FileObject )

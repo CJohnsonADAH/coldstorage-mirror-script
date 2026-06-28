@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0420
+@version 2026.0626
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -28,6 +28,7 @@ param (
     [switch] $Help = $false,
     [switch] $Quiet = $false,
     [switch] $Fast = $false,
+    [switch] $Brief = $false,
     [switch] $Diff = $false,
     [switch] $SizesOnly = $false,
 	[switch] $Batch = $false,
@@ -80,6 +81,7 @@ param (
     [string] $To,
     [switch] $Reverse = $false,
     [switch] $RoboCopy = $false,
+    [switch] $NoRobo = $false,
     [switch] $Progress = $false,
     [switch] $Scheduled = $false,
     $Location = $null,
@@ -308,19 +310,29 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $PassThru=$false )
 
         # Avoid name collision with data child directory when we pop out contents
         Move-Item $Payload -Destination $RebagData -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
-        $RebagData | out-bagitformatteddirectory-cs.ps1 -Log:$vLogFile -LogPackage:$Bag -Context:$sCmd
+        $RebagData | out-bagitformatteddirectory-cs.ps1 -Log:$vLogFile -LogPackage:$Bag -Context:$sCmd ; $rebagExit = $LASTEXITCODE
 
-        # Pop out contents
-        Get-ChildItem -LiteralPath $RebagData |% {
-            Move-Item $_.FullName -Destination $Bag.FullName -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
+        If ( $rebagExit -eq 0 ) {
+            # Pop out contents
+            Get-ChildItem -LiteralPath $RebagData |% {
+                Move-Item $_.FullName -Destination $Bag.FullName -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
+            }
+
+            # Get rid of temporary data container
+            If ( ( Get-ChildItem -LiteralPath:$RebagData -Force | Measure-Object ).Count -eq 0 ) {
+                Remove-Item $RebagData -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
+            }
+            Else {
+                "{0} is not empty!" -f $RebagData | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Warning
+            }
+
+            $Bag.FullName | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose
+            If ( $PassThru ) {
+                $Bag | Write-Output
+            }
         }
-
-        # Get rid of temporary data container
-        Remove-Item $RebagData -Verbose 4>&1 | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose -Verbose
-
-        $Bag.FullName | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Verbose
-        If ( $PassThru ) {
-            $Bag | Write-Output
+        Else {
+            "[{0}] ERR-BagIt EXIT CODE: {0:N0}" -f ( CSDbg -Function:$MyInvocation ), $rebagExit | Write-CSOutputWithLogMaybe -Package:$Bag -Command:$sCmd -Log:$vLogFile | Write-Error
         }
     }
 
@@ -386,13 +398,15 @@ Param (
     [switch] $ColdStorage=$false,
     [switch] $Original=$false,
     [switch] $Forward=$false,
-    [switch] $Reflection=$false
+    [switch] $Reflection=$false,
+    $Mirror=$null
 )
 
     Begin { }
 
     Process {
-        $Item | Get-FileObject | & invoke-in-mirror-location-cs.ps1 -Original:$Original -ColdStorage:$ColdStorage -Forward:$Forward -Reflection:$Reflection -Job:{
+
+        $Item | Get-FileObject | & invoke-in-mirror-location-cs.ps1 -Original:$Original -ColdStorage:$ColdStorage -Forward:$Forward -Reflection:$Reflection -Mirror:$Mirror -Job:{
             Get-Item -LiteralPath:. -Force | Test-BagItFormattedDirectory
         } 2>&1 |% {
             If ( -Not ( $_ -is [System.Management.Automation.ErrorRecord] ) ) {
@@ -494,61 +508,76 @@ param (
             Else {
             
                 $BaggedFromMirror = $false
-                If ( $File | Test-BagItFormattedInMirror ) {
+                "ColdStorage", "Forward", "Grandfather" |% {
+                    If ( -Not $BaggedFromMirror ) {
+                        $CurrentMirror = $_
+                        If ( $File | Test-CSItemHasMirror -At:$CurrentMirror -Resolve ) {
+                            If ( $File | Test-BagItFormattedInMirror -Mirror:$_ ) {
 
-                    If ( & read-yesfromhost-cs.ps1 -Prompt:"Bag from mirror location" -Timeout:60 ) {
+                                If ( & read-yesfromhost-cs.ps1 -Prompt:( "Bag {0} from {1} mirror location" -f $File.Name,$CurrentMirror ) -Timeout:60 ) {
                         
-                        $BaggedFromMirror = $true
+                                    $BaggedFromMirror = $true
                         
-                        Push-Location -LiteralPath:$File.FullName
-                        Do {
-                            $dataName = ( "data-{0}" -f ( Get-Date -Format:"yyyyMMddHHmmss" ) )
-                        } While ( Test-Path -LiteralPath:$dataName )
+                                    Push-Location -LiteralPath:$File.FullName
+                                    Do {
+                                        $dataName = ( "data-{0}" -f ( Get-Date -Format:"yyyyMMddHHmmss" ) )
+                                    } While ( Test-Path -LiteralPath:$dataName )
 
-                        $Payload = ( New-Item -ItemType:Directory -Path:$dataName )
-                        If ( $Payload ) {
+                                    $Payload = ( New-Item -ItemType:Directory -Path:$dataName )
+                                    If ( $Payload ) {
                             
-                            Get-ChildItem . -Force |? { $_.Name -ne $dataName } |% {
-                                Move-Item -LiteralPath:$_.Name -Destination:( $dataName | Join-Path -ChildPath $_.Name ) -Verbose 4>&1 |% { Write-Progress -Activity:"Moving files into payload directory" -Status:$_ }
-                            }
+                                        Get-ChildItem . -Force |? { $_.Name -ne $dataName } |% {
+                                            Move-Item -LiteralPath:$_.Name -Destination:( $dataName | Join-Path -ChildPath $_.Name ) -Verbose 4>&1 |% { Write-Progress -Activity:"Moving files into payload directory" -Status:$_ }
+                                        }
 
-                            Try {
-                                Move-Item $dataName -Destination:data
-                            }
-                            Catch [System.IO.IOException] {
-                                $_ | Write-Warning
-                                Sleep 5
-                                Move-Item $dataName -Destination:data
-                            }
+                                        $DestName = "data"
+                                        Do {
+                                            Try {
+                                                Move-Item $dataName -Destination:$DestName
+                                            }
+                                            Catch [System.IO.IOException] {
+                                                $_ | Write-Warning
+                                                Sleep 5
+                                                Move-Item $dataName -Destination:$DestName
+                                            }
 
-                            $Here = ( Get-Item -LiteralPath:. -Force )
-                            & set-location-to-mirror-cs.ps1 -Push -Quiet
-                            If ( $LASTEXITCODE -eq 0 ) {
-                                $There = ( Get-Item -LiteralPath:. -Force )
-                                & set-location-to-mirror-cs.ps1 -Pop -Quiet
-                            }
-                            Else {
-                                $There = $null
-                            }
+                                            $OK = ( Test-Path -LiteralPath:( "." | Join-Path -ChildPath $DestName ) )
+                                    
+                                            If ( -Not $OK ) {
+                                                $Continue = ( & read-yesfromhost-cs.ps1 -Prompt:( "Moving {0} to {1} failed. Retry?" -f $dataName, $DestName ) -Timeout:10 )
+                                            }
+                                        } While ( ( -Not $OK ) -and $Continue )
 
-                            If ( ( $Here -ne $null ) -and ( $There -ne $null ) ) {
+                                        $Here = ( Get-Item -LiteralPath:. -Force )
+                                        & set-location-to-mirror-cs.ps1 -Mirror:$CurrentMirror -Push -Quiet
+                                        If ( $LASTEXITCODE -eq 0 ) {
+                                            $There = ( Get-Item -LiteralPath:. -Force )
+                                            & set-location-to-mirror-cs.ps1 -Pop -Quiet
+                                        }
+                                        Else {
+                                            $There = $null
+                                        }
 
-                                & robocopy.exe /copy:DAT /dcopy:DAT /e /r:1 /w:1 $There.FullName $Here.FullName /xd data | Write-RoboCopyOutput -ChangeLog
+                                        If ( ( $Here -ne $null ) -and ( $There -ne $null ) ) {
 
-                                If ( Test-BagItFormattedDirectory( $Here ) ) {
-                                    & coldstorage validate .
+                                            & robocopy.exe /copy:DAT /dcopy:DAT /e /r:1 /w:1 $There.FullName $Here.FullName /xd data | Write-RoboCopyOutput -ChangeLog
+
+                                            If ( Test-BagItFormattedDirectory( $Here ) ) {
+                                                & coldstorage validate .
+                                            }
+                                            Else {
+                                                "[{0}] Failed to produce BagIt-formatted directory!" -f ( CSDbg -Function:$MyInvocation ) | Write-Warning
+                                            }
+                                        }
+
+                                    }
+
+                                    Pop-Location
+
                                 }
-                                Else {
-                                    "[{0}] Failed to produce BagIt-formatted directory!" -f ( CSDbg -Function:$MyInvocation ) | Write-Warning
-                                }
                             }
-
                         }
-
-                        Pop-Location
-
                     }
-
                 }
                 
                 If ( -Not $BaggedFromMirror ) {
@@ -567,10 +596,43 @@ param (
                     }
                     ElseIf ( Test-IndexedDirectory($File) ) {
 
+                        #Do {
                         $File | Select-CSPackagesToBag -Quiet:$Quiet -Exclude:$Exclude -Message:"indexed directory" -Line:( Get-CurrentLine ) | Select-CSPackagesOKOrApproved -Quiet:$Quiet -Force:$Force -Rebag:$Rebag -Skip:$Skip | out-baggedpackage-cs.ps1
-            
+                        $OK = ( $File | Test-BagItFormattedDirectory )
+                        #    If ( -Not $OK ) {
+                        #        
+                        #        Push-Location -LiteralPath:$File
+                        #        $Contents = ( Get-ChildItem -LiteralPath:. -File -Force )
+                        #        If ( ( ( $Contents | Measure-Object ).Count -eq 1 ) -and ( Test-Path -Path:'tmp*' -PathType:Container ) ) {
+                        #            $tmpDirectory = ( Get-Item -Path:'tmp*' -Force )
+                        #            
+                        #            If ( -Not $Batch ) {
+                        #                $AttemptRepair = ( & read-yesfromhost-cs.ps1 -Prompt:( "Attempt to repair abortive preparation in {0}?" -f $tmpDirectory.Name ) )
+                        #                If ( $AttemptRepair ) {
+                        #                    
+                        #                    Get-ChildItem -LiteralPath:$tmpDirectory.FullName -Force |% {
+                        #                        Move-Item -LiteralPath:$_.FullName -Destination:( $tmpDirectory.Parent.FullName )
+                        #                    }
+                        #                    $tmpContents = ( Get-ChildItem -LiteralPath:$tmpDirectory.FullName -Force )
+                        #                    If ( ( $tmpContents | Measure-Object ).Count -eq 0 ) {
+                        #                        Remove-Item -LiteralPath:$tmpDirectory.FullName
+                        #                    }
+                        #                    Sleep 5
+                        #
+                        #                }
+                        #                $Giveup = ( -Not $AttemptRepair )
+                        #            }
+                        #            Else {  
+                        #                $Giveup = $true
+                        #            }
+                        #        }
+                        #        Pop-Location
+                        #
+                        #    }
+                        #} While ( -Not ( $OK -or $Giveup ) )
+                        
                         If ( $PassThru ) {
-                            If ( Test-BagItFormattedDirectory($File) ) {
+                            If ( $OK ) {
                                 $File | Write-Output
                             }
                         }
@@ -609,6 +671,7 @@ param (
             }
 
         }
+
     }
 
     End {
@@ -873,102 +936,103 @@ Param ($Pair, $From, $To, [switch] $Batch=$false)
 
 }
 
-Function Invoke-ColdStorageItemMirror {
-Param (
-    [Parameter(ValueFromPipeline=$true)] $File,
-    [int] $DiffLevel=1,
-    [switch] $Batch,
-    [switch] $Only=$false,
-    [switch] $Force=$false,
-    [switch] $Forward=$false,
-    [switch] $Reverse=$false,
-    [switch] $NoScan=$false,
-    [switch] $RoboCopy=$false,
-    [switch] $Scheduled=$false,
-    [switch] $WhatIf
-)
-
-    Begin { }
-
-    Process {
-        If ( $File ) {
-
-            $oRepository = ( Get-FileRepositoryLocation -File $File )
-            $sRepository = $oRepository.FullName
-            $RepositorySlug = ( Get-FileRepositoryName -File $File )
-
-            $Original = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Original -All )
-            If ( -Not $Forward ) {
-                $Reflection = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Reflection -All )
-            }
-            Else {
-                $Reflection = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Forward -All )
-            }
-
-            If ( -Not $Reverse ) {
-                $Src = $Original
-                $Dest = $Reflection
-            }
-            Else {
-                $Src = $Reflection
-                $Dest = $Original
-            }
-
-            ( "REPOSITORY: {0} - SLUG: {0}" -f $sRepository,$RepositorySlug ) | Write-Debug
-
-            $sSrc = ( "${Src}" | ConvertTo-CSFileSystemPath )
-            $sDest = ( "${Dest}" | ConvertTo-CSFileSystemPath )
-
-            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Verbose
-
-            If ( ( "${sSrc}" -ne '' ) -and ( "${sDest}" -ne '' ) ) {
-                
-                If ( -Not $WhatIf ) {
-
-                    Sync-MirroredFiles -From:"${Src}" -To:"${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
-                
-                    If ( ( -Not $Only ) -and ( $Src | Test-LooseFile ) ) {
-
-                        $srcPackage = ( $Src | Get-ItemPackage -At )
-                        
-                        If ( $srcPackage.CSPackageAssociates.Count -gt 0 ) {
-
-                            $srcPackage.CSPackageAssociates |? { $_ -ne $null } |? { $_.FullName -ne $srcPackage.FullName } |% {
-                                $AssociatedItem = $_
-
-                                $AIRelPath = ( $_.FullName | Resolve-PathRelativeTo -Base:$srcPackage.FullName )
-                                
-                                $sCmd = ( Get-CommandWithVerb ) ; If ( $sCmd -notlike '*mirror*' ) { $subVerb = "mirror " } Else { $subVerb = "" }
-                                "[{0}] {1}associated item: '{2}'" -f $sCmd, $subVerb, $AIRelPath | Write-Host -ForegroundColor:Gray
-                                
-                                $bDoIt = ( -Not $Only )
-                                If ( $Only -and ( -Not $Batch ) ) {
-                                    $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror associated files at {0}?" -f $_.FullName ) )
-                                }
-                                If ( $bDoIt ) {
-                                    $AssociatedItem | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -Only -WhatIf:$WhatIf
-                                }
-
-                            }
-                        }
-
-                    }
-
-                }
-                Else {
-                    Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled"
-                }
-            }
-            Else {
-                ( '[{0}] ( "{1}", "{2}" ) has an empty file path parameter.' -f ( Get-CSDebugContext -Function:$MyInvocation ), $sSrc, $sDest ) | Write-Error
-            }
-
-        }
-    }
-
-    End { }
-
-}
+#Function Invoke-ColdStorageItemMirror {
+#Param (
+#    [Parameter(ValueFromPipeline=$true)] $File,
+#    [int] $DiffLevel=1,
+#    [switch] $Batch,
+#    [switch] $Fast=$false,
+#    [switch] $Only=$false,
+#    [switch] $Force=$false,
+#    [switch] $Forward=$false,
+#    [switch] $Reverse=$false,
+#    [switch] $NoScan=$false,
+#    [switch] $RoboCopy=$false,
+#    [switch] $Scheduled=$false,
+#    [switch] $WhatIf
+#)
+#
+#    Begin { }
+#
+#    Process {
+#        If ( $File ) {
+#
+#            $oRepository = ( Get-FileRepositoryLocation -File $File )
+#            $sRepository = $oRepository.FullName
+#            $RepositorySlug = ( Get-FileRepositoryName -File $File )
+#
+#            $Original = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Original -All )
+#            If ( -Not $Forward ) {
+#                $Reflection = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Reflection -All )
+#            }
+#            Else {
+#                $Reflection = ( $File | Get-MirrorMatchedItem -Pair:$RepositorySlug -Forward -All )
+#            }
+#
+#            If ( -Not $Reverse ) {
+#                $Src = $Original
+#                $Dest = $Reflection
+#            }
+#            Else {
+#                $Src = $Reflection
+#                $Dest = $Original
+#            }
+#
+#            ( "REPOSITORY: {0} - SLUG: {0}" -f $sRepository,$RepositorySlug ) | Write-Debug
+#
+#            $sSrc = ( "${Src}" | ConvertTo-CSFileSystemPath )
+#            $sDest = ( "${Dest}" | ConvertTo-CSFileSystemPath )
+#
+#            ( "[coldstorage mirror] '{0}' --> '{1}' [DIFF LEVEL: {2:N0}]" -f $sSrc, $sDest, $DiffLevel ) | Write-Verbose
+#
+#            If ( ( "${sSrc}" -ne '' ) -and ( "${sDest}" -ne '' ) ) {
+#                
+#                If ( -Not $WhatIf ) {
+#
+#                    Sync-MirroredFiles -From:"${Src}" -To:"${Dest}" -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
+#                
+#                    If ( ( -Not $Only ) -and ( $Src | Test-LooseFile ) ) {
+#
+#                        $srcPackage = ( $Src | Get-ItemPackage -At )
+#                        
+#                        If ( $srcPackage.CSPackageAssociates.Count -gt 0 ) {
+#
+#                            $srcPackage.CSPackageAssociates |? { $_ -ne $null } |? { $_.FullName -ne $srcPackage.FullName } |% {
+#                                $AssociatedItem = $_
+#
+#                                $AIRelPath = ( $_.FullName | Resolve-PathRelativeTo -Base:$srcPackage.FullName )
+#                                
+#                                $sCmd = ( Get-CommandWithVerb ) ; If ( $sCmd -notlike '*mirror*' ) { $subVerb = "mirror " } Else { $subVerb = "" }
+#                                "[{0}] {1}associated item: '{2}'" -f $sCmd, $subVerb, $AIRelPath | Write-Host -ForegroundColor:Gray
+#                                
+#                                $bDoIt = ( -Not $Only )
+#                                If ( $Only -and ( -Not $Batch ) ) {
+#                                    $bDoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "MIRROR: Also mirror associated files at {0}?" -f $_.FullName ) )
+#                                }
+#                                If ( $bDoIt ) {
+#                                    $AssociatedItem | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Fast:$Fast -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -Only -WhatIf:$WhatIf
+#                                }
+#
+#                            }
+#                        }
+#
+#                    }
+#
+#                }
+#                Else {
+#                    Write-Host "(WhatIf) Sync-MirroredFiles -From '${Src}' -To '${Dest}' -DiffLevel $DiffLevel -Batch $Batch -Force $Force -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled"
+#                }
+#            }
+#            Else {
+#                ( '[{0}] ( "{1}", "{2}" ) has an empty file path parameter.' -f ( Get-CSDebugContext -Function:$MyInvocation ), $sSrc, $sDest ) | Write-Error
+#            }
+#
+#        }
+#    }
+#
+#    End { }
+#
+#}
 
 Function Invoke-ColdStorageItemBag {
 Param(
@@ -995,9 +1059,11 @@ Param(
     $Items | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -At:$At -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
     If ( $Mirrored ) {
         $Items | Get-FileObject |? { $_ -ne $null } |% {
-            $_ | Invoke-ColdStorageItemMirror -Batch:$true -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false
-            If ( $Forward ) {
-                $_ | Invoke-ColdStorageItemMirror -Batch:$true -Forward -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false
+            If ( $_ | Test-BagItFormattedDirectory ) {
+                $_ | & sync-cs-itemtomirror.ps1 -Batch:$true -Fast:$false -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false -Context:( Get-CommandWithVerb )
+                If ( $Forward ) {
+                    $_ | & sync-cs-itemtomirror.ps1 -Batch:$true -Fast:$false -Forward -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false -Context:( Get-CommandWithVerb )
+                }
             }
         }
     }
@@ -2019,11 +2085,12 @@ Else {
             $DiffLevel = 1
         }
 
+        $UseRoboCopy = ( -Not $NoRobo )
         If ( $Repository ) {
-            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled
+            Sync-MirroredRepositories -Pairs $Words -DiffLevel $DiffLevel -Batch:$Batch -Force:$Force -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$UseRoboCopy -Scheduled:$Scheduled
         }
         Else {
-            $allObjects | Get-FileObject | Invoke-ColdStorageItemMirror -DiffLevel:$DiffLevel -Batch:$Batch -Force:$Force -Forward:$Forward -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$RoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf
+            $allObjects | & sync-cs-itemtomirror.ps1 -DiffLevel:$DiffLevel -Batch:$Batch -Fast:$Fast -Force:$Force -Forward:$Forward -Reverse:$Reverse -NoScan:$NoScan -RoboCopy:$UseRoboCopy -Scheduled:$Scheduled -WhatIf:$WhatIf -Context:( Get-CommandWithVerb )
         }
     }
     ElseIf ( $Verb -eq "321" ) {
@@ -2037,7 +2104,7 @@ Else {
         }
         Else {
             $CS321Script = $( Get-CSScriptDirectory -File "sync-321preservation.ps1" )
-            $allObjects | & "$CS321Script" -Report:$Report -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
+            $allObjects | & "$CS321Script" -Report:$Report -Brief:$Brief -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
         
             $ExitCode = $Sync321Exit
         }
@@ -2409,6 +2476,38 @@ Else {
             -Unzipped -Report
         $Locations | & "${CSGetPackages}" -Items:$Items -Repository:$Repository -Recurse:$Recurse `
             -Zipped -NotInCloud -Report
+    }
+    ElseIf ( $Verb -eq "package" ) {
+        $packageObjects = ( $allObjects |% {
+            $o = ( $_ | Get-FileObject )
+            If ( $o | Test-BagItFormattedDirectory ) {
+                $bagItTxt = ( Get-Item -LiteralPath:( $o.FullName | Join-Path -ChildPath "bagit.txt" ) -Force )
+                If ( $bagItTxt ) {
+                    "[{0}] {1} is already packaged, date: {2}" -f ( Get-CSDebugContext ), $o.FullName, $o.LastWriteTime | Write-Host -ForegroundColor:Cyan
+                    $o = $null
+                }
+            }
+            ElseIf ( Test-Path -LiteralPath:$o.FullName -PathType:Container ) {
+                $contents = ( Get-ChildItem -LiteralPath:$o.FullName -File -Force | get-itempackage-cs.ps1 -At )
+
+                $SidecarsFound = $false
+                $contents |% {
+                    $Sidecars = $_.CSPackageSidecars
+                    If ( $Sidecars ) {
+                        $SidecarsFound = $true
+                    }
+                }
+                If ( $SidecarsFound ) {
+                    "[{0}] {1} contains single file packaging; will package the rest as single files also" -f ( Get-CSDebugContext ), $o.FullName, $o.LastWriteTime | Write-Host -ForegroundColor:Cyan
+                    $o = ( Get-ChildItem -LiteralPath:$o.FullName -Recurse -File -Force |? { $_.FullName -notlike '*\.*\*' } |? { $p = ( $_ | Get-ItemPackage -At ) ; ( -Not ( $p.CSPackageSidecars.Count -gt 0 ) ) } )
+                }
+            }
+
+            If ( $o -ne $null ) {
+                $o | Write-Output
+            }
+        } )
+        Invoke-ColdStorageItemBag -Items:$packageObjects -PassThru:$PassThru -At:$At -Recurse:$Recurse -NoScan:$NoScan -Force:$Force -Bundle:$true -Manifest:$Manifest -Mirrored:$true -Forward:$Forward -Batch:$Batch -Interactive:$Interactive
     }
     ElseIf ( $Verb -eq "packages" ) {
 

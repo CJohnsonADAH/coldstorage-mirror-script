@@ -35,7 +35,7 @@
 		},
         "Unprocessed": {
 			"Original": [ "//ADAHMAIN-24D/ElectronicRecords/{0}" ],
-			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"Reflection": [ "//ADAHMainStorage_22B/ElectronicRecords/{0}", "//ADAHMainStorage_22B/ElectronicRecords/{0}" ],
 			"ColdStorage": "$Reflection",
 			"Groups": [ "ER", "Preservation", "Packaged" ]
 		},
@@ -47,9 +47,10 @@
 		},
         "Masters": {
 			"Original":  [ "//ADAHMAIN-24D/Digital{0}" ],
-			"Reflection": [ "{1}/{0}", "{2}/{0}" ],
+			"Reflection": [ "//ADAHMainStorage_22B/Digital{0}" ],
 			"ColdStorage": "$Reflection",
 			"Forward": [ "//ADAHMainStorage_22B/Digital{0}" ],
+			"Grandfather": [ "//ADAHColdStorage/ADAHDATA/Digitization/Masters" ],
 			"Groups": [ "DA", "Preservation", "Packaged" ]
 		},
         "Access": {

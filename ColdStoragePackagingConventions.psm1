@@ -1465,11 +1465,10 @@ Param (
 
         If ( $File -ne $null ) {
 
-            $aContents = @( )
-            
             $bBagged = ( Test-BagItFormattedDirectory -File $File )
             $oBagLocation = $null
 
+            $aContents = @( )
             If ( Test-ERInstanceDirectory -File $File ) {
                 $aContents = ( @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName ) )
             }
