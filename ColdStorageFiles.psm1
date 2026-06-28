@@ -16,25 +16,30 @@ Param( [Parameter(ValueFromPipeline=$true)] $File )
     Begin { }
 
     Process {
-        $oFile = $null
-        If ( ( $File -is [String] ) -and ( $File.length -gt 0 ) ) {
-
-            If ( Test-Path -LiteralPath "${File}" ) {
-                $oFile = ( Get-Item -Force -LiteralPath "${File}" )
+        If ( $File -is [String] ) {
+            If ( ( $File.Length -gt 0 ) -and ( Test-Path -LiteralPath:$File ) ) {
+                Get-Item -Force -LiteralPath:$File
             }
-
-        }
-        ElseIf ( ( $File -is [object] ) -and ( $File | Get-Member -Name "FullName" -MemberType Properties ) ) {
-            $oFile = $File
-        }
-        ElseIf ( ( $File -is [object] ) -and ( $File | Get-Member -Name "Path" -MemberType Properties ) ) {
-            $oFile = ( Get-Item -LiteralPath $File.Path )
+            Else {
+                $null | Write-Output
+            }
         }
         Else {
-            $oFile = $File
+            If ( $File -is [object] ) {
+                If ( $File | Get-Member -Name "FullName" -MemberType Properties ) {
+                    $File
+                }
+                ElseIf ( $File | Get-Member -Name "Path" -MemberType Properties ) {
+                    Get-Item -Force -LiteralPath:$File.Path
+                }
+                Else {
+                    $File
+                }
+            }
+            Else {
+                $File
+            }
         }
-
-        $oFile
     }
 
     End { }
