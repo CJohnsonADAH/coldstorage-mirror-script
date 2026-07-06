@@ -876,6 +876,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='*' )
     End { }
 
 }
+
 Function Add-321LooseFileChecksumSidecarFile {
 Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='md5', $Value=$null, [switch] $Compute=$false, [switch] $Force=$false )
 
@@ -938,7 +939,7 @@ Param( [Parameter(ValueFromPipeline=$true)] $Item, $Algorithm='*', $Output='obje
     Process {
         $Container = ( $Item | Get-321LooseFileChecksumSidecarsContainer -Algorithm:$Algorithm -Detect -Output:"object" )
 
-        $AlgoExclude = @( 'tag', 'json' )
+        $AlgoExclude = @( 'tag', 'json', 'lnk' )
         If ( $Algorithm.Count -eq 1 ) {
             $AlgoWC = $Algorithm
             $AlgoInclude = $null
@@ -1036,7 +1037,39 @@ Param( [Parameter(ValueFromPipeline=$true)] $Item, $Output='string', [switch] $S
     End { }
 }
 
+Function Get-321LooseFileFromSidecarFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, $Output='string' )
 
+    Begin { }
+
+    Process {
+        $Sidecar = ( $Item | Get-FileObject )
+        If ( $Sidecar -ne $null ) {
+
+            If ( Test-Path -LiteralPath:$Item.FullName -PathType:Leaf ) {
+            
+                $FileName, $Ext = ( $Item.Name -split '[.]([^.]+)$',2 )
+                If ( $Ext -eq 'json' ) {
+                    $FileName2, $Ext = ( $FileName -split '[.]([^.]+)$',2 )
+                    If ( $Ext -eq 'package' ) {
+                        $FileName = $FileName2
+                    }
+                }
+
+                $Container = ( $Item.Directory.Parent )
+                If ( $Container ) {
+                    $Payload = ( $Item.Directory.Parent.FullName | Join-Path -ChildPath:$FileName )
+                    If ( Test-Path -LiteralPath:$Payload -PathType:Leaf ) {
+                        Get-Item -LiteralPath:$Payload -Force
+                    }
+                }
+
+            }
+
+        }
+    }
+
+}
 
 #############################################################################################################
 #############################################################################################################
@@ -2426,6 +2459,7 @@ Export-ModuleMember -Function New-321LooseFileChecksumSidecarsContainer
 Export-ModuleMember -Function Add-321LooseFileChecksumSidecarFile
 Export-ModuleMember -Function Get-321LooseFileChecksumSidecarFile
 Export-ModuleMember -Function Get-321LooseFileBagLocationTransient
+Export-ModuleMember -Function Get-321LooseFileFromSidecarFile
 Export-ModuleMember -Function Test-BagItManifestFile
 Export-ModuleMEmber -Function New-BagItManifestContainer
 Export-ModuleMember -Function Undo-CSBagPackage

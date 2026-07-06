@@ -23,6 +23,48 @@ $global:CSBIDScriptDirectory = ( My-Script-Directory -Command $MyInvocation.MyCo
 ## PUBLIC FUNCTIONS #########################################################################################
 #############################################################################################################
 
+Function Get-BagItFormattedDirectoryMetadataFile {
+Param ( [Parameter(ValueFromPipeline=$true)] $Bag, $Wildcard='*.txt', $Like='*', $Match='.*', $Output="string" )
+
+    Begin { }
+
+    Process {
+        $oBag = ( $Bag | Get-FileObject )
+        If ( $oBag | Test-BagItFormattedDirectory ) {
+            Get-ChildItem -LiteralPath:$oBag.FullName -File -Force |? {
+                $_.Name -like $Wildcard
+            } |? {
+                $_.Name -like $Like
+            } |? {
+                $_.Name -match $Match
+            } |% {
+                If ( $Output -eq 'object' ) {
+                    $_
+                }
+                Else {
+                    $_ | Get-FileLiteralPath
+                }
+            }
+        }
+    }
+
+    End { }
+
+}
+
+Function Get-BagItFormattedDirectoryManifests {
+Param ( [Parameter(ValueFromPipeline=$true)] $Bag, $Like='*', $Match='.*', $Output="string" )
+    
+    Begin { }
+
+    Process {
+        $Bag | Get-BagItFormattedDirectoryMetadataFile -Wildcard:'*manifest-*.txt' -Like:$Like -Match:$Match -Output:$Output
+    }
+
+    End { }
+}
+
+
 Function Get-BagItFormattedDirectoryPayload {
 Param ( [Parameter(ValueFromPipeline=$true)] $Bag, $Output="string" )
 
@@ -266,6 +308,8 @@ End { }
 
 }
 
+Export-ModuleMember -Function Get-BagItFormattedDirectoryMetadataFile
+Export-ModuleMember -Function Get-BagItFormattedDirectoryManifests
 Export-ModuleMember -Function Get-BagItFormattedDirectoryPayload
 Export-ModuleMember -Function Test-BagItFormattedDirectory
 Export-ModuleMember -Function Test-BagItFormattedDirectoryContent

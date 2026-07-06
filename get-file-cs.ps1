@@ -1,7 +1,8 @@
 ﻿Param(
     [Parameter(ValueFromPipeline=$true)] $File,
     [switch] $Object=$false,
-    [switch] $LiteralPath=$false
+    [switch] $LiteralPath=$false,
+    [switch] $Localize=$false
 )
 
 Begin {
@@ -16,15 +17,20 @@ Begin {
 }
 
 Process {
+    $o = $File
+    If ( $Localize ) { 
+        $o = ( $o | Get-LocalPathFromUNC )
+    }
+
     If ( $Object ) {
-        $File | Get-FileObject
+        $o | Get-FileObject
     }
 
     If ( $LiteralPath ) {
-        $File | Get-FileLiteralPath
+        $o | Get-FileLiteralPath
     }
     ElseIf ( -Not $Object ) {
-        $File | Get-FileObject
+        $o | Get-FileObject
     }
 }
 

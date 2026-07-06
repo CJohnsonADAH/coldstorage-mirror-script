@@ -47,6 +47,7 @@ param (
     [switch] $NotMirrored = $false,
     [switch] $InCloud = $false,
     [switch] $NotInCloud = $false,
+    [switch] $All = $false,
     [switch] $Only = $false,
     [switch] $PassThru = $false,
     [switch] $Report = $false,
@@ -317,7 +318,7 @@ param (
 
 Function Get-CSItemValidation {
 
-Param ( [Parameter(ValueFromPipeline=$true)] $Item, $Copy=$null, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false, [switch] $Fast=$false )
+Param ( [Parameter(ValueFromPipeline=$true)] $Item, $Copy=$null, [switch] $All=$false, [switch] $Summary=$true, [switch] $PassThru=$false, [switch] $NoLog=$false, [switch] $Fast=$false )
 
 Begin {
     $nChecked = 0
@@ -331,11 +332,16 @@ Begin {
 
 Process {
 
+    $aCopiesChecked = @( )
+    $aCopiesValidated = @( )
     $Item | Get-ItemPackage -At -Force -CheckMirrored |% {
         
         $ToValidate = $null
-        If ( $Copy -eq "mirror" ) {
-            $ToValidate = ( $_ | Get-MirrorMatchedItem -Other -Passive )
+        If ( ( $Copy -eq "all" ) -or $All ) {
+            $ToValidate = @( $_, ( $_ | Get-MirrorMatchedItem -Other -Passive ) | Get-FileObject )
+        }
+        ElseIf ( $Copy -eq "mirror" ) {
+            $ToValidate = ( $_ | Get-MirrorMatchedItem -Other -Passive | Get-FileObject )
         }
         Else {
             $ToValidate = $_
@@ -349,6 +355,7 @@ Process {
         }
 
     } |% {
+        $aCopiesChecked = @( $aCopiesChecked ) + @( $_ | Get-FileObject )
 
         $oBag = $_
         $sLiteralPath = Get-FileLiteralPath -File $_
@@ -403,6 +410,7 @@ Process {
 
         $nChecked = $nChecked + 1
         $nValidated = $nValidated + $Validated.Count
+        $aCopiesValidated = ( $aCopiesValidated ) + @( $_ )
 
         If ( $PassThru ) {
             If ( $Validated.Count -gt 0 ) {
@@ -416,6 +424,49 @@ Process {
             $Validated # > stdout
         }
     }
+
+    If ( $aCopiesChecked.Count -gt 1 ) {
+        
+        If ( $aCopiesChecked.Count -eq $aCopiesValidated.Count ) {
+            $aaManifests = @{ }
+            $aCopiesChecked |% {
+                $_ | Get-BagItFormattedDirectoryManifests -Output:object |% {
+                    If ( -Not ( $aaManifests.ContainsKey( $_.Name ) ) ) {
+                        $aaManifests[ $_.Name ] = @( )
+                    }
+                    $aaManifests[ $_.Name ] += @( $_ )
+                }
+            }
+            
+            $bManifestsMatch = $true
+            $aaManifests.Keys |% {
+                $first = ( $aaManifests[ $_ ] | Select-Object -First:1 )
+                $rest = ( $aaManifests[ $_ ] | Select-Object -Skip:1 )
+                
+                $rest |% {
+                    $fcOutput = ( & fc.exe $first.FullName $_.FullName ) ; $fcExit = $LASTEXITCODE
+                    If ( $fcExit -ne 0 ) {
+                        
+                        "MISMATCH: manifest {0} is not identical across copies {1}, {2}!" -f $first.Name, $first.Directory.Name, $_.Directory.Name | Write-Warning
+                        "~~~" | Write-Warning
+                        $fcOutput | Write-Warning
+                        "~~~" | Write-Warning
+
+                        $bManifestsMatch = $false
+                    }
+                }
+            }
+            If ( $bManifestsMatch ) {                    
+                "OK-Manifests: {0}" -f ( $Item | Get-FileLiteralPath )
+            }
+            Else {
+                "ERR-Manifests: {0}" -f ( $Item | Get-FileLiteralPath )
+            }
+
+        }
+        
+    }
+
 }
 
 End {
@@ -525,7 +576,7 @@ Param ( $Pairs=$null )
 
 }
 
-Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $Zipped=$false, [switch] $Batch=$false, [switch] $NoLog=$false, $Copy=$null ) {
+Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [switch] $All=$false, [switch] $Zipped=$false, [switch] $Batch=$false, [switch] $NoLog=$false, $Copy=$null ) {
     $mirrors = ( Get-ColdStorageRepositories )
 
     If ( $Pairs.Count -lt 1 ) {
@@ -594,7 +645,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
                         $BagPath = Get-FileLiteralPath -File $_
                         $Progress.Update( ( "#{0:N0}. Validating: {1}" -f $Progress.I, $BagPathLeaf ), 0 )
 
-                        $Validated = ( $BagPath | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$false -NoLog:$NoLog -Fast:$Fast )
+                        $Validated = ( $BagPath | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$false -NoLog:$NoLog -Fast:$Fast -All:$All )
                         
                         $nChecked = $nChecked + 1
                         $nValidated = $nValidated + $Validated.Count
@@ -635,7 +686,7 @@ Function Invoke-ColdStorageValidate ($Pairs=$null, [switch] $Verbose=$false, [sw
                 }
             }
             If ( $recurseInto.Count -gt 0 ) {
-                Invoke-ColdStorageValidate -Copy:$Copy -Pairs $recurseInto -Verbose:$Verbose -Zipped:$Zipped
+                Invoke-ColdStorageValidate -Copy:$Copy -Pairs $recurseInto -Verbose:$Verbose -All:$All -Zipped:$Zipped
             }
         } # if
 
@@ -972,10 +1023,10 @@ Else {
     }
     ElseIf ( $Verb -eq "validate" ) {
         If ( $Repository ) {
-            Invoke-ColdStorageValidate -Pairs $allObjects -Copy:$Copy -Verbose:$Verbose -NoLog:$NoValidateLog -Zipped
+            Invoke-ColdStorageValidate -Pairs $allObjects -Copy:$Copy -Verbose:$Verbose -NoLog:$NoValidateLog -All:$All -Zipped
         }
         Else {
-            $allObjects | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -PassThru:$PassThru
+            $allObjects | Get-CSItemValidation -Copy:$Copy -Verbose:$Verbose -Summary:$Report -NoLog:$NoValidateLog -Fast:$Fast -All:$All -PassThru:$PassThru
         }
     }
     ElseIf ( $Verb -eq "stats" ) {

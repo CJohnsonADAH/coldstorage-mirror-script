@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0626
+@version 2026.0704
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -60,9 +60,11 @@ param (
     [switch] $ColdStorage = $false,
     [switch] $Forward = $false,
     [switch] $Only = $false,
+    [switch] $All = $false,
     [switch] $PassThru = $false,
     [switch] $Report = $false,
     [switch] $ReportOnly = $false,
+    [switch] $Detailed = $false,
     [switch] $Dependencies = $false,
     $Props = $null,
     [String] $Output = "-",
@@ -1058,12 +1060,16 @@ Param(
 
     $Items | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -At:$At -Recurse:$Recurse | Out-BagItFormattedDirectoryWhenCleared -Skip:$SkipScan -Force:$Force -Bundle:$Bundle -Manifest:$Manifest -PassThru:$PassThru -Batch:$Batch
     If ( $Mirrored ) {
-        $Items | Get-FileObject |? { $_ -ne $null } |% {
-            If ( $_ | Test-BagItFormattedDirectory ) {
-                $_ | & sync-cs-itemtomirror.ps1 -Batch:$true -Fast:$false -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false -Context:( Get-CommandWithVerb )
+        $Items | Get-FileObject |? { $_ -ne $null } | Get-CSPackagesToBag -PassThru:$PassThru -At:$At -Recurse:$Recurse |% {
+            If ( ( Test-Path -LiteralPath:$_.FullName -PathType:Leaf ) -or ( $_ | Test-BagItFormattedDirectory ) ) {
+                "[{0}] Mirroring bagged version of {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ), $_.FullName | Write-Host -ForegroundColor:Cyan
+                $_ | & sync-cs-itemtomirror.ps1 -Batch:$false -Fast:$false -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$true -Context:( Get-CommandWithVerb )
                 If ( $Forward ) {
-                    $_ | & sync-cs-itemtomirror.ps1 -Batch:$true -Fast:$false -Forward -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$false -Context:( Get-CommandWithVerb )
+                    $_ | & sync-cs-itemtomirror.ps1 -Batch:$false -Fast:$false -Forward -Force:$Force -NoScan:$NoScan -RoboCopy -Scheduled:$true -Context:( Get-CommandWithVerb )
                 }
+            }
+            Else {
+                "[{0}] Not mirroring directory {1}. Did bagging fail?" -f ( Get-CSDebugContext -Function:$MyInvocation ), $_.FullName | Write-Host -ForegroundColor:Yellow
             }
         }
     }
@@ -2104,7 +2110,7 @@ Else {
         }
         Else {
             $CS321Script = $( Get-CSScriptDirectory -File "sync-321preservation.ps1" )
-            $allObjects | & "$CS321Script" -Report:$Report -Brief:$Brief -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
+            $allObjects | & "$CS321Script" -Report:$Report -Detailed:$Detailed -Brief:$Brief -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
         
             $ExitCode = $Sync321Exit
         }
@@ -2356,6 +2362,7 @@ Else {
             -Mirrored:$Mirrored -NotMirrored:$NotMirrored `
             -InCloud:$InCloud -NotInCloud:$NotInCloud `
             -Only:$Only `
+            -All:$All `
             -FullName:$FullName `
             -Context:$Context `
             -Report:$Report `
@@ -2639,7 +2646,8 @@ Else {
         & start-coldstorage-checkup-loops.ps1 -Loop
     }
     ElseIf ( $Verb -iin @( "cd" ) ) {
-        & set-location-to-mirror-cs.ps1 -Original:$Original -ColdStorage:$ColdStorage -Forward:$Forward -LiteralPath:$allObjects
+        If ( $To.Length -gt 0 ) { $sCdTo = $To } Else { $sCdTo = $null }
+        & set-location-to-mirror-cs.ps1 -Original:$Original -ColdStorage:$ColdStorage -Forward:$Forward -Mirror:$sCdTo -LiteralPath:$allObjects
     }
     ElseIf ( $Verb -eq "echo" ) {
         $aFlags = $MyInvocation.BoundParameters

@@ -198,6 +198,24 @@ Process {
             }
         }
     
+        If ( -Not $SkipOver -and ( $PassThru ) ) {
+            $DefaultYN = $( If ( $PassThru ) { "Y" } Else { $InputDefault } )
+            $DefaultLeaveDo = $( If ( $DefaultYN -eq "Y" ) { "upload to cloud" } Else { "leave not in cloud" } )
+            $TimeoutYN = $( If ( $PassThru ) { 10 } Else { $TimeoutBase } )
+
+            $PassThru = $false
+            $SkipOver = $true
+
+
+            $DoIt = ( $Batch -or ( "cloud" -iin $Automatically ) )
+            If ( ( -Not $DoIt ) -and $Interactive ) {
+                $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Add {1} 3-2-1 preservation copy shortcuts?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
+            }
+            If ( $DoIt ) {
+                $Package | & add-321preservationcopylinksshortcuts.ps1 |% { "[shortcut link created] {0}" -f $_.FullName | Write-Host -ForegroundColor:Gray }
+            }
+        }
+
         If ( $DoIt ) {
             $Package | write-packages-report-cs.ps1 | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & write-packages-report-cs.ps1" | Write-Host -ForegroundColor Green -BackgroundColor Black
         }

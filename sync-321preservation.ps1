@@ -2,6 +2,7 @@
     [Parameter(ValueFromPipeline=$true)] $Location,
     [switch] $Report=$false,
     [switch] $Brief=$false,
+    [switch] $Detailed=$false,
     [switch] $Batch=$false
 )
 
@@ -117,6 +118,10 @@ End {
             "~~~ 3-2-1 Digital Preservation: all packages appear to be 3-2-1 preserved ~~~" | Write-Host -ForegroundColor:Blue
         }
 
+    }
+
+    If ( $Detailed ) {
+        $aObjects |% { $_ | & get-321preservationcopylinks.ps1 -Confirm }
     }
 
     Exit $ExitCode

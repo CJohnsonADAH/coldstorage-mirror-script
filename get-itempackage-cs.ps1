@@ -24,7 +24,7 @@ Begin {
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStoragePackagingConventions.psm1" )
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageStats.psm1" )
     Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageToCloudStorage.psm1" )
-
+    Import-Module -Verbose:$false $( $modPath.FullName | Join-Path -ChildPath "ColdStorageInteraction.psm1" )
     If ( $Check321 ) {
         $CheckMirrored = $true
         $CheckZipped = $true

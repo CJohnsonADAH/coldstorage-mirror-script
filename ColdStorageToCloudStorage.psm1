@@ -318,14 +318,22 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File )
                     $Key = ( $oFile.Key )
                 }
                 ElseIf ( $oFile | Get-Member -MemberType NoteProperty -Name CloudCopy ) {
-                    $Key = ( $oFile.CloudCopy.Key )
-                    $Bucket = ( $oFile.CloudCopy.Bucket )
+
+                    If ( $oFile.CloudCopy | Get-Member -MemberType:NoteProperty -Name:Contents ) {
+                        $cc = $oFile.CloudCopy.Contents
+                    }
+                    Else {
+                        $cc = $oFile.CloudCopy
+                    }
+                    $Key = ( $cc.Key )
+                    $Bucket = ( $cc.Bucket )
                 }
                 ElseIf ( $oFile | Get-Member -MemberType Property -Name FullName ) {
                     $Key = ( $oFile.Name )
                 }
 
                 If ( $Bucket -eq $null ) {
+
                     If ( $oFile | Get-Member -MemberType NoteProperty -Name Bucket ) {
                         $Bucket = ( $oFile.Bucket )
                     }

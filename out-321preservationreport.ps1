@@ -4,6 +4,7 @@
     $Output='text/plain',
     $Header="~~~",
     $Footer="~~~",
+    [switch] $Candidates=$false,
     [switch] $Bags=$false,
     [switch] $WSFA=$false,
     [switch] $Flat=$false,
@@ -186,7 +187,9 @@ Process {
 
     $sLog = $Log ; If ( $sLog -eq $null ) { $sLog = ( $oItem | Get-321PRLogFilePath -Template:'get-321preservationreport-{0}.log.txt' ) }
     $sAttnLog = $AttnLog ; If ( $sAttnLog -eq $null ) { $sAttnLog = ( $oItem | Get-321PRLogFilePath -Template:'get-321preservationreport-{0}-ATTN-{1}.log.txt' ) }
-    
+    $sAttnLogWC = $null ; If ( $sAttnLog -ne $null ) { $sAttnLogWC = ( $sAttnLog -replace '-([0-9]+)([.]log[.]txt)$', '-*$2' ) }
+    $sLogsSuperseded = ( $oItem | Get-321PRLogFilePath -Template:'logs-superseded' )
+      
     $sProfileLog = $null
     If ( $Profile ) {
         $sProfileLog = ( $oItem | Get-321PRLogFilePath -Template:'get-321preservationreport-{0}-PROFILE-{1}.log.txt' )
@@ -219,8 +222,11 @@ Process {
             -Not ( $_ | Test-BagItFormattedDirectoryContent )
         } )
     }
+    ElseIf ( $Candidates ) {
+        $out = ( Get-Item -LiteralPath:. -Force | get-321preservationpackagecandidates.ps1 )
+    }
     Else {
-        $out = ( Get-Item -LiteralPath:. -Force |  get-321childitempackages.ps1 )
+        $out = ( Get-Item -LiteralPath:. -Force | get-321childitempackages.ps1 )
     }
 
 
@@ -375,6 +381,12 @@ Process {
         }
         If ( $AttnRpt -ne $null ) {
             $Lines = ( $AttnRpt | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip:$SkipCsvLines )
+            
+            # Move superseded Attn logs to a cleanup subdirectory
+            If ( Test-Path -LiteralPath:$sLogsSuperseded -PathType:Container ) {
+                Get-Item -Path:$sAttnLogWC -Force | Sort-Object -Descending -Property:LastWriteTime | Select-Object -Skip:1 |% { Move-Item $_.FullName -Destination:$sLogsSuperseded }
+            }
+
             $Lines | Out-File -Encoding utf8 -Append -LiteralPath $sAttnLog
             "ATTN LOG: {0}" -f $sAttnLog | Write-Host -ForegroundColor Cyan
         }
