@@ -1718,6 +1718,9 @@ Param (
         ElseIf ( $Ascend ) {
             $oFile.CSPackageContentWarnings += @( "RECURSE -- ASCEND FROM: {0}" -f $File.FullName )
         }
+        ElseIf ( $At -and $Force -and ( Test-Path -LiteralPath:$File.FullName -PathType:Container ) ) {
+            $oFile.CSPackageContentFiles = @( $File ) + @( Get-ChildItem -Force -Recurse -LiteralPath $File.FullName )
+        }
         Else {
             $oFile.CSPackageContentWarnings += @( "SKIPPED -- MISC: {0}" -f $File.FullName )
         }

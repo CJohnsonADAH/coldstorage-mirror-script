@@ -2,6 +2,8 @@
     [Parameter(ValueFromPipeline=$true)] $Item,
     [switch] $NoBags,
     [switch] $NoSingletons,
+    [switch] $NoUnpackagedSingletons,
+    [switch] $NoLeafContainers,
     [switch] $Profile,
     [String[]] $Exclude=@( "ZIP" )
 )
@@ -51,18 +53,42 @@ Process {
                 If ( $Profile ) {
                     Write-Progress -Id:068 -Activity:"Screening" -Status:( '[{0}: {1}] Collecting packaged singletons: {2}' -f ( (Get-Date) - $tN[-1] ), $tN[-1], $_.FullName )
                 }
-                Get-ChildItem -LiteralPath:$_.FullName -File -Force -Include:'*.package.json' | Get-321LooseFileFromSidecarFile
-                
-                Get-ChildItem -LiteralPath:$_.FullName -Directory -Recurse -Force |? {
-                    ( $_.Name -eq 'data' )
-                } |% {
-                    $_.Parent
-                } |? {
-                    ( $_ | Test-BagItFormattedDirectory )
-                } |? {
-                    -Not ( $_ | Test-BagItFormattedDirectoryContent )
+
+                If ( $NoUnpackagedSingletons ) {
+                    $PackagedSingletons = ( Get-ChildItem -LiteralPath:$_.FullName -File -Force |? { $_.Name -like '*.package.json' } )               
+                    $PackagedSingletons | Get-321LooseFileFromSidecarFile
+
+                    Get-ChildItem -LiteralPath:$_.FullName -Directory -Recurse -Force |? {
+                        ( $_.Name -eq 'data' )
+                    } |% {
+                        $_.Parent
+                    } |? {
+                        ( $_ | Test-BagItFormattedDirectory )
+                    } |? {
+                        -Not ( $_ | Test-BagItFormattedDirectoryContent )
+                    }
                 }
+                Else { 
+                    Get-ChildItem -LiteralPath:$_.Parent.FullName -File -Force
+                }
+
             } | Get-ItemPackage -At -Force
+        }
+
+        If ( -Not ( $NoLeafContainers ) ) {
+
+            Get-ChildItem -LiteralPath:$Container.FullName -Directory -Recurse -Force |? { ( $_.FullName -notlike '*\.*\*' ) } |? { $_.Name -notin @( $Exclude ) } |? {
+                $_.FullName -notlike '*\data\*'
+            } |? { 
+                $_.Name -ne '.bagged'
+            } |? {
+                -Not ( $_ | Test-BagItFormattedDirectoryContent )
+            } |? {
+                $aFiles = ( Get-ChildItem -LiteralPath:$_.FullName -File -Force |? { $_.Name -ne 'Thumbs.db' } | Select-Object -First:1 )
+                $aDirs = ( Get-ChildItem -LiteralPath:$_.FullName -Directory -Force | Select-Object -First:1 )
+                ( ( ( $aFiles | Measure-Object ).Count -gt 0 ) -and ( ( $aDirs | Measure-Object ).Count -eq 0 ) ) | Write-Output
+            }
+
         }
 
     }

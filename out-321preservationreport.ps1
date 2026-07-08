@@ -6,8 +6,6 @@
     $Footer="~~~",
     [switch] $Candidates=$false,
     [switch] $Bags=$false,
-    [switch] $WSFA=$false,
-    [switch] $Flat=$false,
     $Log=$null,
     [switch] $Attn=$false,
     $AttnLog=$null,
@@ -35,6 +33,7 @@ Begin {
     Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageSettings.psm1" )
     Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageRepositoryLocations.psm1" )
     Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageBagItDirectories.psm1" )
+    Import-Module -Verbose:$false  $( $modPath.FullName | Join-Path -ChildPath "ColdStorageInteraction.psm1" )
 
 #############################################################################################################
 ## FUNCTIONS ################################################################################################
@@ -103,9 +102,26 @@ Begin {
         }
 
         Process {
-            "COPY-1:`t{0:N0} total" -f $Rpt["PACKAGES"]
-
             $I = 1
+
+            $Label = ( "COPY-{0:N0}" -f $I )
+            $Ratio = ( '{0:N0} total' -f $Rpt[ 'PACKAGES' ] )
+            $Footnote = $null
+            If ( $Rpt.Contains( 'BAGGED' ) ) {
+                If ( $Rpt[ 'BAGGED' ] -lt $Rpt[ 'PACKAGES' ] ) {
+                    $Pct = ( 100.0 * $Rpt[ 'BAGGED' ] / $Rpt["PACKAGES"] )
+                    $Diff = ( $Rpt[ "PACKAGES" ] - $Rpt[ 'BAGGED' ] )
+                    $Adj = 'packaged'
+                    $Footnote = ( "[{0:N0}/{1:N0}, {2:N2}% {3}]" -f $Rpt[ 'BAGGED' ], $Rpt[ 'PACKAGES' ], $Pct, $Adj, $Diff )
+                }
+            }
+            If ( $Footnote ) {
+                "{0}:`t{1}`t{2}" -f $Label, $Ratio, $Footnote | Write-Output
+            }
+            Else {
+                "{0}:`t{1}" -f $Label, $Ratio | Write-Output
+            }
+
             "MIRRORED", "CLOUD" |% {
                 $I = $I + 1
                 $Pct = ( 100.0 * $Rpt[ $_ ] / $Rpt["PACKAGES"] )
@@ -202,25 +218,8 @@ Process {
         'Collecting bagged directories' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
     }
 
-    If ( $Flat ) {
-        $out = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } )
-    }
-    ElseIf ( $WSFA ) {
-        $out = ( Get-ChildItem -Directory |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } |% { Get-ChildItem $_.FullName -Directory } )
-    }
-    ElseIf ( $Bags ) {
-        $out = ( Get-ChildItem -Directory -Recurse -Force |? { $_.Name -notlike '.*' } |? { $_.Name -notin @( 'ZIP' ) } |? {
-            ( $_.Name -eq 'data' )
-        } |% {
-            $_.Parent
-        } |? {
-            ( $_ | Test-BagItFormattedDirectory )
-        } |? {
-            If ( $Profile ) {
-                Write-Progress -Id:068 -Activity:"Screening" -Status:( '[{0}: {1}] Collecting bagged directories: {2}' -f ( (Get-Date) - $tN[-1] ), $tN[-1], $_.FullName )
-            }
-            -Not ( $_ | Test-BagItFormattedDirectoryContent )
-        } )
+    If ( $Bags ) {
+        $out = ( Get-Item -LiteralPath:. -Force | get-321preservationpackagecandidates.ps1 -NoSingletons -NoUnpackagedSingletons ) # should I use -NoLeafContainers?
     }
     ElseIf ( $Candidates ) {
         $out = ( Get-Item -LiteralPath:. -Force | get-321preservationpackagecandidates.ps1 )
@@ -240,7 +239,7 @@ Process {
         ( '[{0:N0}x] $packages = ( $out | & get-itempackage-cs.ps1 -Check321 -Profile )' -f $Nout ) | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
     }
     
-    $packages = ( $out | & get-itempackage-cs.ps1 -Check321 -Profile:$Profile )
+    $packages = ( $out | & get-itempackage-cs.ps1 -At -Force -Check321 -Profile:$Profile )
 
     If ( $Profile ) {
         $tN += , ( Get-Date )
@@ -249,8 +248,14 @@ Process {
 
     $packs = @{}
     $packs['~'] = ( $packages |? { Write-Progress -Id:101 -Activity:"Sorting and collating packages" -Status:( $_ | write-packages-report-cs.ps1 ) ;
-        ( ( -Not ( $_ | test-cs-package-is.ps1 -Mirrored ) ) -or ( -Not ( $_.CSPackageZip.Count -gt 0 ) ) -or ( -Not ( $_.CloudCopy -ne $null ) ) )
+        ( ( -Not ( $_ | test-cs-package-is.ps1 -Bagged ) ) -or ( -Not ( $_ | test-cs-package-is.ps1 -Mirrored ) ) -or ( -Not ( $_.CSPackageZip.Count -gt 0 ) ) -or ( -Not ( $_.CloudCopy -ne $null ) ) )
     } )
+
+    If ( $Profile ) {
+        $tN += , ( Get-Date )
+        'Sorting and collating: ~b' | Write-ProfileProgress -Log:$sProfileLog -tN:$tN
+    }
+    $packs['~b'] = ( $packs['~'] |? { Write-Progress -Id:101 -Activity:"Sorting and collating packages (mirrored copy)" -Status:( $_ | write-packages-report-cs.ps1 ) ; -Not ( $_ | test-cs-package-is.ps1 -Bagged ) } )
 
     If ( $Profile ) {
         $tN += , ( Get-Date )
@@ -282,14 +287,16 @@ Process {
 
     $tN += , ( Get-Date )
 
+    $mp = ( $packages | Measure-Object )
     $Rpt = [ordered] @{
         "LOCATION"=$Location.FullName
         "START"= $t0
         "END"=$tN[-1]
-        "PACKAGES"=( $packages | Measure-Object ).Count
-        "MIRRORED"=( ( $packages | Measure-Object ).Count - ( $packs['~m'] | Measure-Object ).Count )
-        "ZIPPED"=( ( $packages | Measure-Object ).Count - ( $packs['~z'] | Measure-Object ).Count )
-        "CLOUD"=( ( $packages | Measure-Object ).Count - ( $packs['~c'] | Measure-Object ).Count )
+        "PACKAGES"=$mp.Count
+        "BAGGED"=( $mp.Count - ( $packs['~b'] | Measure-Object ).Count )
+        "MIRRORED"=( $mp.Count - ( $packs['~m'] | Measure-Object ).Count )
+        "ZIPPED"=( $mp.Count - ( $packs['~z'] | Measure-Object ).Count )
+        "CLOUD"=( $mp.Count - ( $packs['~c'] | Measure-Object ).Count )
     }
 
     $oRpt = ( [PSCustomObject] $Rpt )

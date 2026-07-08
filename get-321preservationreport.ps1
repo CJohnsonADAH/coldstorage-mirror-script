@@ -51,46 +51,62 @@ Begin {
 
     }
 
-        Function Write-321PreservationPackagesSummaryReport {
-        Param( [Parameter(ValueFromPipeline=$true)] $Rpt )
+    Function Write-321PreservationPackagesSummaryReport {
+    Param( [Parameter(ValueFromPipeline=$true)] $Rpt )
 
-            Begin {
-                $Footnotes = @{ "CLOUD"="ZIPPED" }
-            }
-
-            Process {
-                "COPY-1:`t{0:N0} total" -f $Rpt["PACKAGES"]
-
-                $I = 1
-                "MIRRORED", "CLOUD" |% {
-                    $I = $I + 1
-                    $Pct = ( 100.0 * $Rpt[ $_ ] / $Rpt["PACKAGES"] )
-            
-                    $Label = ( "COPY-{0:N0}" -f $I  )
-                    $Ratio = ( "{0:N0} / {1:N0} {2} ({3:N2}% complete, {4:N0} to go)" -f $Rpt[ $_ ], $Rpt["PACKAGES"], $_.ToLower(), $Pct, ( $Rpt[ "PACKAGES" ] - $Rpt[ $_ ] ) )
-
-                    $Footnote = $null
-                    If ( $Footnotes.ContainsKey( $_ ) ) {
-                        $Footnotes[ $_ ] |% {
-                            $Pct = ( 100.0 * $Rpt[ $_ ] / $Rpt["PACKAGES"] )
-                            $Adj = $_.ToLower()
-                            $Footnote = ( "[{0:N0}/{1:N0}, {2:N2}% {3}]" -f $Rpt[ $_ ], $Rpt[ "PACKAGES" ], $Pct, $Adj, ( $Rpt[ "PACKAGES" ] - $Rpt[ $_ ] ) )
-                        }
-                    }
-
-                    If ( $Footnote ) {
-                        "{0}:`t{1}`t{2}" -f $Label, $Ratio, $Footnote | Write-Output
-                    }
-                    Else {
-                        "{0}:`t{1}" -f $Label, $Ratio | Write-Output
-                    }
-                }
-            }
-
-            End { }
-
+        Begin {
+            $Footnotes = @{ "CLOUD"="ZIPPED" }
         }
 
+        Process {
+            $I = 1
+
+            $Label = ( "COPY-{0:N0}" -f $I )
+            $Ratio = ( '{0:N0} total' -f $Rpt[ 'PACKAGES' ] )
+            $Footnote = $null
+            If ( $Rpt.Contains( 'BAGGED' ) ) {
+                If ( $Rpt[ 'BAGGED' ] -lt $Rpt[ 'PACKAGES' ] ) {
+                    $Pct = ( 100.0 * $Rpt[ 'BAGGED' ] / $Rpt["PACKAGES"] )
+                    $Diff = ( $Rpt[ "PACKAGES" ] - $Rpt[ 'BAGGED' ] )
+                    $Adj = 'packaged'
+                    $Footnote = ( "[{0:N0}/{1:N0}, {2:N2}% {3}]" -f $Rpt[ 'BAGGED' ], $Rpt[ 'PACKAGES' ], $Pct, $Adj, $Diff )
+                }
+            }
+            If ( $Footnote ) {
+                "{0}:`t{1}`t{2}" -f $Label, $Ratio, $Footnote | Write-Output
+            }
+            Else {
+                "{0}:`t{1}" -f $Label, $Ratio | Write-Output
+            }
+
+            "MIRRORED", "CLOUD" |% {
+                $I = $I + 1
+                $Pct = ( 100.0 * $Rpt[ $_ ] / $Rpt["PACKAGES"] )
+            
+                $Label = ( "COPY-{0:N0}" -f $I  )
+                $Ratio = ( "{0:N0} / {1:N0} {2} ({3:N2}% complete, {4:N0} to go)" -f $Rpt[ $_ ], $Rpt["PACKAGES"], $_.ToLower(), $Pct, ( $Rpt[ "PACKAGES" ] - $Rpt[ $_ ] ) )
+
+                $Footnote = $null
+                If ( $Footnotes.ContainsKey( $_ ) ) {
+                    $Footnotes[ $_ ] |% {
+                        $Pct = ( 100.0 * $Rpt[ $_ ] / $Rpt["PACKAGES"] )
+                        $Adj = $_.ToLower()
+                        $Footnote = ( "[{0:N0}/{1:N0}, {2:N2}% {3}]" -f $Rpt[ $_ ], $Rpt[ "PACKAGES" ], $Pct, $Adj, ( $Rpt[ "PACKAGES" ] - $Rpt[ $_ ] ) )
+                    }
+                }
+
+                If ( $Footnote ) {
+                    "{0}:`t{1}`t{2}" -f $Label, $Ratio, $Footnote | Write-Output
+                }
+                Else {
+                    "{0}:`t{1}" -f $Label, $Ratio | Write-Output
+                }
+            }
+        }
+
+        End { }
+
+    }
 
     Function Get-321PRLocationSlug {
     Param( [Parameter(ValueFromPipeline=$true)] $Location )
