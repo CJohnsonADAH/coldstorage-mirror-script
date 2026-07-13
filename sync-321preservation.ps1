@@ -3,7 +3,9 @@
     [switch] $Report=$false,
     [switch] $Brief=$false,
     [switch] $Detailed=$false,
-    [switch] $Batch=$false
+    [switch] $Batch=$false,
+    [switch] $NoScan=$false,
+    $Timeout=30
 )
 
 
@@ -91,7 +93,7 @@ End {
                 $Proceed = $Batch
                 If ( -Not $Batch ) {
                     
-                    $SyncConfirm = ( & read-yesfromhost-cs.ps1 -Prompt:( "PRESERVE: Perform all 3-2-1 digital preservation steps AUTOMATICALLY for {0}: {1}" -f $RepositoryName, $RelPath ) -OtherOptions:@( "Select steps" ) -DefaultInput:"Y" -Timeout:60 )
+                    $SyncConfirm = ( & read-yesfromhost-cs.ps1 -Prompt:( "PRESERVE: Perform all 3-2-1 digital preservation steps AUTOMATICALLY for {0}: {1}" -f $RepositoryName, $RelPath ) -OtherOptions:@( "Select steps" ) -DefaultInput:"Y" -Timeout:$Timeout )
                     
                     $Proceed = ( $DoItAll -or ( $SyncConfirm -ne $false ) )
                     $DoItAll = ( $DoItAll -or ( $SyncConfirm -eq $true ) )
@@ -106,7 +108,7 @@ End {
                 }
 
                 If ( $Proceed ) {
-                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$DoItAll -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:$SyncConfirmTimeout -Context:"321"
+                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$DoItAll -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:$SyncConfirmTimeout -NoScan:$NoScan -Context:"321"
                 }
                 Else {
                     "[321] skipping for now: {0}: {1}" -f $RepositoryName, $RelPath | Write-Host -ForegroundColor:Gray

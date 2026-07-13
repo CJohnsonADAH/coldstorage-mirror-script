@@ -1,5 +1,5 @@
 ﻿Param(
-    $Repositories=@( 'Access', 'Masters', 'Processed', 'Unprocessed' ),
+    $Repositories=@( 'Access', 'Processed', 'Unprocessed' ),
     $Directories='*',
     $Window=60,
     $IPG=50,
@@ -222,6 +222,12 @@ If ( $OKtoStart ) {
         }
         
         $repo = ( & coldstorage repository $sRepositoryCode -Location:Original )
+        If ( $repo ) {
+            $repoProps = ( $repo.File | & coldstorage repository properties ).Properties
+        }
+        Else {
+            $repoProps = $null
+        }
 
         $Lines = @( ( "DAILY MIRROR: {0} [{1}]" -f $sRepository, $repo.File ), ( "Date/Time: {0}" -f ( Get-Date ) ) )
         $FlexWidth = ( [Math]::Max( 80, ( $Lines | Sort-Object -Property:Length -Descending | Select-Object -First:1 ).Length + 6 ) )
@@ -264,11 +270,23 @@ If ( $OKtoStart ) {
                 }
 
                 If ( $mirror ) {
-                    $roboCopyPre = @( "/copy:DAT", "/dcopy:DAT", "/maxage:${nWindow}", "/ipg:${IPG}", "/z", "/r:1", "/w:1", "/e" )
-                    $roboCopyPost = @( "/XN", "/XO" )
+                    $roboCopyPre = @( "/copy:DAT", "/dcopy:DAT", "/maxage:${nWindow}", "/ipg:${IPG}", "/r:1", "/w:1", "/e" )
+                    $roboCopyPost = @(  )
+                    If ( $repoProps -ne $null ) {
+                        If ( $repoProps | Get-Member -MemberType:NoteProperty -Name:Robocopy ) {
+                            $robo = $repoProps.Robocopy
+                            If ( $robo | Get-Member "pre" ) {
+                                $roboCopyPre = @( $roboCopyPre ) + ( $robo.pre )
+                                "[mirror] ADDING ROBOCOPY PRE PARAMETERS: {0}" -f ( $roboCopyPre -join ' ' ) | Write-Verbose
+                            }
+                            If ( $robo | Get-Member "post" ) {
+                                $roboCopyPost = @( $roboCopyPost ) + ( $robo.post )
+                                "[mirror] ADDING ROBOCOPY POST PARAMETERS: {0}" -f ( $roboCopyPost -join ' ' ) | Write-Verbose
+                            }
+                        }
+                    }
+                    
                     & Robocopy.exe @roboCopyPre $_.FullName $mirror @roboCopyPost /XD .coldstorage ZIP /XF Thumbs.db | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
-                    # /copy:DAT /dcopy:DAT /maxage:${nWindow} /ipg:${IPG} /z /r:1 /w:1 /e 
-                    # /xn /xo 
                 }
 
                 Pop-Location

@@ -13,5 +13,6 @@
         .\Supreme_Court,
         .\WPA,
         .\WWI_cards,
+        .\Audiovisual,
         .\Executive_orders -Force | out-321preservationreport.ps1 -Attn -Candidates -Summary
 } -Loop

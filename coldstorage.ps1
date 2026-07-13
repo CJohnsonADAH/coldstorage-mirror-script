@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
 ADAHColdStorage Digital Preservation maintenance and utility script with multiple subcommands.
-@version 2026.0704
+@version 2026.0712
 
 .PARAMETER Diff
 coldstorage mirror -Diff compares the contents of files and mirrors the new versions of files whose content has changed. Worse performance, more correct results.
@@ -1329,7 +1329,7 @@ Param ( [string] $Destination, $What, [switch] $Repository, [switch] $Diff, [swi
                         $UploadedFile = $What
                     }
 
-                    "[{0} {1}] uploaded {2} to cloud: {3}" -f ( Get-CommandWithVerb ), $Destination, $UploadedFile.Name, $Matches[2] | Write-Host -ForegroundColor:DarkCyan
+                    "[{0} {1}] uploaded {2} to cloud: {3}" -f ( Get-CommandWithVerb ), $Destination, $UploadedFile.Name, $Matches[2] | Write-Host -ForegroundColor:Cyan
                 }
                 Else {
                     "$_" | Write-Warning
@@ -2110,7 +2110,7 @@ Else {
         }
         Else {
             $CS321Script = $( Get-CSScriptDirectory -File "sync-321preservation.ps1" )
-            $allObjects | & "$CS321Script" -Report:$Report -Detailed:$Detailed -Brief:$Brief -Batch:$Batch -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
+            $allObjects | & "$CS321Script" -Report:$Report -Detailed:$Detailed -Brief:$Brief -Batch:$Batch -NoScan:$NoScan -Verbose:$Verbose -Debug:$Debug ; $Sync321Exit = $LASTEXITCODE
         
             $ExitCode = $Sync321Exit
         }

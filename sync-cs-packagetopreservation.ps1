@@ -2,6 +2,7 @@
     [Parameter(ValueFromPipeline=$true)] $Package,
     [switch] $Batch=$false,
     [switch] $NoMirror=$false,
+    [switch] $NoScan=$false,
     [int] $InputTimeout=60,
     $Automatically=@( ),
     $InputDefault="N",
@@ -113,7 +114,7 @@ Process {
             If ( $DoIt ) {
                 If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: PACKAGING Copy-1 and MIRRORING Copy-2 local preservation copy" -f $Context | Write-HostSectionHeader }
 
-                $Package | & coldstorage bag -Mirrored
+                $Package | & coldstorage bag -Mirrored -NoScan:$NoScan
                 $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
                 $PassThru = $true
                 $SkipOver = $false
@@ -135,7 +136,7 @@ Process {
             }
             If ( $DoIt ) {
                 If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: MIRRORING Copy-2 local preservation copy" -f $Context | Write-HostSectionHeader }
-                $Package | & coldstorage mirror -Items -RoboCopy | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage mirror -Items -RoboCopy"
+                $Package | & coldstorage mirror -Items -RoboCopy -NoScan:$NoScan | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage mirror -Items -RoboCopy"
                 $PassThru = $true
             }
             Else {
@@ -157,7 +158,7 @@ Process {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Zip package {1}?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
-                $Package | & coldstorage zip -Items | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage zip -Items" |% {
+                $Package | & coldstorage zip -Items -NoScan:$NoScan | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage zip -Items" |% {
                     $FGColor = "Gray"
                     If ( $_.New -eq $false ) {
                         $FGColor = "DarkGray"

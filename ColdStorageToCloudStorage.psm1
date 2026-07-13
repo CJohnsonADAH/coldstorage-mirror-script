@@ -522,8 +522,8 @@ Param(
         If ( $Cache -ne $null ) {
             $sCachePath = $Cache
             If ( Test-Path -LiteralPath $sCachePath -PathType Container ) {
-                "[{0}] BUCKET: {1}" -f "Get-CloudStorageBucketObjectList",$Bucket | Write-Debug
-                "[{0}] CACHE DIRECTORY: {1}" -f "Get-CloudStorageBucketObjectList",$sCachePath | Write-Debug
+                "[{0}] BUCKET: {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ),$Bucket | Write-Debug
+                "[{0}] CACHE DIRECTORY: {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ),$sCachePath | Write-Debug
             }
         }
 
@@ -541,7 +541,7 @@ Param(
                 $sCacheFileName = ( "aws-s3api-list-objects-v2-{0}.json" -f ( $awsSwitches -join " " | Get-StringMD5 )  )
                 $sCacheFile = ( Join-Path $sCachePath -ChildPath $sCacheFileName )
                 If ( Test-Path -LiteralPath $sCachePath -PathType Container ) {
-                    "[{0}] CACHE FILE: {1}" -f "Get-CloudStorageBucketObjectList",$sCacheFile | Write-Verbose
+                    "[{0}] CACHE FILE: {1}" -f ( Get-CSDebugContext -Function:$MyInvocation ),$sCacheFile | Write-Verbose
                 }
             }
         }
@@ -552,16 +552,16 @@ Param(
                 $oCachedReply = ( Get-Content $sCacheFile -Raw | ConvertFrom-Json )
 
                 $CacheAge = ( [double] ( Get-Date -UFormat "%s" ) - [double] ( $oCachedReply.Timestamp ) )
-                "CACHED QUERY({0}): {1}" -f $CacheAge,$sCmdLine | Write-Verbose
+                "CACHED QUERY({0}): {1}" -f $CacheAge,$sCmdLine | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
 
                 If ( $CacheAge -lt $CacheExpiration ) {
                     If ( $oCachedReply | Get-Member -Name Response ) {
-                        "GOT REPLY" | Write-Verbose
+                        "GOT REPLY" | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
                         $jsonReply = $oCachedReply.Response
                     }
                     If ( $oCachedReply | Get-Member -Name ExitCode ) {
                         $awsExitCode = $oCachedReply.ExitCode
-                        "GOT EXIT CODE: {0}" -f $awsExitCode | Write-Verbose
+                        "GOT EXIT CODE: {0}" -f $awsExitCode | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
                     }
                 }
                 Else {
@@ -571,15 +571,30 @@ Param(
         }
 
         If ( $jsonReply -eq $null ) {
-            "LIVE QUERY: {0}" -f $sCmdLine | Write-Verbose
-            $jsonReply = $( & "${AWS}" @awsSwitches ) ; $awsExitCode = $LastExitCode
-
+            
+            "LIVE QUERY: {0}" -f $sCmdLine | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
+            
+            $awsMessages = ( & "${AWS}" @awsSwitches 2>&1 ) ; $awsExitCode = $LASTEXITCODE
+            $awsOut = ( $awsMessages |? { $_ -isnot [System.Management.Automation.ErrorRecord] } )
+            $awsErr = ( $awsMessages |? { $_ -is [System.Management.Automation.ErrorRecord] } )
+            $jsonReply = $awsOut
+            
+            $sResponse = ( "JSON: '{0}'" -f ( $jsonReply -join "`n"  ) )
+            If ( $awsErr ) {
+                $sResponse = ( "{0} / ERROR: {1}" -f $sResponse, ( $awsErr -join ' / ' ) )
+            }
+            "LIVE JSON REPLY: exit code {0:N0}, {1}" -f $awsExitCode, $sResponse | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
+            
             $oCachedReply = [PSCustomObject] @{
                 "Request"=( $awsSwitches )
                 "Timestamp"=( Get-Date -UFormat "%s" )
                 "ExitCode"=( $awsExitCode )
                 "Response"=( $jsonReply -join "`n" )
             }
+            If ( ( $awsErr | Measure-Object ).Count -gt 0 ) {
+                $oCachedReply | Add-Member -MemberType:NoteProperty -Name:AWSCLIErrorMessages -Value:( ( $awsErr |% { "$_" } ) -join "`n" )
+            }
+
             If ( $sCacheFile -ne $null ) {
                 $oCachedReply | ConvertTo-Json | Out-File $sCacheFile -Encoding utf8 -Force
                 "CACHED TO: {0}" -f $sCacheFile | Write-Verbose
@@ -590,7 +605,16 @@ Param(
         }
 
         $bucketObject = ( $jsonReply | ConvertFrom-Json )
-        $bucketObject | Add-Member -MemberType NoteProperty -Name AWSCLIExitCode -Value $awsExitCode
+        "JSON REPLY: {0}" -f $jsonReply | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
+
+        If ( ( $bucketObject -eq $null ) -and ( ( $jsonReply -eq $null ) -or ( $jsonReply -eq '' ) ) ) {
+            $bucketObject = [PSCustomObject] @{ "AWSCLIErrorMessages"=$oCachedReply.AWSCLIErrorMessages }
+        }
+
+        If ( $bucketObject -ne $null ) {
+            "ADDING EXIT CODE" | Write-CSIDiagnosticMessageStream -Context:"cloud" -ForegroundColor:Yellow -BackgroundColor:Black
+            $bucketObject | Add-Member -MemberType NoteProperty -Name AWSCLIExitCode -Value $awsExitCode
+        }
 
         $bucketObject | Write-Output
 
@@ -654,7 +678,8 @@ Param (
     [switch] $Force=$false,
     [string] $From="",
     [string] $To="",
-    [string] $Context="Get-CloudStorageListing"
+    [string] $Context="Get-CloudStorageListing",
+    [ScriptBlock] $OnProcessingError={ }
 )
 
 Begin {
@@ -734,31 +759,24 @@ End {
             $sPropsDir = ( $Files | Select-Object -First 1 | Get-PackageCloudStorageBucketCacheDirectory )
             
             If ( ( $All ) -or ( $Files.Count -ne 1 ) ) {
-                "going to file cache {0}" -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
+                "going to file cache [{0}] ... " -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
                 $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Cache:$sPropsDir -CacheExpiration:3600 -Force:$Force )
                 If ( $oReply ) {
                     $awsExitCode = $oReply.AWSCLIExitCode
                 }
-
-                #Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}'" -f ${AWS},$Bucket )
-                #$jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" ) ; $awsExitCode = $LastExitCode
             }
             Else {
-                "going to API request" -f $sPropsDir | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
+                "going to API request ... " | Write-CSIDiagnosticMessageStream -Context:@( "cloud" ) -ForegroundColor:Yellow -NoNewline #DBG
                 $oReply = ( $Bucket | Get-CloudStorageBucketObjectList -Prefix:$Files.Name -Cache:$sPropsDir -CacheExpiration:600 -Force:$Force )
                 If ( $oReply ) {
                     $awsExitCode = $oReply.AWSCLIExitCode
                 }
-
-                #Write-Debug ( "& {0} s3api list-objects-v2 --bucket '{1}' --prefix '{2}'" -f ${AWS},$Bucket,$Files.Name )
-                #$jsonReply = $( & ${AWS} s3api list-objects-v2 --bucket "${Bucket}" --prefix $Files.Name ) ; $awsExitCode = $LastExitCode
             }
 
-            #If ( $jsonReply ) {
-            If ( $oReply ) {
+            If ( $oReply -and ( -Not ( $oReply.AWSCLIErrorMessages ) ) ) {
                 $oCloudContents = $null
                 $isDataGood = $false
-                #$oReply = ( $jsonReply | ConvertFrom-Json )
+
                 If ( $oReply ) {
                     If ( $oReply.Contents ) {
                         $oCloudContents = $oReply.Contents
@@ -856,7 +874,12 @@ End {
 
         }
         Else {
-            Write-Warning ( "[cloud:${Bucket}] AWS CLI processing error: {0}" -f $awsExitCode )
+            If ( $OnProcessingError ) {
+                & $OnProcessingError $oCloudContents $oReply
+            }
+            Else {
+                Write-Warning ( "[cloud:{0}] AWS CLI processing error: exit code {1:N0}" -f $Bucket, $awsExitCode )
+            }
         }
 
     }
@@ -1089,17 +1112,20 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                 $s3Uri = ( "s3://{0}/{1}" -f $Bucket,$sFileName )
                 
                 "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 ls '${s3Uri}' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
-                $s3Ls = ( & "${AWS}" s3 ls $s3Uri ) ; $s3LsExit = $LASTEXITCODE
+                $s3Ls = ( & "${AWS}" s3 ls $s3Uri 2>&1 ) ; $s3LsExit = $LASTEXITCODE
 
-                If ( $s3LsExit -ne 0 ) {
+                If ( $s3LsExit -notin ( 0, 254 ) ) {
 				    $sCmd = ( '& {0} s3 cp "{1}" "s3://{2}/" --storage-class DEEP_ARCHIVE {3}' -f ${AWS},${sFile},${Bucket},${sWhatIf} )
                     
                     "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 cp '${sFile}' 's3://${Bucket}/' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-Debug
-
+                    "[{0}] FOR-EACH ITEMPACKAGES({1}) ... invoking ${AWS} s3 cp '${sFile}' 's3://${Bucket}/' ({3} / {2})" -f ( Get-CSDebugContext -Function:$MyInvocation  ), $_, ( $tN += , ( Get-Date ) )[-1], ( $tN[-1] - $tN[-2] ) | Write-CSIDiagnosticMessageStream -Context:"cloud"
                     & "${AWS}" s3 cp "${sFile}" "s3://${Bucket}/" --storage-class DEEP_ARCHIVE ${sWhatIf} 2>&1 |% {
                         # This progress indicator is v. useful in interactive modes but it shouldn't go into logs, etc.
                         If ( "$_" -match "Completed\s+[0-9.]+\s+.*\s+with\s+[0-9]+.*\s+remaining\s*" ) {
                             Write-Progress -Id 107 -Status "$_" -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} )
+                        }
+                        ElseIf ( $_ -is [System.Management.Automation.ErrorRecord] ) {
+                            $_ | Write-Error
                         }
                         Else {
                             $_ | Write-Output
@@ -1107,8 +1133,11 @@ Param ( [Parameter(ValueFromPipeline=$true)] $File, [switch] $WhatIf=$false, [sw
                     } | Write-CSOutputWithLogMaybe -Package:$oFile -Command:$sCmd -Log:$vLogFile
                     Write-Progress -Id 107 -Activity ( "& {0} aws s3 cp '{1}' '{2}' --storage-class DEEP_ARCHIVE {3}" -f "${AWS}","${sFile}", "s3://${Bucket}/", ${sWhatIf} ) -Completed
                 }
-                Else {
+                ElseIf ( $s3LsExit -eq 0 ) {
                     $s3Ls | Write-Warning
+                }
+                Else {
+                    $s3Ls | Write-Error
                 }
 
 

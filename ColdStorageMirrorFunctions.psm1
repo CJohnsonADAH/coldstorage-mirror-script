@@ -241,11 +241,11 @@ Param ( $From, $To, $File=$null, $Direction="over", $SyncOptions=$null, [switch]
                 $rcDestination = ( Convert-Path -LiteralPath "${DestinationContainer}" )
                 
                 If ( $File -ne $null ) {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT /IPG:$PacketGap "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /IS /IT /IPG:$PacketGap "${rcSource}" "${rcDestination}" "${File}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
                     $RoboCode = $LASTEXITCODE
                 }
                 Else {
-                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /Z /IS /IT /IPG:$PacketGap "${rcSource}" "${rcDestination}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
+                    & $RoboCopy.Source /DCOPY:DAT /COPY:DAT /R:4 /W:4 /IS /IT /IPG:$PacketGap "${rcSource}" "${rcDestination}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput
                     $RoboCode = $LASTEXITCODE
                 }
                 $Fallback = ( $RoboCode -ge 5 )
@@ -318,12 +318,12 @@ Param (
                     $rcFile = ( Split-Path "${From}" -Leaf )
 
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 /IPG:$PacketGap "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
+                        & $RoboCopyExe.Source /DCOPY:DAT /COPY:DAT /R:2 /W:4 /IPG:$PacketGap "${rcFrom}" "${rcTo}" "${rcFile}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -ChangeLog
                     }
                 }
                 Else {
                     If ( ( $rcFrom -ne $null ) -and ( $rcTo -ne $null ) ) {
-                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /Z /R:2 /W:4 /IPG:$PacketGap "${rcFrom}" "${rcTo}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
+                        & $RoboCopyExe.Source /E /DCOPY:DAT /COPY:DAT /R:2 /W:4 /IPG:$PacketGap "${rcFrom}" "${rcTo}" | Write-CSOutputWithLogMaybe -Package:( Get-FileObject $From ) -Command:"[coldstorage mirror] ROBOCOPY.EXE" -Log:$LogFile | Write-RoboCopyOutput -Prolog -Epilog -ChangeLog
                     }
                 }
 
