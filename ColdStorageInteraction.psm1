@@ -202,7 +202,13 @@ Param ( [Parameter(ValueFromPipeline=$true)] $In, [string[]] $OtherOptions=@( ),
         $ok = ( $In -match '^\s*[YyNn].*$' )
         If ( ( $OtherOptions | Measure-Object ).Count -gt 0 ) {
             $FirstCharacters = ( $OtherOptions |% { $_.Substring( 0, 1 ).ToUpper(), $_.Substring( 0, 1 ).ToLower() } | Select-Object -Unique )
-            $ok = ( $ok -or ( $In.Substring( 0, 1 ) -iin $FirstCharacters ) )
+            
+            $c = ''
+            If ( $In.Length -ge 1 ) {
+                $c = $In.Substring( 0, 1 )
+            }
+
+            $ok = ( $ok -or ( $c -iin $FirstCharacters ) )
         }
         If ( $AllowEmpty ) {
             $ok = ( $ok -or ( $In -match '^\s*$' ) )
