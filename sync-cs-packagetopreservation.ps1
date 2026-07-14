@@ -181,22 +181,69 @@ Process {
             $PassThru = $false
             $SkipOver = $true
 
-
             $DoIt = ( $Batch -or ( "cloud" -iin $Automatically ) )
             If ( ( -Not $DoIt ) -and $Interactive ) {
                 $DoIt = ( read-yesfromhost-cs.ps1 -Prompt ( "{0}: Upload {1} to cloud?" -f $sConfirm, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:$DefaultYN -DefaultTimeout:10 -DefaultAction:$DefaultLeaveDo )
             }
             If ( $DoIt ) {
-                If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: SENDING Copy-3 off-site preservation copy TO CLOUD STORAGE" -f $Context | Write-HostSectionHeader }
 
-                $Package | & coldstorage to cloud -Quiet:( $Quiet -or ( $Context -ne $null ) ) | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage to cloud -Items"
-                $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
-                $PassThru = $true
-                $SkipOver = $false
+                Do {
+                    $Retry = $false
+
+                    If ( ( -Not $Quiet ) -and ( $Context -ne $null ) ) { "* {0}: SENDING Copy-3 off-site preservation copy TO CLOUD STORAGE" -f $Context | Write-HostSectionHeader }
+
+                    $toCloudErrors = @( ) ; $toCloudExit = -1
+                    $Package | & coldstorage to cloud -Quiet:( $Quiet -or ( $Context -ne $null ) ) 2>&1 |% {
+                    
+                        If ( $_ -is [System.Management.Automation.ErrorRecord] ) {
+                        
+                            $toCloudErrors = @( $toCloudErrors ) + @( $_ )
+                            If ( "$_" -match '^(System[.]Management[.]Automation[.]RemoteException|An error occurred \(NoSuchBucket\) when calling the ListObjectsV2 operation)' ) {
+                                $_ | Write-Verbose
+                            }
+                            Else {
+                                $_ | Write-Error
+                            }
+
+                        }
+                        Else {
+                            $_
+                        }
+
+                    } | Write-OutputWithLogMaybe -Log:$LogFile -Package:$Package -Command:"{0} | & coldstorage to cloud -Items"
+                    $toCloudExit = $LASTEXITCODE
+                    
+                    $Package = ( $Package | & coldstorage packages -Items -Bagged -Mirrored -Zipped -InCloud )
+                
+                    If ( ( $toCloudExit -eq 254 ) -and ( $Package | test-cs-package-is.ps1 -NotInCloud ) ) {
+                        $toCloudErrors |% {
+                            If ( "$_" -match '^An error occurred \(NoSuchBucket\) when calling the ListObjectsV2 operation' ) {
+                                $sBucket = ( $Package | & coldstorage bucket )
+                                If ( $Interactive ) {
+                                    "" | Write-Host
+                                    "{0}: Expected bucket '{1}' was not found in AWS. Does it need to be created?" -f $Context, $sBucket | Write-Host -ForegroundColor:Yellow
+                                    If ( read-yesfromhost-cs.ps1 -Prompt:( "{0}: Create cloud storage bucket '{1}' for package {2}?" -f $sConfirm, $sBucket, $Package.Name ) -Timeout:$TimeoutYN -DefaultInput:"N" -DefaultTimeout:10 ) {
+                                        $Package | & coldstorage bucket -Make
+                                        $Retry = $true
+                                    }
+                                }
+                                Else {
+                                    "{0}: Expected bucket '{1}' was not found in AWS. Does it need to be created?" -f $Context, $sBucket | Write-Warning
+                                }
+                            }
+                        }
+                    }
+                            
+                    $PassThru = $true
+                    $SkipOver = $false
+
+                } While ( $Retry )
             }
             Else {
                 ( "{0} | & coldstorage to cloud -Items" -f ( "Get-Item -LiteralPath '{0}'" -f $Package.FullName ) ) | Out-File -LiteralPath:$DeferredFile -Append
             }
+
+
         }
     
         If ( -Not $SkipOver -and ( $PassThru ) ) {

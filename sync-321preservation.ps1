@@ -108,7 +108,13 @@ End {
                 }
 
                 If ( $Proceed ) {
-                    $_ | & "${CSSyncPackageToPreservation}" -Batch:$DoItAll -Automatically:@( "zip" ) -InputDefault:"Y" -InputTimeout:$SyncConfirmTimeout -NoScan:$NoScan -Context:"321"
+                    If ( $DoItAll ) {
+                        $Automated = @( "bag", "mirror", "zip", "cloud" )
+                    }
+                    Else {
+                        $Automated = @( "zip" )
+                    }
+                    $_ | & "${CSSyncPackageToPreservation}" -Automatically:$Automated -InputDefault:"Y" -InputTimeout:$SyncConfirmTimeout -NoScan:$NoScan -Context:"321"
                 }
                 Else {
                     "[321] skipping for now: {0}: {1}" -f $RepositoryName, $RelPath | Write-Host -ForegroundColor:Gray

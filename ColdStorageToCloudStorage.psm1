@@ -783,12 +783,11 @@ End {
                         $isDataGood = $true
                     }
                     Else {
-                        ( "[0] could not find contents in JSON reply: {1}; object:" -f $sContext,( $pReply | ConvertTo-Json -Compress ) ) | Write-Warning
-                        $oReply | Write-Warning
+                        ( "[{0}] could not find contents in JSON reply: '{1}'" -f $sContext,( $oReply | ConvertTo-Json -Compress ) ) | Write-Warning
                     }
                 }
                 Else {
-                    ( "${sContext}could not parse JSON reply: {0}" -f $jsonReply ) | Write-Warning
+                    ( "[{0}] could not parse JSON reply: {1}" -f $sContext, $jsonReply ) | Write-Warning
                 }
             }
             Else {
